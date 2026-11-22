@@ -18,6 +18,7 @@ import (
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/watch"
 )
 
 // Version is set when the binary is built.
@@ -48,6 +49,9 @@ type Env struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// StartWatcher starts a background watcher for the project at root. When
+	// it is nil, checkpoints scan the project instead.
+	StartWatcher func(root string) error
 }
 
 type usageError struct{ msg string }
@@ -102,8 +106,12 @@ func dispatch(args []string, env Env) error {
 	case "uninstall":
 		return uninstall(rest, env)
 	case "hook":
-		hook.HandleClaude(env.Stdin)
+		hook.HandleClaude(env.Stdin, func(s *store.Store, label, dir string) (store.Checkpoint, error) {
+			return take(s, label, dir, env)
+		})
 		return nil
+	case "watch":
+		return serve(env)
 	case "version":
 		fmt.Fprintln(env.Stdout, "undo", Version)
 		return nil
@@ -322,7 +330,7 @@ func checkpoint(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	cp, err := s.Take(f.label, env.Dir)
+	cp, err := take(s, f.label, env.Dir, env)
 	if err != nil {
 		return err
 	}
@@ -341,7 +349,7 @@ func runCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.Take(strings.Join(args, " "), env.Dir); err != nil {
+	if _, err := take(s, strings.Join(args, " "), env.Dir, env); err != nil {
 		return err
 	}
 	cmd := exec.Command(args[0], args[1:]...)
@@ -413,5 +421,25 @@ func uninstall(args []string, env Env) error {
 		return err
 	}
 	fmt.Fprintf(env.Stdout, "Removed the undo hook from %s\n", path)
+	return nil
+}
+
+// take checkpoints through the project's watcher when one can be started,
+// and by scanning the project otherwise.
+func take(s *store.Store, label, dir string, env Env) (store.Checkpoint, error) {
+	if env.StartWatcher == nil {
+		return s.Take(label, dir)
+	}
+	return watch.Checkpoint(s, label, dir, func() error { return env.StartWatcher(s.Root()) })
+}
+
+func serve(env Env) error {
+	s, err := open(env)
+	if err != nil {
+		return err
+	}
+	if err := watch.Serve(s, time.Hour, nil); err != nil && !errors.Is(err, watch.ErrRunning) {
+		return err
+	}
 	return nil
 }

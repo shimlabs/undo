@@ -79,9 +79,13 @@ type claudeInput struct {
 	} `json:"tool_input"`
 }
 
-// HandleClaude reads one PreToolUse event from in and takes a checkpoint.
-// Errors are written to the project's hook log, and the agent is never blocked.
-func HandleClaude(in io.Reader) error {
+// Checkpointer takes a checkpoint of the project in s.
+type Checkpointer func(s *store.Store, label, dir string) (store.Checkpoint, error)
+
+// HandleClaude reads one PreToolUse event from in and takes a checkpoint with
+// checkpoint. Errors are written to the project's hook log, and the agent is
+// never blocked.
+func HandleClaude(in io.Reader, checkpoint Checkpointer) error {
 	var input claudeInput
 	if err := json.NewDecoder(in).Decode(&input); err != nil {
 		return err
@@ -101,7 +105,7 @@ func HandleClaude(in io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.Take(claudeLabel(input, root), dir); err != nil {
+	if _, err := checkpoint(s, claudeLabel(input, root), dir); err != nil {
 		logFailure(s, err)
 		return err
 	}

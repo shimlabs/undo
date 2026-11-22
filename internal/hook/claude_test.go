@@ -120,7 +120,7 @@ func TestHookTakesCheckpoint(t *testing.T) {
 	os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644)
 	input := `{"session_id":"s1","cwd":"` + root + `","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf src"}}`
 
-	HandleClaude(strings.NewReader(input))
+	HandleClaude(strings.NewReader(input), (*store.Store).Take)
 
 	s, err := store.Open(root)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestHookLabelsFileTools(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	input := `{"cwd":"` + root + `","tool_name":"Edit","tool_input":{"file_path":"` + root + `/main.go"}}`
 
-	HandleClaude(strings.NewReader(input))
+	HandleClaude(strings.NewReader(input), (*store.Store).Take)
 
 	s, _ := store.Open(root)
 	list, _ := s.List()
