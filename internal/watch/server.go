@@ -74,8 +74,18 @@ func Serve(s *store.Store, options Options) error {
 		options.Ready()
 	}
 
-	pruning := make(chan struct{}, 1)
-	defer func() { pruning <- struct{}{} }()
+	prunes := make(chan struct{}, 1)
+	pruned := make(chan struct{})
+	go func() {
+		defer close(pruned)
+		for range prunes {
+			s.Prune(time.Now(), options.Limits)
+		}
+	}()
+	defer func() {
+		close(prunes)
+		<-pruned
+	}()
 	var lastPrune time.Time
 
 	lastID := 0
@@ -96,13 +106,9 @@ func Serve(s *store.Store, options Options) error {
 		if lastID == before || time.Since(lastPrune) < pruneInterval {
 			continue
 		}
+		lastPrune = time.Now()
 		select {
-		case pruning <- struct{}{}:
-			lastPrune = time.Now()
-			go func() {
-				s.Prune(time.Now(), options.Limits)
-				<-pruning
-			}()
+		case prunes <- struct{}{}:
 		default:
 		}
 	}
