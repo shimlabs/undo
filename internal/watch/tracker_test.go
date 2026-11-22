@@ -159,3 +159,53 @@ func TestTrackerRecoversAfterOutsideCheckpoint(t *testing.T) {
 		t.Fatal("restore after an outside checkpoint is not exact")
 	}
 }
+
+func checkMatchesScan(t *testing.T, s *store.Store, root string, id int) {
+	t.Helper()
+	ex, _ := exclude.New(root)
+	scanned, err := tree.Scan(root, ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.ListingAt(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(scanned, stored) {
+		changed, deleted := tree.Changed(stored, scanned)
+		t.Fatalf("checkpoint %d differs from a scan: changed %v, deleted %v", id, changed, deleted)
+	}
+}
+
+func TestTrackerFollowsMovedDirectories(t *testing.T) {
+	tracker, s, root := newTracked(t)
+	tracker.Checkpoint("first", root)
+
+	os.Rename(filepath.Join(root, "src"), filepath.Join(root, "moved"))
+	tracker.Checkpoint("after move", root)
+	write(t, filepath.Join(root, "moved", "lib", "util.go"), "package lib // edited")
+	write(t, filepath.Join(root, "moved", "lib", "new.go"), "package lib")
+
+	cp, err := tracker.Checkpoint("after edit", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, s, root, cp.ID)
+}
+
+func TestTrackerSeesRecreatedProject(t *testing.T) {
+	tracker, s, root := newTracked(t)
+	tracker.Checkpoint("first", root)
+
+	os.RemoveAll(root)
+	write(t, filepath.Join(root, "README.md"), "# recreated")
+	tracker.Checkpoint("after recreate", root)
+	write(t, filepath.Join(root, "README.md"), "# edited again")
+	write(t, filepath.Join(root, "src", "main.go"), "package main")
+
+	cp, err := tracker.Checkpoint("after edit", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, s, root, cp.ID)
+}

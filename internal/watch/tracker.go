@@ -85,6 +85,11 @@ func (t *Tracker) handle(events []Event) {
 		if e.Path == t.root || strings.HasPrefix(e.Path, t.root+string(filepath.Separator)) {
 			t.dirty[e.Path] = true
 		}
+		// Creating, removing or renaming a path also changes its directory's
+		// times, but the event names only the path itself.
+		if parent := filepath.Dir(e.Path); parent == t.root || strings.HasPrefix(parent, t.root+string(filepath.Separator)) {
+			t.dirty[parent] = true
+		}
 	}
 }
 
