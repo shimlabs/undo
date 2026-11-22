@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,7 +32,9 @@ func startServer(t *testing.T, s *store.Store, idle time.Duration) chan error {
 	t.Helper()
 	done := make(chan error, 1)
 	ready := make(chan struct{})
-	go func() { done <- Serve(s, idle, func() { close(ready) }) }()
+	go func() {
+		done <- Serve(s, Options{Idle: idle, Limits: store.DefaultLimits, Ready: func() { close(ready) }})
+	}()
 	select {
 	case <-ready:
 	case err := <-done:
@@ -82,7 +85,7 @@ func TestCheckpointStartsServer(t *testing.T) {
 	started := false
 	start := func() error {
 		started = true
-		go Serve(s, time.Minute, nil)
+		go Serve(s, Options{Idle: time.Minute, Limits: store.DefaultLimits})
 		return nil
 	}
 
@@ -116,8 +119,41 @@ func TestSecondServerExits(t *testing.T) {
 	s, _ := serverProject(t)
 	startServer(t, s, time.Minute)
 
-	if err := Serve(s, time.Minute, nil); err != ErrRunning {
+	if err := Serve(s, Options{Idle: time.Minute, Limits: store.DefaultLimits}); err != ErrRunning {
 		t.Fatalf("second Serve = %v, want ErrRunning", err)
+	}
+}
+
+func TestServerPrunesAfterCheckpoints(t *testing.T) {
+	s, root := serverProject(t)
+	pruneInterval = 0
+	t.Cleanup(func() { pruneInterval = time.Hour })
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	limits := store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
+	go func() { done <- Serve(s, Options{Idle: time.Minute, Limits: limits, Ready: func() { close(ready) }}) }()
+	<-ready
+
+	for i := range 3 {
+		write(t, filepath.Join(root, "main.go"), fmt.Sprintf("package main // %d", i))
+		if _, err := Checkpoint(s, "edit", root, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		list, err := s.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) == 1 && list[0].ID == 3 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("checkpoints = %d after pruning, want only 3", len(list))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

@@ -28,6 +28,11 @@ type Changes struct {
 // Plan returns what restoring checkpoint id would change. It does not change
 // anything.
 func Plan(s *store.Store, id int) (Changes, error) {
+	unlock, err := s.RLock()
+	if err != nil {
+		return Changes{}, err
+	}
+	defer unlock()
 	target, err := s.State(id)
 	if err != nil {
 		return Changes{}, err
@@ -46,6 +51,11 @@ func Apply(s *store.Store, id int) (Changes, error) {
 	if _, err := s.Take(fmt.Sprintf("undo to %d", id), s.Root()); err != nil {
 		return Changes{}, err
 	}
+	unlock, err := s.RLock()
+	if err != nil {
+		return Changes{}, err
+	}
+	defer unlock()
 	target, err := s.State(id)
 	if err != nil {
 		return Changes{}, err

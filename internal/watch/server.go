@@ -27,10 +27,24 @@ type response struct {
 	Error      string           `json:"error,omitempty"`
 }
 
+// pruneInterval is how often the server prunes the store. Pruning measures the
+// whole store, which is too slow to do after every checkpoint.
+var pruneInterval = time.Hour
+
+// Options configure Serve.
+type Options struct {
+	// Idle is how long the server waits for a request before it exits.
+	Idle time.Duration
+	// Limits bound the history the server keeps when it prunes the store.
+	Limits store.Limits
+	// Ready, if set, is called once the server accepts connections.
+	Ready func()
+}
+
 // Serve watches the project of s and takes checkpoints for clients until no
-// request arrives for idle. ready, if set, is called once it accepts
-// connections.
-func Serve(s *store.Store, idle time.Duration, ready func()) error {
+// request arrives for options.Idle. After checkpoints it prunes the store in
+// the background, at most once per pruneInterval.
+func Serve(s *store.Store, options Options) error {
 	path, err := SocketPath(s)
 	if err != nil {
 		return err
@@ -56,13 +70,17 @@ func Serve(s *store.Store, idle time.Duration, ready func()) error {
 		return err
 	}
 	defer tracker.Close()
-	if ready != nil {
-		ready()
+	if options.Ready != nil {
+		options.Ready()
 	}
+
+	pruning := make(chan struct{}, 1)
+	defer func() { pruning <- struct{}{} }()
+	var lastPrune time.Time
 
 	lastID := 0
 	for {
-		if err := listener.SetDeadline(time.Now().Add(idle)); err != nil {
+		if err := listener.SetDeadline(time.Now().Add(options.Idle)); err != nil {
 			return err
 		}
 		conn, err := listener.Accept()
@@ -73,7 +91,20 @@ func Serve(s *store.Store, idle time.Duration, ready func()) error {
 		if err != nil {
 			return err
 		}
+		before := lastID
 		lastID = serveOne(conn, tracker, lastID)
+		if lastID == before || time.Since(lastPrune) < pruneInterval {
+			continue
+		}
+		select {
+		case pruning <- struct{}{}:
+			lastPrune = time.Now()
+			go func() {
+				s.Prune(time.Now(), options.Limits)
+				<-pruning
+			}()
+		default:
+		}
 	}
 }
 

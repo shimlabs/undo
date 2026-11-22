@@ -438,7 +438,7 @@ func serve(env Env) error {
 	if err != nil {
 		return err
 	}
-	if err := watch.Serve(s, time.Hour, nil); err != nil && !errors.Is(err, watch.ErrRunning) {
+	if err := watch.Serve(s, watch.Options{Idle: time.Hour, Limits: store.DefaultLimits}); err != nil && !errors.Is(err, watch.ErrRunning) {
 		return err
 	}
 	return nil

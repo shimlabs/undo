@@ -63,11 +63,29 @@ func (s *Store) LayerFile(id int, rel string) string {
 }
 
 func (s *Store) lock() (unlock func(), err error) {
+	unlock, err = s.flock(unix.LOCK_EX)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.finishMerge(); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
+}
+
+// RLock blocks changes to stored checkpoints until unlock is called. Taking a
+// checkpoint or pruning waits for it, but other readers do not.
+func (s *Store) RLock() (unlock func(), err error) {
+	return s.flock(unix.LOCK_SH)
+}
+
+func (s *Store) flock(how int) (unlock func(), err error) {
 	file, err := os.OpenFile(filepath.Join(s.dir, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX); err != nil {
+	if err := unix.Flock(int(file.Fd()), how); err != nil {
 		file.Close()
 		return nil, err
 	}
