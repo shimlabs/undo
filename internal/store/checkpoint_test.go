@@ -156,3 +156,20 @@ func TestTakeLockedConcurrently(t *testing.T) {
 		t.Fatalf("ids = %v, want [2 3]", ids)
 	}
 }
+
+func TestFirstTakeNeverReadsExcluded(t *testing.T) {
+	s, root := newProject(t, map[string]string{"main.js": "x", "lib/util.js": "u"})
+	locked := filepath.Join(root, "node_modules", "locked")
+	writeFile(t, filepath.Join(locked, "secret.js"), "s")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+
+	if _, err := s.Take("first", root); err != nil {
+		t.Fatalf("first checkpoint read an excluded directory: %v", err)
+	}
+	if got := readFile(t, filepath.Join(s.Dir(), "base", "lib", "util.js")); got != "u" {
+		t.Fatalf("base lib/util.js = %q", got)
+	}
+}

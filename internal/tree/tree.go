@@ -41,7 +41,15 @@ type Listing map[string]Entry
 // Scan lists every path under root that ex does not exclude. Symlinks are
 // recorded but never followed.
 func Scan(root string, ex *exclude.Matcher) (Listing, error) {
+	listing, _, err := ScanAll(root, ex)
+	return listing, err
+}
+
+// ScanAll works like Scan and also returns the excluded paths it skipped. It
+// does not go into excluded directories.
+func ScanAll(root string, ex *exclude.Matcher) (Listing, []string, error) {
 	listing := Listing{}
+	var excluded []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -55,6 +63,7 @@ func Scan(root string, ex *exclude.Matcher) (Listing, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if rel != "." && ex.Match(rel, d.IsDir()) {
+			excluded = append(excluded, rel)
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -70,7 +79,7 @@ func Scan(root string, ex *exclude.Matcher) (Listing, error) {
 		listing[rel] = entry
 		return nil
 	})
-	return listing, err
+	return listing, excluded, err
 }
 
 // Stat describes the file at path. If it is a symlink, the link itself is

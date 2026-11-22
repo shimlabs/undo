@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 
@@ -80,9 +81,10 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 
 // cloneBase clones the project into the base and returns the listing taken
 // just before the clone. If a path changes while the clone runs, it no longer
-// matches that listing, so the first checkpoint records it again.
+// matches that listing, so the first checkpoint records it again. Excluded
+// paths are never read.
 func (s *Store) cloneBase(ex *exclude.Matcher) (tree.Listing, error) {
-	before, err := tree.Scan(s.root, ex)
+	before, excluded, err := tree.ScanAll(s.root, ex)
 	if err != nil {
 		return nil, err
 	}
@@ -90,29 +92,44 @@ func (s *Store) cloneBase(ex *exclude.Matcher) (tree.Listing, error) {
 	if err := os.RemoveAll(base); err != nil {
 		return nil, err
 	}
-	if err := clone.Tree(s.root, base); err != nil {
-		return nil, err
+	holders := map[string]bool{}
+	for _, rel := range excluded {
+		for dir := path.Dir(rel); !holders[dir]; dir = path.Dir(dir) {
+			holders[dir] = true
+			if dir == "." {
+				break
+			}
+		}
 	}
-	err = filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	children := map[string][]string{}
+	for rel := range before {
+		if rel != "." {
+			children[path.Dir(rel)] = append(children[path.Dir(rel)], rel)
 		}
-		rel, err := filepath.Rel(base, path)
-		if err != nil || rel == "." {
-			return err
-		}
-		if !ex.Match(filepath.ToSlash(rel), d.IsDir()) {
+	}
+	return before, s.cloneInto(".", base, holders, children)
+}
+
+// cloneInto clones rel to dst in one call. If rel contains excluded paths, it
+// creates the directory instead and clones each child separately.
+func (s *Store) cloneInto(rel, dst string, holders map[string]bool, children map[string][]string) error {
+	src := filepath.Join(s.root, filepath.FromSlash(rel))
+	if !holders[rel] {
+		err := clone.File(src, dst)
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
-		if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o700); err != nil {
+		return err
+	}
+	for _, child := range children[rel] {
+		if err := s.cloneInto(child, filepath.Join(dst, path.Base(child)), holders, children); err != nil {
 			return err
 		}
-		if d.IsDir() {
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return before, err
+	}
+	return nil
 }
 
 // cloneChanged copies each changed file and symlink into the layer for id. If a
