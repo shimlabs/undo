@@ -52,8 +52,8 @@ func UninstallCodex() (string, error) {
 }
 
 // HandleCodex reads one Codex PreToolUse event from in and takes a checkpoint
-// with checkpoint. Errors are written to the project's hook log, and the agent
-// is never blocked.
+// with checkpoint. Errors are logged in the store, and the agent is never
+// blocked.
 func HandleCodex(in io.Reader, checkpoint Checkpointer) error {
 	return handle(in, checkpoint, codexLabel)
 }

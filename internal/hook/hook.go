@@ -3,11 +3,8 @@ package hook
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
@@ -28,8 +25,7 @@ type input struct {
 }
 
 // handle reads one PreToolUse event from in and takes a checkpoint labeled by
-// label. Errors are written to the project's hook log, and the agent is never
-// blocked.
+// label. Errors are logged in the store, and the agent is never blocked.
 func handle(in io.Reader, checkpoint Checkpointer, label func(event input, root string) string) error {
 	var event input
 	if err := json.NewDecoder(in).Decode(&event); err != nil {
@@ -51,17 +47,8 @@ func handle(in io.Reader, checkpoint Checkpointer, label func(event input, root 
 		return err
 	}
 	if _, err := checkpoint(s, label(event, root), dir); err != nil {
-		logFailure(s, err)
+		s.LogError(err)
 		return err
 	}
 	return nil
-}
-
-func logFailure(s *store.Store, failure error) {
-	file, err := os.OpenFile(filepath.Join(s.Dir(), "hook.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-	fmt.Fprintf(file, "%s %v\n", time.Now().Format(time.RFC3339), failure)
 }

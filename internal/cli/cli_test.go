@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/shimlabs/undo/internal/store"
 )
 
 func newProject(t *testing.T) string {
@@ -220,6 +223,22 @@ func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
 	_, out := run(t, root, "", "status")
 	if !strings.Contains(out, "Storage      full copies") {
 		t.Fatalf("status does not show copy mode:\n%s", out)
+	}
+}
+
+func TestStatusShowsLastError(t *testing.T) {
+	root := newProject(t)
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+	s, err := store.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.LogError(errors.New("first failure"))
+	s.LogError(errors.New("disk full"))
+
+	_, out := run(t, root, "", "status")
+	if !strings.Contains(out, "Last error   ") || !strings.HasSuffix(strings.TrimSpace(out), " disk full") {
+		t.Fatalf("status does not show the last hook error:\n%s", out)
 	}
 }
 

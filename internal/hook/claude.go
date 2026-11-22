@@ -49,8 +49,8 @@ func UninstallClaude() (string, error) {
 }
 
 // HandleClaude reads one Claude Code PreToolUse event from in and takes a
-// checkpoint with checkpoint. Errors are written to the project's hook log,
-// and the agent is never blocked.
+// checkpoint with checkpoint. Errors are logged in the store, and the agent is
+// never blocked.
 func HandleClaude(in io.Reader, checkpoint Checkpointer) error {
 	return handle(in, checkpoint, claudeLabel)
 }

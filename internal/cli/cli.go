@@ -418,6 +418,9 @@ func status(env Env) error {
 	}
 	fmt.Fprintf(env.Stdout, "Excluded     %s\n", strings.Join(ex.Patterns(), ", "))
 	fmt.Fprintln(env.Stdout, "Not covered  anything outside this folder: databases, git push, API calls")
+	if line := s.LastError(); line != "" {
+		fmt.Fprintf(env.Stdout, "Last error   %s\n", line)
+	}
 	return nil
 }
 
@@ -511,6 +514,7 @@ func serve(env Env) error {
 		return err
 	}
 	if err := watch.Serve(s, watch.Options{Idle: time.Hour, Limits: store.DefaultLimits}); err != nil && !errors.Is(err, watch.ErrRunning) {
+		s.LogError(fmt.Errorf("watcher stopped: %w", err))
 		return err
 	}
 	return nil
