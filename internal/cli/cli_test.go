@@ -209,3 +209,29 @@ func TestFormatBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallCodexExplainsTrust(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	code, out := run(t, t.TempDir(), "", "install", "codex")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !strings.Contains(out, "/hooks") {
+		t.Fatalf("install output does not explain the trust step:\n%s", out)
+	}
+}
+
+func TestHookCodexTakesCheckpoint(t *testing.T) {
+	root := newProject(t)
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+	input := `{"cwd":"` + root + `","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: f.txt\n*** End Patch"}}`
+
+	if code, out := run(t, root, input, "hook", "codex"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	_, out := run(t, root, "", "list")
+	if !strings.Contains(out, "apply_patch f.txt") {
+		t.Fatalf("list does not show the Codex checkpoint:\n%s", out)
+	}
+}

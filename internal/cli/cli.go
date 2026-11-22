@@ -35,7 +35,8 @@ Usage:
   undo checkpoint          take a checkpoint now
   undo status              show what undo protects
   undo install claude      checkpoint before every Claude Code tool call
-  undo uninstall claude    remove that hook
+  undo install codex       checkpoint before every Codex command and patch
+  undo uninstall <agent>   remove that hook
   undo version             print the version
 
 Flags:
@@ -106,9 +107,14 @@ func dispatch(args []string, env Env) error {
 	case "uninstall":
 		return uninstall(rest, env)
 	case "hook":
-		hook.HandleClaude(env.Stdin, func(s *store.Store, label, dir string) (store.Checkpoint, error) {
+		checkpoint := func(s *store.Store, label, dir string) (store.Checkpoint, error) {
 			return take(s, label, dir, env)
-		})
+		}
+		if len(rest) > 0 && rest[0] == "codex" {
+			hook.HandleCodex(env.Stdin, checkpoint)
+		} else {
+			hook.HandleClaude(env.Stdin, checkpoint)
+		}
 		return nil
 	case "watch":
 		return serve(env)
@@ -426,8 +432,8 @@ func ago(t time.Time) string {
 }
 
 func install(args []string, env Env) error {
-	if len(args) != 1 || args[0] != "claude" {
-		return usageError{"install supports: claude"}
+	if len(args) != 1 || (args[0] != "claude" && args[0] != "codex") {
+		return usageError{"install supports: claude, codex"}
 	}
 	binary, err := os.Executable()
 	if err != nil {
@@ -435,6 +441,16 @@ func install(args []string, env Env) error {
 	}
 	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
 		binary = resolved
+	}
+	if args[0] == "codex" {
+		path, err := hook.InstallCodex(binary)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(env.Stdout, "Updated %s\n"+
+			"Codex runs new hooks only after you trust them: open Codex, run /hooks and trust the undo hook.\n"+
+			"Then Codex takes a checkpoint before every shell command and patch.\n", path)
+		return nil
 	}
 	path, err := hook.InstallClaude(binary)
 	if err != nil {
@@ -445,10 +461,16 @@ func install(args []string, env Env) error {
 }
 
 func uninstall(args []string, env Env) error {
-	if len(args) != 1 || args[0] != "claude" {
-		return usageError{"uninstall supports: claude"}
+	var path string
+	var err error
+	switch {
+	case len(args) == 1 && args[0] == "claude":
+		path, err = hook.UninstallClaude()
+	case len(args) == 1 && args[0] == "codex":
+		path, err = hook.UninstallCodex()
+	default:
+		return usageError{"uninstall supports: claude, codex"}
 	}
-	path, err := hook.UninstallClaude()
 	if err != nil {
 		return err
 	}
