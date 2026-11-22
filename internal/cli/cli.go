@@ -42,6 +42,7 @@ Usage:
 Flags:
   --yes                    restore without asking
   --label <text>           label for undo checkpoint
+  --copy                   keep full copies, for filesystems without clones
 `
 
 // Env holds the directory and streams a command works with.
@@ -73,6 +74,10 @@ func Run(args []string, env Env) int {
 		fmt.Fprintf(env.Stderr, "undo: %s\n\n%s", usageErr.msg, usage)
 		return 2
 	case errors.Is(err, errDeclined):
+		return 1
+	case errors.Is(err, store.ErrCloneUnsupported):
+		fmt.Fprintf(env.Stderr, "undo: %s, so it cannot protect this project cheaply.\n"+
+			"Run 'undo checkpoint --copy' once to keep full copies instead. They take as much disk as the project.\n", err)
 		return 1
 	default:
 		fmt.Fprintf(env.Stderr, "undo: %s\n", err)
@@ -139,6 +144,7 @@ func open(env Env) (*store.Store, error) {
 // flags holds the parsed --yes and --label flags and the other arguments.
 type flags struct {
 	yes   bool
+	copy  bool
 	label string
 	args  []string
 }
@@ -149,6 +155,8 @@ func parse(args []string) (flags, error) {
 		switch arg := args[i]; {
 		case arg == "--yes" || arg == "-y":
 			f.yes = true
+		case arg == "--copy":
+			f.copy = true
 		case arg == "--label":
 			if i+1 == len(args) {
 				return f, usageError{"--label needs a value"}
@@ -336,6 +344,11 @@ func checkpoint(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	if f.copy {
+		if err := s.SetCopyMode(true); err != nil {
+			return err
+		}
+	}
 	cp, err := take(s, f.label, env.Dir, env)
 	if err != nil {
 		return err
@@ -391,6 +404,11 @@ func status(env Env) error {
 		fmt.Fprintln(env.Stdout, "Checkpoints  0")
 	} else {
 		fmt.Fprintf(env.Stdout, "Checkpoints  %d (oldest %s)\n", len(cps), ago(cps[0].Time))
+	}
+	if s.CopyMode() {
+		fmt.Fprintln(env.Stdout, "Storage      full copies, because copy mode is on")
+	} else {
+		fmt.Fprintln(env.Stdout, "Storage      clones that share data with the project")
 	}
 	fmt.Fprintf(env.Stdout, "Disk used    %s not shared with the project, limit %s\n", formatBytes(usage), formatBytes(store.DefaultLimits.MaxBytes))
 	if watcher.Running {

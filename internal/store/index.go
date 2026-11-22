@@ -89,10 +89,15 @@ func (s *Store) flock(how int) (unlock func(), err error) {
 		file.Close()
 		return nil, err
 	}
-	return func() {
+	unlock = func() {
 		unix.Flock(int(file.Fd()), unix.LOCK_UN)
 		file.Close()
-	}, nil
+	}
+	if err := s.loadConfig(); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
 }
 
 func readJSON(path string, v any) error {

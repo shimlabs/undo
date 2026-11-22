@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
 )
 
@@ -230,7 +229,7 @@ func (s *Store) mergeLayer(id int, base tree.Listing) (int64, error) {
 			if err := os.RemoveAll(tmp); err != nil {
 				return freed, err
 			}
-			if err := clone.File(s.LayerFile(id, rel), tmp); err != nil {
+			if err := s.Clone(s.LayerFile(id, rel), tmp); err != nil {
 				return freed, err
 			}
 			size, err := s.removeFromBase(rel)

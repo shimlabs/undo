@@ -210,6 +210,19 @@ func TestFormatBytes(t *testing.T) {
 	}
 }
 
+func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
+	root := newProject(t)
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+
+	if code, out := run(t, root, "", "checkpoint", "--copy"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	_, out := run(t, root, "", "status")
+	if !strings.Contains(out, "Storage      full copies") {
+		t.Fatalf("status does not show copy mode:\n%s", out)
+	}
+}
+
 func TestInstallCodexExplainsTrust(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 
@@ -233,5 +246,24 @@ func TestHookCodexTakesCheckpoint(t *testing.T) {
 	_, out := run(t, root, "", "list")
 	if !strings.Contains(out, "apply_patch f.txt") {
 		t.Fatalf("list does not show the Codex checkpoint:\n%s", out)
+	}
+}
+
+func TestRefusalExplainsCopyMode(t *testing.T) {
+	plain := os.Getenv("UNDO_TEST_PLAIN_DIR")
+	if plain == "" {
+		t.Skip("UNDO_TEST_PLAIN_DIR is not set")
+	}
+	t.Setenv("UNDO_HOME", t.TempDir())
+	root, err := os.MkdirTemp(plain, "project-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
+
+	code, out := run(t, root, "", "checkpoint")
+	if code != 1 || !strings.Contains(out, "undo checkpoint --copy") {
+		t.Fatalf("exit %d: %s", code, out)
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/tree"
@@ -68,7 +67,7 @@ func Apply(s *store.Store, id int) (Changes, error) {
 	if err := removeAll(s.Root(), removals(changes, current, target)); err != nil {
 		return changes, err
 	}
-	if err := writeAll(s.Root(), changes.Write, target); err != nil {
+	if err := writeAll(s, changes.Write, target); err != nil {
 		return changes, err
 	}
 	return changes, restoreDirTimes(s.Root(), changes.Write, target)
@@ -126,7 +125,8 @@ func removeAll(root string, paths []string) error {
 	return nil
 }
 
-func writeAll(root string, paths []string, target map[string]store.Source) error {
+func writeAll(s *store.Store, paths []string, target map[string]store.Source) error {
+	root := s.Root()
 	paths = slices.Clone(paths)
 	slices.SortStableFunc(paths, func(a, b string) int { return depth(a) - depth(b) })
 	for _, rel := range paths {
@@ -138,7 +138,7 @@ func writeAll(root string, paths []string, target map[string]store.Source) error
 				return err
 			}
 		case tree.File, tree.Symlink:
-			if err := replace(src.Path, full); err != nil {
+			if err := replace(s, src.Path, full); err != nil {
 				return err
 			}
 			if src.Entry.Kind == tree.File {
@@ -153,7 +153,7 @@ func writeAll(root string, paths []string, target map[string]store.Source) error
 
 // replace clones src next to dst and renames the clone into place. A clone
 // cannot overwrite an existing path, so this is how dst gets replaced.
-func replace(src, dst string) error {
+func replace(s *store.Store, src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func replace(src, dst string) error {
 	if err := os.RemoveAll(tmp); err != nil {
 		return err
 	}
-	if err := clone.File(src, tmp); err != nil {
+	if err := s.Clone(src, tmp); err != nil {
 		return err
 	}
 	return os.Rename(tmp, dst)

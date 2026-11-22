@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/tree"
 )
@@ -43,7 +42,8 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 		}
 	} else {
 		if previous, err = s.cloneBase(ex); err != nil {
-			return Checkpoint{}, err
+			os.RemoveAll(s.BaseDir())
+			return Checkpoint{}, cloneError(err)
 		}
 		if err := s.saveGob("base.gob", previous); err != nil {
 			return Checkpoint{}, err
@@ -94,7 +94,8 @@ func (s *Store) commit(list []Checkpoint, label, dir string, current tree.Listin
 	}
 	manifest, err := s.cloneChanged(id, changed, current)
 	if err != nil {
-		return Checkpoint{}, err
+		os.RemoveAll(s.layerDir(id))
+		return Checkpoint{}, cloneError(err)
 	}
 	manifest.Deleted = append(manifest.Deleted, deleted...)
 
@@ -109,6 +110,13 @@ func (s *Store) commit(list []Checkpoint, label, dir string, current tree.Listin
 		return Checkpoint{}, err
 	}
 	return cp, nil
+}
+
+func cloneError(err error) error {
+	if errors.Is(err, errors.ErrUnsupported) {
+		return ErrCloneUnsupported
+	}
+	return err
 }
 
 // cloneBase clones the project into the base and returns the listing taken
@@ -147,7 +155,7 @@ func (s *Store) cloneBase(ex *exclude.Matcher) (tree.Listing, error) {
 func (s *Store) cloneInto(rel, dst string, holders map[string]bool, children map[string][]string) error {
 	src := filepath.Join(s.root, filepath.FromSlash(rel))
 	if !holders[rel] {
-		err := clone.File(src, dst)
+		err := s.Clone(src, dst)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -204,7 +212,7 @@ func (s *Store) cloneStable(id int, rel string, entry tree.Entry) (tree.Entry, b
 		if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return entry, false, err
 		}
-		if err := clone.File(src, dst); err != nil {
+		if err := s.Clone(src, dst); err != nil {
 			return entry, false, err
 		}
 		after, err := tree.Stat(src)
