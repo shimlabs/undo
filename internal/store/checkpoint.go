@@ -62,11 +62,15 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 	return cp, s.saveListing(cp.ID, current)
 }
 
+// ErrStale means another checkpoint was taken after the one the changes were
+// based on.
+var ErrStale = errors.New("changes are not relative to the latest checkpoint")
+
 // Commit records a checkpoint from changes found by a caller that tracks the
 // project itself, such as the watcher. current is the full listing of the
 // project. changed and deleted are the paths that differ from the listing at
-// the previous checkpoint. The project must already have a first checkpoint.
-func (s *Store) Commit(label, dir string, current tree.Listing, changed, deleted []string) (Checkpoint, error) {
+// checkpoint after, which must be the latest checkpoint.
+func (s *Store) Commit(after int, label, dir string, current tree.Listing, changed, deleted []string) (Checkpoint, error) {
 	unlock, err := s.lock()
 	if err != nil {
 		return Checkpoint{}, err
@@ -77,8 +81,8 @@ func (s *Store) Commit(label, dir string, current tree.Listing, changed, deleted
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	if len(list) == 0 {
-		return Checkpoint{}, errors.New("no first checkpoint")
+	if len(list) == 0 || list[len(list)-1].ID != after {
+		return Checkpoint{}, ErrStale
 	}
 	return s.commit(list, label, dir, current, changed, deleted)
 }

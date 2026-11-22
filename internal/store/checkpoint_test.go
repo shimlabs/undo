@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -220,7 +221,7 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 	current["a.txt"] = entry
 	delete(current, "b.txt")
 
-	cp, err := s.Commit("from watcher", root, current, []string{"a.txt"}, []string{"b.txt"})
+	cp, err := s.Commit(first.ID, "from watcher", root, current, []string{"a.txt"}, []string{"b.txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,5 +231,16 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 	}
 	if got := readFile(t, s.LayerFile(cp.ID, "a.txt")); got != "alpha two" {
 		t.Fatalf("layer a.txt = %q", got)
+	}
+}
+
+func TestCommitRefusesStaleChanges(t *testing.T) {
+	s, root := newProject(t, map[string]string{"a.txt": "alpha"})
+	first, _ := s.Take("first", root)
+	s.Take("second", root)
+	current, _ := s.ListingAt(first.ID)
+
+	if _, err := s.Commit(first.ID, "stale", root, current, nil, nil); !errors.Is(err, ErrStale) {
+		t.Fatalf("err = %v, want ErrStale", err)
 	}
 }
