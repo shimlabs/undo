@@ -371,12 +371,44 @@ func status(env Env) error {
 	if err != nil {
 		return err
 	}
+	usage, err := s.Usage()
+	if err != nil {
+		return err
+	}
+	watcher, err := watch.Status(s)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(env.Stdout, "Project      %s\n", s.Root())
 	fmt.Fprintf(env.Stdout, "Store        %s\n", s.Dir())
-	fmt.Fprintf(env.Stdout, "Checkpoints  %d\n", len(cps))
+	if len(cps) == 0 {
+		fmt.Fprintln(env.Stdout, "Checkpoints  0")
+	} else {
+		fmt.Fprintf(env.Stdout, "Checkpoints  %d (oldest %s)\n", len(cps), ago(cps[0].Time))
+	}
+	fmt.Fprintf(env.Stdout, "Disk used    %s not shared with the project, limit %s\n", formatBytes(usage), formatBytes(store.DefaultLimits.MaxBytes))
+	if watcher.Running {
+		fmt.Fprintln(env.Stdout, "Watcher      running")
+	} else {
+		fmt.Fprintln(env.Stdout, "Watcher      not running, so checkpoints scan the project")
+	}
 	fmt.Fprintf(env.Stdout, "Excluded     %s\n", strings.Join(ex.Patterns(), ", "))
 	fmt.Fprintln(env.Stdout, "Not covered  anything outside this folder: databases, git push, API calls")
 	return nil
+}
+
+func formatBytes(size int64) string {
+	if size < 1000 {
+		return fmt.Sprintf("%d B", size)
+	}
+	value, unit := float64(size)/1000, "kB"
+	for _, larger := range []string{"MB", "GB"} {
+		if value < 1000 {
+			break
+		}
+		value, unit = value/1000, larger
+	}
+	return fmt.Sprintf("%.1f %s", value, unit)
 }
 
 func ago(t time.Time) string {

@@ -178,3 +178,34 @@ func TestInstallUnknownAgent(t *testing.T) {
 		t.Fatalf("exit %d, want 2", code)
 	}
 }
+
+func TestStatusShowsDiskUseAndWatcher(t *testing.T) {
+	root := newProject(t)
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+	if code, out := run(t, root, "", "checkpoint"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+
+	code, out := run(t, root, "", "status")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	for _, want := range []string{
+		"Checkpoints  1 (oldest ",
+		"Disk used    ",
+		"not shared with the project, limit 5.0 GB",
+		"Watcher      not running",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status output is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	for size, want := range map[int64]string{0: "0 B", 999: "999 B", 1500: "1.5 kB", 2_340_000: "2.3 MB", 5_000_000_000: "5.0 GB"} {
+		if got := formatBytes(size); got != want {
+			t.Errorf("formatBytes(%d) = %q, want %q", size, got, want)
+		}
+	}
+}
