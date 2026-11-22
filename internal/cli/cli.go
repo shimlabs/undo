@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/shimlabs/undo/internal/exclude"
+	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
@@ -30,6 +33,8 @@ Usage:
   undo run -- <command>    take a checkpoint, then run <command>
   undo checkpoint          take a checkpoint now
   undo status              show what undo protects
+  undo install claude      checkpoint before every Claude Code tool call
+  undo uninstall claude    remove that hook
   undo version             print the version
 
 Flags:
@@ -92,6 +97,13 @@ func dispatch(args []string, env Env) error {
 		return checkpoint(rest, env)
 	case "status":
 		return status(env)
+	case "install":
+		return install(rest, env)
+	case "uninstall":
+		return uninstall(rest, env)
+	case "hook":
+		hook.HandleClaude(env.Stdin)
+		return nil
 	case "version":
 		fmt.Fprintln(env.Stdout, "undo", Version)
 		return nil
@@ -371,4 +383,35 @@ func ago(t time.Time) string {
 	default:
 		return t.Format("Jan 2 15:04")
 	}
+}
+
+func install(args []string, env Env) error {
+	if len(args) != 1 || args[0] != "claude" {
+		return usageError{"install supports: claude"}
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
+		binary = resolved
+	}
+	path, err := hook.InstallClaude(binary)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stdout, "Claude Code now takes a checkpoint before every Bash, Edit and Write call.\nUpdated %s\n", path)
+	return nil
+}
+
+func uninstall(args []string, env Env) error {
+	if len(args) != 1 || args[0] != "claude" {
+		return usageError{"uninstall supports: claude"}
+	}
+	path, err := hook.UninstallClaude()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stdout, "Removed the undo hook from %s\n", path)
+	return nil
 }

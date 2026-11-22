@@ -139,3 +139,42 @@ func TestDiffGroupsDirectories(t *testing.T) {
 		t.Fatalf("%d lines, want at most 3:\n%s", lines, out)
 	}
 }
+
+func TestInstallClaudeWritesSettings(t *testing.T) {
+	root := newProject(t)
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+
+	code, out := run(t, root, "", "install", "claude")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	data, err := os.ReadFile(filepath.Join(config, "settings.json"))
+	if err != nil || !strings.Contains(string(data), "hook claude") {
+		t.Fatalf("settings = %s, %v", data, err)
+	}
+
+	if code, out := run(t, root, "", "uninstall", "claude"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	data, _ = os.ReadFile(filepath.Join(config, "settings.json"))
+	if strings.Contains(string(data), "hook claude") {
+		t.Fatalf("hook still installed: %s", data)
+	}
+}
+
+func TestHookNeverBlocksTheAgent(t *testing.T) {
+	root := newProject(t)
+
+	code, out := run(t, root, "not json", "hook", "claude")
+	if code != 0 || out != "" {
+		t.Fatalf("exit %d, output %q", code, out)
+	}
+}
+
+func TestInstallUnknownAgent(t *testing.T) {
+	root := newProject(t)
+	if code, _ := run(t, root, "", "install", "notepad"); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+}
