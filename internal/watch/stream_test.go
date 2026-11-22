@@ -1,3 +1,5 @@
+//go:build darwin || linux
+
 package watch
 
 import (
@@ -51,7 +53,7 @@ func (c *collector) waitFor(t *testing.T, marker string) []string {
 func startCollecting(t *testing.T, root string) *collector {
 	t.Helper()
 	var c collector
-	stream, err := Start([]string{root}, c.add)
+	stream, err := Start([]string{root}, nil, c.add)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +94,7 @@ func TestStreamDeliversDeletesBeforeLaterMarker(t *testing.T) {
 func TestStreamCloseWhileEventsArrive(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	for round := range 50 {
-		stream, err := Start([]string{root}, func([]Event) {})
+		stream, err := Start([]string{root}, nil, func([]Event) {})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,4 +104,40 @@ func TestStreamCloseWhileEventsArrive(t *testing.T) {
 		stream.Close()
 	}
 	time.Sleep(200 * time.Millisecond)
+}
+
+func TestStreamSeesFilesInNewDirectories(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	c := startCollecting(t, root)
+
+	nested := filepath.Join(root, "a", "b", "c", "f.txt")
+	os.MkdirAll(filepath.Dir(nested), 0o755)
+	os.WriteFile(nested, []byte("x"), 0o644)
+	c.waitFor(t, filepath.Join(root, "ready"))
+	os.WriteFile(nested, []byte("changed"), 0o644)
+
+	if before := c.waitFor(t, filepath.Join(root, "marker")); !slices.Contains(before, nested) {
+		t.Fatalf("events before marker = %v, want %s", before, nested)
+	}
+}
+
+func TestStreamWatchesRecreatedRoot(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	markers, _ := filepath.EvalSymlinks(t.TempDir())
+	var c collector
+	stream, err := Start([]string{root, markers}, nil, c.add)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stream.Close)
+
+	os.RemoveAll(root)
+	os.Mkdir(root, 0o755)
+	c.waitFor(t, filepath.Join(markers, "recreated"))
+
+	path := filepath.Join(root, "a.txt")
+	os.WriteFile(path, []byte("x"), 0o644)
+	if before := c.waitFor(t, filepath.Join(markers, "written")); !slices.Contains(before, path) {
+		t.Fatalf("events before marker = %v, want %s", before, path)
+	}
 }

@@ -28,6 +28,7 @@ type Tracker struct {
 	store     *store.Store
 	root      string
 	markerDir string
+	exclude   *exclude.Matcher
 	stream    *Stream
 	sequence  atomic.Uint64
 
@@ -51,15 +52,20 @@ func NewTracker(s *store.Store) (*Tracker, error) {
 	if err != nil {
 		return nil, err
 	}
+	ex, err := exclude.New(s.Root())
+	if err != nil {
+		return nil, err
+	}
 	t := &Tracker{
 		store:     s,
 		root:      s.Root(),
 		markerDir: markerDir,
+		exclude:   ex,
 		dirty:     map[string]bool{},
 		full:      true,
 		markers:   map[string]chan struct{}{},
 	}
-	if t.stream, err = Start([]string{t.root, markerDir}, t.handle); err != nil {
+	if t.stream, err = Start([]string{t.root, markerDir}, t.skip, t.handle); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -68,6 +74,16 @@ func NewTracker(s *store.Store) (*Tracker, error) {
 // Close stops watching.
 func (t *Tracker) Close() {
 	t.stream.Close()
+}
+
+// skip reports whether dir is excluded, so the stream does not need to watch
+// it. The matcher is read once, when the tracker starts.
+func (t *Tracker) skip(dir string) bool {
+	rel, err := filepath.Rel(t.root, dir)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	return t.exclude.Match(filepath.ToSlash(rel), true)
 }
 
 func (t *Tracker) handle(events []Event) {
