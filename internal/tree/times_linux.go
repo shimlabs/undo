@@ -1,0 +1,7 @@
+package tree
+
+import "syscall"
+
+func times(st *syscall.Stat_t) (modTime, changeTime int64) {
+	return st.Mtim.Nano(), st.Ctim.Nano()
+}
