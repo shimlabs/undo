@@ -42,8 +42,13 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 		if previous, err = s.Listing(); err != nil {
 			return Checkpoint{}, err
 		}
-	} else if previous, err = s.cloneBase(ex); err != nil {
-		return Checkpoint{}, err
+	} else {
+		if previous, err = s.cloneBase(ex); err != nil {
+			return Checkpoint{}, err
+		}
+		if err := s.saveGob("base.gob", previous); err != nil {
+			return Checkpoint{}, err
+		}
 	}
 
 	current, err := tree.Scan(s.root, ex)
@@ -67,7 +72,7 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 	if err := writeJSON(filepath.Join(s.dir, "index.json"), append(list, cp)); err != nil {
 		return Checkpoint{}, err
 	}
-	if err := s.saveListing(current); err != nil {
+	if err := s.saveGob("tree.gob", current); err != nil {
 		return Checkpoint{}, err
 	}
 	return cp, nil
@@ -169,7 +174,17 @@ func (s *Store) cloneStable(id int, rel string, entry tree.Entry) (tree.Entry, b
 
 // Listing returns the project listing saved at the latest checkpoint.
 func (s *Store) Listing() (tree.Listing, error) {
-	data, err := os.ReadFile(filepath.Join(s.dir, "tree.gob"))
+	return s.loadGob("tree.gob")
+}
+
+// BaseListing returns the listing of the project at the moment the base was
+// cloned.
+func (s *Store) BaseListing() (tree.Listing, error) {
+	return s.loadGob("base.gob")
+}
+
+func (s *Store) loadGob(name string) (tree.Listing, error) {
+	data, err := os.ReadFile(filepath.Join(s.dir, name))
 	if err != nil {
 		return nil, err
 	}
@@ -178,10 +193,10 @@ func (s *Store) Listing() (tree.Listing, error) {
 	return listing, err
 }
 
-func (s *Store) saveListing(listing tree.Listing) error {
+func (s *Store) saveGob(name string, listing tree.Listing) error {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(listing); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(s.dir, "tree.gob"), buf.Bytes())
+	return writeAtomic(filepath.Join(s.dir, name), buf.Bytes())
 }
