@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/shimlabs/undo/internal/project"
+	"github.com/shimlabs/undo/internal/tree"
 )
 
 func TestOpenCreatesStoreUnderHome(t *testing.T) {
@@ -29,4 +30,8 @@ func TestOpenCreatesStoreUnderHome(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatal("layers is not a directory")
 	}
+}
+
+func statEntry(path string) (tree.Entry, error) {
+	return tree.Stat(path)
 }

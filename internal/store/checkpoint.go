@@ -18,8 +18,8 @@ import (
 const cloneAttempts = 3
 
 // Take records the project's current state as a new checkpoint. The first
-// checkpoint clones the whole project into the base. Later checkpoints clone
-// only the paths that changed since the previous one.
+// checkpoint clones the whole project into the base. Later checkpoints scan
+// the project and clone only the paths that changed since the previous one.
 func (s *Store) Take(label, dir string) (Checkpoint, error) {
 	unlock, err := s.lock()
 	if err != nil {
@@ -36,11 +36,9 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 		return Checkpoint{}, err
 	}
 
-	id := 1
 	var previous tree.Listing
 	if len(list) > 0 {
-		id = list[len(list)-1].ID + 1
-		if previous, err = s.Listing(); err != nil {
+		if previous, err = s.ListingAt(list[len(list)-1].ID); err != nil {
 			return Checkpoint{}, err
 		}
 	} else {
@@ -57,6 +55,39 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 		return Checkpoint{}, err
 	}
 	changed, deleted := tree.Changed(previous, current)
+	cp, err := s.commit(list, label, dir, current, changed, deleted)
+	if err != nil {
+		return Checkpoint{}, err
+	}
+	return cp, s.saveListing(cp.ID, current)
+}
+
+// Commit records a checkpoint from changes found by a caller that tracks the
+// project itself, such as the watcher. current is the full listing of the
+// project. changed and deleted are the paths that differ from the listing at
+// the previous checkpoint. The project must already have a first checkpoint.
+func (s *Store) Commit(label, dir string, current tree.Listing, changed, deleted []string) (Checkpoint, error) {
+	unlock, err := s.lock()
+	if err != nil {
+		return Checkpoint{}, err
+	}
+	defer unlock()
+
+	list, err := s.List()
+	if err != nil {
+		return Checkpoint{}, err
+	}
+	if len(list) == 0 {
+		return Checkpoint{}, errors.New("no first checkpoint")
+	}
+	return s.commit(list, label, dir, current, changed, deleted)
+}
+
+func (s *Store) commit(list []Checkpoint, label, dir string, current tree.Listing, changed, deleted []string) (Checkpoint, error) {
+	id := 1
+	if len(list) > 0 {
+		id = list[len(list)-1].ID + 1
+	}
 	manifest, err := s.cloneChanged(id, changed, current)
 	if err != nil {
 		return Checkpoint{}, err
@@ -71,9 +102,6 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 	}
 	cp := Checkpoint{ID: id, Time: time.Now(), Label: label, Dir: dir}
 	if err := writeJSON(filepath.Join(s.dir, "index.json"), append(list, cp)); err != nil {
-		return Checkpoint{}, err
-	}
-	if err := s.saveGob("tree.gob", current); err != nil {
 		return Checkpoint{}, err
 	}
 	return cp, nil
@@ -189,15 +217,45 @@ func (s *Store) cloneStable(id int, rel string, entry tree.Entry) (tree.Entry, b
 	}
 }
 
-// Listing returns the project listing saved at the latest checkpoint.
-func (s *Store) Listing() (tree.Listing, error) {
-	return s.loadGob("tree.gob")
-}
-
 // BaseListing returns the listing of the project at the moment the base was
 // cloned.
 func (s *Store) BaseListing() (tree.Listing, error) {
 	return s.loadGob("base.gob")
+}
+
+type savedListing struct {
+	ID      int
+	Listing tree.Listing
+}
+
+// ListingAt returns the project listing at checkpoint id. It uses the saved
+// copy when that matches, and otherwise rebuilds the listing from the base and
+// the layers.
+func (s *Store) ListingAt(id int) (tree.Listing, error) {
+	data, err := os.ReadFile(filepath.Join(s.dir, "tree.gob"))
+	if err == nil {
+		var saved savedListing
+		if gob.NewDecoder(bytes.NewReader(data)).Decode(&saved) == nil && saved.ID == id {
+			return saved.Listing, nil
+		}
+	}
+	state, err := s.State(id)
+	if err != nil {
+		return nil, err
+	}
+	listing := make(tree.Listing, len(state))
+	for rel, src := range state {
+		listing[rel] = src.Entry
+	}
+	return listing, nil
+}
+
+func (s *Store) saveListing(id int, listing tree.Listing) error {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(savedListing{ID: id, Listing: listing}); err != nil {
+		return err
+	}
+	return writeAtomic(filepath.Join(s.dir, "tree.gob"), buf.Bytes())
 }
 
 func (s *Store) loadGob(name string) (tree.Listing, error) {

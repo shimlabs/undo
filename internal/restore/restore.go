@@ -25,15 +25,10 @@ type Changes struct {
 	Remove []string
 }
 
-type source struct {
-	entry tree.Entry
-	path  string
-}
-
 // Plan returns what restoring checkpoint id would change. It does not change
 // anything.
 func Plan(s *store.Store, id int) (Changes, error) {
-	target, err := targetState(s, id)
+	target, err := s.State(id)
 	if err != nil {
 		return Changes{}, err
 	}
@@ -45,13 +40,13 @@ func Plan(s *store.Store, id int) (Changes, error) {
 // the current state, so the restore itself can be undone. Excluded paths are
 // never touched.
 func Apply(s *store.Store, id int) (Changes, error) {
-	if _, err := targetState(s, id); err != nil {
+	if _, err := s.State(id); err != nil {
 		return Changes{}, err
 	}
 	if _, err := s.Take(fmt.Sprintf("undo to %d", id), s.Root()); err != nil {
 		return Changes{}, err
 	}
-	target, err := targetState(s, id)
+	target, err := s.State(id)
 	if err != nil {
 		return Changes{}, err
 	}
@@ -69,42 +64,7 @@ func Apply(s *store.Store, id int) (Changes, error) {
 	return changes, restoreDirTimes(s.Root(), changes.Write, target)
 }
 
-// targetState applies the layers up to id on top of the base.
-func targetState(s *store.Store, id int) (map[string]source, error) {
-	list, err := s.List()
-	if err != nil {
-		return nil, err
-	}
-	if !slices.ContainsFunc(list, func(cp store.Checkpoint) bool { return cp.ID == id }) {
-		return nil, fmt.Errorf("no checkpoint %d", id)
-	}
-	base, err := s.BaseListing()
-	if err != nil {
-		return nil, err
-	}
-	target := make(map[string]source, len(base))
-	for rel, entry := range base {
-		target[rel] = source{entry: entry, path: filepath.Join(s.BaseDir(), filepath.FromSlash(rel))}
-	}
-	for _, cp := range list {
-		if cp.ID > id {
-			break
-		}
-		manifest, err := s.Layer(cp.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, rel := range manifest.Deleted {
-			delete(target, rel)
-		}
-		for rel, entry := range manifest.Changed {
-			target[rel] = source{entry: entry, path: s.LayerFile(cp.ID, rel)}
-		}
-	}
-	return target, nil
-}
-
-func diff(s *store.Store, target map[string]source) (Changes, tree.Listing, error) {
+func diff(s *store.Store, target map[string]store.Source) (Changes, tree.Listing, error) {
 	ex, err := exclude.New(s.Root())
 	if err != nil {
 		return Changes{}, nil, err
@@ -115,7 +75,7 @@ func diff(s *store.Store, target map[string]source) (Changes, tree.Listing, erro
 	}
 	var changes Changes
 	for rel, src := range target {
-		if entry, ok := current[rel]; !ok || entry != src.entry {
+		if entry, ok := current[rel]; !ok || entry != src.Entry {
 			changes.Write = append(changes.Write, rel)
 		}
 	}
@@ -132,10 +92,10 @@ func diff(s *store.Store, target map[string]source) (Changes, tree.Listing, erro
 // removals returns the paths to delete before writing: paths that are not in
 // the target, and paths whose kind changes, such as a file that must become a
 // directory.
-func removals(changes Changes, current tree.Listing, target map[string]source) []string {
+func removals(changes Changes, current tree.Listing, target map[string]store.Source) []string {
 	paths := slices.Clone(changes.Remove)
 	for _, rel := range changes.Write {
-		if entry, ok := current[rel]; ok && entry.Kind != target[rel].entry.Kind {
+		if entry, ok := current[rel]; ok && entry.Kind != target[rel].Entry.Kind {
 			paths = append(paths, rel)
 		}
 	}
@@ -156,23 +116,23 @@ func removeAll(root string, paths []string) error {
 	return nil
 }
 
-func writeAll(root string, paths []string, target map[string]source) error {
+func writeAll(root string, paths []string, target map[string]store.Source) error {
 	paths = slices.Clone(paths)
 	slices.SortStableFunc(paths, func(a, b string) int { return depth(a) - depth(b) })
 	for _, rel := range paths {
 		src := target[rel]
 		full := filepath.Join(root, filepath.FromSlash(rel))
-		switch src.entry.Kind {
+		switch src.Entry.Kind {
 		case tree.Dir:
 			if err := os.MkdirAll(full, 0o700); err != nil {
 				return err
 			}
 		case tree.File, tree.Symlink:
-			if err := replace(src.path, full); err != nil {
+			if err := replace(src.Path, full); err != nil {
 				return err
 			}
-			if src.entry.Kind == tree.File {
-				if err := setMeta(full, src.entry); err != nil {
+			if src.Entry.Kind == tree.File {
+				if err := setMeta(full, src.Entry); err != nil {
 					return err
 				}
 			}
@@ -200,11 +160,11 @@ func replace(src, dst string) error {
 // restoreDirTimes sets directory modes and times at the end, deepest first.
 // Writing into a directory changes its modification time, so this has to come
 // last.
-func restoreDirTimes(root string, paths []string, target map[string]source) error {
-	dirs := slices.DeleteFunc(slices.Clone(paths), func(rel string) bool { return target[rel].entry.Kind != tree.Dir })
+func restoreDirTimes(root string, paths []string, target map[string]store.Source) error {
+	dirs := slices.DeleteFunc(slices.Clone(paths), func(rel string) bool { return target[rel].Entry.Kind != tree.Dir })
 	slices.SortFunc(dirs, func(a, b string) int { return depth(b) - depth(a) })
 	for _, rel := range dirs {
-		if err := setMeta(filepath.Join(root, filepath.FromSlash(rel)), target[rel].entry); err != nil {
+		if err := setMeta(filepath.Join(root, filepath.FromSlash(rel)), target[rel].Entry); err != nil {
 			return err
 		}
 	}

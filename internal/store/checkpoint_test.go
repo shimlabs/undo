@@ -173,3 +173,62 @@ func TestFirstTakeNeverReadsExcluded(t *testing.T) {
 		t.Fatalf("base lib/util.js = %q", got)
 	}
 }
+
+func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
+	s, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
+	s.Take("first", root)
+	writeFile(t, filepath.Join(root, "a.txt"), "alpha two")
+	os.Remove(filepath.Join(root, "b.txt"))
+	cp, err := s.Take("second", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.ListingAt(cp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(filepath.Join(s.Dir(), "tree.gob")); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, err := s.ListingAt(cp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rebuilt) != len(saved) {
+		t.Fatalf("rebuilt %d paths, saved %d", len(rebuilt), len(saved))
+	}
+	for rel, entry := range saved {
+		if rebuilt[rel] != entry {
+			t.Fatalf("%s: rebuilt %+v, saved %+v", rel, rebuilt[rel], entry)
+		}
+	}
+}
+
+func TestCommitRecordsGivenChanges(t *testing.T) {
+	s, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
+	first, _ := s.Take("first", root)
+	writeFile(t, filepath.Join(root, "a.txt"), "alpha two")
+	os.Remove(filepath.Join(root, "b.txt"))
+
+	current, err := s.ListingAt(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := statEntry(filepath.Join(root, "a.txt"))
+	current["a.txt"] = entry
+	delete(current, "b.txt")
+
+	cp, err := s.Commit("from watcher", root, current, []string{"a.txt"}, []string{"b.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := s.Layer(cp.ID)
+	if _, ok := m.Changed["a.txt"]; !ok || !slices.Equal(m.Deleted, []string{"b.txt"}) {
+		t.Fatalf("manifest = %+v", m)
+	}
+	if got := readFile(t, s.LayerFile(cp.ID, "a.txt")); got != "alpha two" {
+		t.Fatalf("layer a.txt = %q", got)
+	}
+}
