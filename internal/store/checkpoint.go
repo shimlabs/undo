@@ -458,8 +458,12 @@ func (s *Store) cloneStable(layer *os.Root, id int, rel string, entry tree.Entry
 	src := filepath.Join(s.root, filepath.FromSlash(rel))
 	dst := s.layerFile(id, rel)
 	for attempt := 1; ; attempt++ {
-		if err := layer.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return entry, false, err
+		// The layer starts empty, so only a retry has an earlier clone to
+		// remove.
+		if attempt > 1 {
+			if err := layer.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return entry, false, err
+			}
 		}
 		if err := s.clone(src, dst); err != nil {
 			return entry, false, err
