@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"iter"
 	"maps"
 	"os"
 	"path"
@@ -82,7 +83,7 @@ func (s *Store) Manifest(id int) (Manifest, error) {
 		return Manifest{}, err
 	}
 	paths := slices.Concat(manifest.Deleted, manifest.Unstable, manifest.Unreadable, slices.Collect(maps.Keys(manifest.Changed)))
-	return manifest, checkLocal(paths)
+	return manifest, checkLocal(slices.Values(paths))
 }
 
 // ErrPathOutsideProject means a stored path points outside the project.
@@ -91,8 +92,8 @@ var ErrPathOutsideProject = errors.New("a stored path points outside the project
 
 // checkLocal rejects stored paths that are absolute or climb out of the
 // project with "..", so restoring or merging cannot touch other files.
-func checkLocal(paths []string) error {
-	for _, rel := range paths {
+func checkLocal(paths iter.Seq[string]) error {
+	for rel := range paths {
 		if !filepath.IsLocal(filepath.FromSlash(rel)) {
 			return fmt.Errorf("%q: %w", rel, ErrPathOutsideProject)
 		}

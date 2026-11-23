@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"slices"
 
 	"github.com/shimlabs/undo/internal/tree"
 )
@@ -27,7 +26,7 @@ func (s *Store) baseListing() (tree.Listing, error) {
 	if err != nil {
 		return nil, err
 	}
-	return listing, checkLocal(slices.Collect(maps.Keys(listing)))
+	return listing, checkLocal(maps.Keys(listing))
 }
 
 // maxListingChain is how many checkpoints the saved listing may fall behind
@@ -140,5 +139,5 @@ func (s *Store) savedListing() (int, tree.Listing, error) {
 	if err := decoder.Decode(&listing); err != nil {
 		return 0, nil, err
 	}
-	return id, listing, checkLocal(slices.Collect(maps.Keys(listing)))
+	return id, listing, checkLocal(maps.Keys(listing))
 }
