@@ -5,10 +5,10 @@ on:
     branches: [main]
   pull_request:
 
-# Actions are pinned to commits, since a tag can be moved to other code.
 permissions:
   contents: read
 
+# Actions are pinned to commits, since a tag can be moved to other code.
 jobs:
   lint:
     strategy:

@@ -103,6 +103,8 @@ func TestStreamCloseWhileEventsArrive(t *testing.T) {
 		}
 		stream.Close()
 	}
+	// A callback that still fires after Close would crash in this window,
+	// inside this test rather than a later one.
 	time.Sleep(200 * time.Millisecond)
 }
 
