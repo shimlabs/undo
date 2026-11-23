@@ -160,8 +160,13 @@ func (p *restorePlan) writePath(rel string, isClonable bool, extractor *store.Ex
 	if err := parents.Check(rel); err != nil {
 		return err
 	}
-	if isOccupied, err := pending.isOccupied(rel, source.Entry); err != nil || isOccupied {
+	isOccupied, err := pending.isOccupied(rel, source.Entry)
+	if err != nil {
 		return err
+	}
+	if isOccupied {
+		pending.occupied = append(pending.occupied, rel)
+		return nil
 	}
 	switch {
 	case isClonable && p.isMissing(rel):
@@ -182,15 +187,15 @@ func (p *restorePlan) writePath(rel string, isClonable bool, extractor *store.Ex
 }
 
 // isOccupied reports whether something the removals left in place stands
-// where the restore must write entry at rel, so writing it would fail, and
-// adds rel to the occupied paths if so. On a filesystem that ignores case, a
-// directory renamed only in case that holds excluded content survives its
-// removal under the target's name; a locked file survives too.
-func (pending *pendingWrites) isOccupied(rel string, entry tree.Entry) (bool, error) {
+// where the restore must write entry at rel, so writing it would fail. On a
+// filesystem that ignores case, a directory renamed only in case that holds
+// excluded content survives its removal under the target's name; a locked
+// file survives too.
+func (w *pendingWrites) isOccupied(rel string, entry tree.Entry) (bool, error) {
 	if rel == "." {
 		return false, nil
 	}
-	dir, err := pending.parentDir.open(rel)
+	dir, err := w.parentDir.open(rel)
 	// A parent that is missing could not be written, so nothing stands in
 	// the way of rel.
 	if errors.Is(err, fs.ErrNotExist) {
@@ -200,11 +205,10 @@ func (pending *pendingWrites) isOccupied(rel string, entry tree.Entry) (bool, er
 		return false, err
 	}
 	found, err := tree.StatAt(dir, path.Base(rel))
-	if err != nil || (found.Kind == tree.Dir) == (entry.Kind == tree.Dir) {
+	if err != nil {
 		return false, nil //nolint:nilerr // nothing in the way is the usual case
 	}
-	pending.occupied = append(pending.occupied, rel)
-	return true, nil
+	return (found.Kind == tree.Dir) != (entry.Kind == tree.Dir), nil
 }
 
 // keepOccupied takes the occupied paths, and everything under them, out of
