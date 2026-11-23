@@ -60,8 +60,8 @@ func TestEditDistance(t *testing.T) {
 		want int
 	}{
 		{"list", "list", 0},
-		{"lsit", "list", 2},
-		{"stauts", "status", 2},
+		{"lsit", "list", 1},
+		{"stauts", "status", 1},
 		{"", "to", 2},
 		{"checkpoint", "diff", 9},
 	}

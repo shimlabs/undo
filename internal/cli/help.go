@@ -151,10 +151,14 @@ func unknownCommandError(name string) error {
 	return usageError{message: message}
 }
 
-// closestCommand returns the listed command nearest to name, if it is
-// within two edits.
+// closestCommand returns the listed command nearest to name: within one
+// edit for a name of four letters or fewer, and within two otherwise.
 func closestCommand(name string) (string, bool) {
-	best, bestDistance := "", 3
+	maxDistance := 2
+	if len(name) <= 4 {
+		maxDistance = 1
+	}
+	best, bestDistance := "", maxDistance+1
 	for _, cmd := range commands() {
 		if cmd.group == "" || cmd.name == "" {
 			continue
@@ -166,23 +170,29 @@ func closestCommand(name string) (string, bool) {
 	return best, best != ""
 }
 
-// editDistance returns the Levenshtein distance between a and b.
+// editDistance returns the optimal string alignment distance between a and
+// b: the Levenshtein distance, with two neighboring letters swapped counting
+// as one edit, the most common typo.
 func editDistance(a, b string) int {
-	previous := make([]int, len(b)+1)
-	for j := range previous {
-		previous[j] = j
+	distances := make([][]int, len(a)+1)
+	for i := range distances {
+		distances[i] = make([]int, len(b)+1)
+		distances[i][0] = i
+	}
+	for j := range distances[0] {
+		distances[0][j] = j
 	}
 	for i := 1; i <= len(a); i++ {
-		current := make([]int, len(b)+1)
-		current[0] = i
 		for j := 1; j <= len(b); j++ {
 			cost := 1
 			if a[i-1] == b[j-1] {
 				cost = 0
 			}
-			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
+			distances[i][j] = min(distances[i-1][j]+1, distances[i][j-1]+1, distances[i-1][j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				distances[i][j] = min(distances[i][j], distances[i-2][j-2]+1)
+			}
 		}
-		previous = current
 	}
-	return previous[len(b)]
+	return distances[len(a)][len(b)]
 }
