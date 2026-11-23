@@ -34,6 +34,8 @@ type Checkpoint struct {
 	// UnstableCount is how many files changed while the checkpoint saved
 	// them.
 	UnstableCount int `json:"unstable_count,omitempty"`
+	// StoredBytes is at most the disk space the checkpoint's own copies take.
+	StoredBytes int64 `json:"stored_bytes,omitempty"`
 }
 
 // Checkpointer takes a checkpoint of the project in projectStore, either by
@@ -175,6 +177,7 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 		Time:              time.Now(),
 		CheckpointOptions: options,
 		UnstableCount:     len(manifest.Unstable),
+		StoredBytes:       storedBytes(manifest.Changed),
 	}
 	return checkpoint, s.appendIndex(checkpoint)
 }

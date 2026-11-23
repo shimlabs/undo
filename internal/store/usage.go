@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
+	"github.com/shimlabs/undo/internal/tree"
 	"github.com/shimlabs/undo/internal/walk"
 )
 
@@ -59,4 +60,47 @@ func diskUsage(root string) (int64, error) {
 		return subdirs, nil
 	})
 	return total.Load(), err
+}
+
+// blockSize is what a file takes on disk at least. Sizes are rounded up to
+// it, so estimates stay above the real use.
+const blockSize = 4096
+
+// storedBytes returns at most the disk space the copies of entries take.
+func storedBytes(entries map[string]tree.Entry) int64 {
+	var total int64
+	for _, entry := range entries {
+		total += blockSize
+		if entry.Kind == tree.File {
+			total += (entry.Size + blockSize - 1) / blockSize * blockSize
+		}
+	}
+	return total
+}
+
+// usageBound returns a quick upper bound of Usage: everything the base lists
+// and every checkpoint stored, as if none of it were shared, plus the
+// store's own files.
+func (s *Store) usageBound() (int64, error) {
+	base, err := s.baseListing()
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	bound := storedBytes(base)
+	checkpoints, err := s.List()
+	if err != nil {
+		return 0, err
+	}
+	for _, checkpoint := range checkpoints {
+		bound += checkpoint.StoredBytes
+	}
+	for _, path := range []string{s.indexPath(), s.baseListingPath(), s.listingPath(), s.restorePath(), s.logPath()} {
+		if info, err := os.Stat(path); err == nil {
+			bound += info.Size() + blockSize
+		}
+	}
+	return bound, nil
 }

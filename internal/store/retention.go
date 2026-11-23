@@ -47,6 +47,12 @@ func (s *Store) Prune(now time.Time, limits Limits) (int, error) {
 	if err != nil {
 		return count, err
 	}
+	// Measuring a large store takes seconds, so it is only measured when a
+	// quick upper bound is over the limit.
+	bound, err := s.usageBound()
+	if err != nil || bound <= limits.MaxBytes {
+		return count, err
+	}
 	usage, err := s.Usage()
 	if err != nil || usage <= limits.MaxBytes {
 		return count, err

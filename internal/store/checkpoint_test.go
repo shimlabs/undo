@@ -455,3 +455,23 @@ func TestListingAtBuildsForwardFromOlderSavedListing(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageBoundIsAtLeastUsage(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": strings.Repeat("a", 10_000), "dir/b.txt": "b"})
+	take(t, projectStore, "first")
+	for _, content := range []string{"x", "y", "z"} {
+		testutil.WriteFile(t, filepath.Join(root, "a.txt"), strings.Repeat(content, 20_000))
+		take(t, projectStore, content)
+	}
+	usage, err := projectStore.Usage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := projectStore.usageBound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound < usage {
+		t.Fatalf("usage bound %d is below the measured usage %d", bound, usage)
+	}
+}
