@@ -171,7 +171,7 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 		if event.ShouldRescan {
 			t.shouldRescan = true
 		}
-		if event.Path == filepath.Join(t.root, ".undoignore") {
+		if event.Path == filepath.Join(t.root, exclude.IgnoreFile) {
 			t.hasRulesChange = true
 		}
 		// Installs and builds write many files into excluded directories,

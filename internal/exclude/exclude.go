@@ -25,11 +25,15 @@ type Matcher struct {
 	patterns []string
 }
 
+// IgnoreFile is the file in a project root that holds its own exclude
+// rules, one gitignore-style pattern per line.
+const IgnoreFile = ".undoignore"
+
 // New returns a Matcher with the defaults plus the patterns in the project's
 // .undoignore file.
 func New(root string) (*Matcher, error) {
 	patterns := slices.Clone(defaults)
-	file, err := os.Open(filepath.Join(root, ".undoignore"))
+	file, err := os.Open(filepath.Join(root, IgnoreFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Matcher{patterns: patterns}, nil
 	}
