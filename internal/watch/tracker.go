@@ -358,7 +358,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 func hardLinkedFiles(listing tree.Listing) map[string]bool {
 	hardLinked := map[string]bool{}
 	for rel, entry := range listing {
-		if entry.Links > 1 {
+		if entry.LinkCount > 1 {
 			hardLinked[rel] = true
 		}
 	}
@@ -372,7 +372,7 @@ func (t *tracker) updateHardLinked(changed, deleted []string) {
 		delete(t.hardLinked, rel)
 	}
 	for _, rel := range changed {
-		if t.listing[rel].Links > 1 {
+		if t.listing[rel].LinkCount > 1 {
 			t.hardLinked[rel] = true
 		} else {
 			delete(t.hardLinked, rel)

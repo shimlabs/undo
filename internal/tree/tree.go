@@ -40,9 +40,9 @@ type Entry struct {
 	ChangeTime int64       `json:"ctime"`
 	Inode      uint64      `json:"ino"`
 	Link       string      `json:"link,omitempty"`
-	// Links is how many names a file has. A write through any of them
+	// LinkCount is how many names a file has. A write through any of them
 	// changes all of them.
-	Links uint64 `json:"links,omitempty"`
+	LinkCount uint64 `json:"link_count,omitempty"`
 }
 
 // Listing maps paths to their entries. Paths are slash-separated and relative
@@ -176,7 +176,7 @@ func Stat(path string) (Entry, error) {
 	switch {
 	case info.Mode().IsRegular():
 		entry.Kind = File
-		entry.Links = toUint64(stat.Nlink)
+		entry.LinkCount = toUint64(stat.Nlink)
 	case info.IsDir():
 		entry.Kind = Dir
 		entry.Size = 0
