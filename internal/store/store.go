@@ -133,6 +133,13 @@ func openAt(dir, root string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dir, layersDirName), 0o700); err != nil {
 		return nil, err
 	}
+	// Merges and restores work on paths below these, so a symlink in their
+	// place would lead them outside the store.
+	for _, name := range []string{baseDirName, layersDirName} {
+		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
+			return nil, fmt.Errorf("%s: %w", filepath.Join(dir, name), ErrUnsafeStore)
+		}
+	}
 	s := &Store{root: root, dir: dir}
 	if err := s.loadConfig(); err != nil {
 		return nil, err

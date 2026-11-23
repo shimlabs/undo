@@ -242,3 +242,19 @@ func TestOpenIgnoresStoreNextToProjectThatHomeDidNotCreate(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenRefusesStoreWithSymlinkedBase(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+	take(t, projectStore, "first")
+	if err := os.RemoveAll(projectStore.baseDir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), projectStore.baseDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	home := filepath.Dir(projectStore.Dir())
+	if _, err := Open(home, root); !errors.Is(err, ErrUnsafeStore) {
+		t.Fatalf("Open = %v, want ErrUnsafeStore", err)
+	}
+}
