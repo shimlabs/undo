@@ -45,6 +45,15 @@ func Agents() []Agent {
 	return []Agent{claude, codex, cursor, gemini, openCode}
 }
 
+// AgentNames returns the command-line names of every agent.
+func AgentNames() []string {
+	var names []string
+	for _, agent := range Agents() {
+		names = append(names, agent.Name)
+	}
+	return names
+}
+
 // FindAgent returns the agent with the given command-line name.
 func FindAgent(name string) (Agent, bool) {
 	agents := Agents()

@@ -40,11 +40,7 @@ func agentArg(command string, args []string) (hook.Agent, error) {
 			return agent, nil
 		}
 	}
-	var names []string
-	for _, agent := range hook.Agents() {
-		names = append(names, agent.Name)
-	}
-	return hook.Agent{}, usageError{fmt.Sprintf("%s supports: %s", command, strings.Join(names, ", "))}
+	return hook.Agent{}, usageError{fmt.Sprintf("%s supports: %s", command, strings.Join(hook.AgentNames(), ", "))}
 }
 
 // hookCommand handles one event from an agent. It never fails and never

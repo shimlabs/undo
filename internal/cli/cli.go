@@ -45,10 +45,7 @@ Flags:
 `
 
 func usage() string {
-	var names []string
-	for _, agent := range hook.Agents() {
-		names = append(names, agent.Name)
-	}
+	names := hook.AgentNames()
 	last := len(names) - 1
 	return fmt.Sprintf(usageFormat, strings.Join(names[:last], ", ")+" or "+names[last])
 }
