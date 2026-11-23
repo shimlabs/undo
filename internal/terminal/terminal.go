@@ -57,13 +57,6 @@ const (
 	cyan   = "\x1b[36m"
 )
 
-func (w *Writer) style(codes, text string) string {
-	if !w.isColor || text == "" {
-		return text
-	}
-	return codes + text + reset
-}
-
 // Bold returns text in bold.
 func (w *Writer) Bold(text string) string { return w.style(bold, text) }
 
@@ -111,4 +104,11 @@ func (w *Writer) Warningf(format string, args ...any) {
 // Errorf writes a line that reports a failure.
 func (w *Writer) Errorf(format string, args ...any) {
 	fmt.Fprintf(w.out, "%s %s\n", w.style(bold+red, "Error:"), fmt.Sprintf(format, args...))
+}
+
+func (w *Writer) style(codes, text string) string {
+	if !w.isColor || text == "" {
+		return text
+	}
+	return codes + text + reset
 }

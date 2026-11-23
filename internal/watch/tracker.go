@@ -111,6 +111,59 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 	return t, nil
 }
 
+// Close stops watching and saves the listing, so the next tracker or scan
+// does not have to rebuild it from the layers.
+// Closing it again does nothing.
+func (t *tracker) Close() {
+	t.closeOnce.Do(func() {
+		t.stream.Close()
+		t.saveListing()
+		t.savePosition()
+	})
+}
+
+// SaveState saves where a new tracker can resume, and the listing when the
+// saved one is far behind. The server calls it when it goes quiet, so a
+// watcher that is killed still leaves a recent position.
+func (t *tracker) SaveState() {
+	if t.store.IsListingBehind(t.lastID) {
+		t.saveListing()
+	}
+	t.savePosition()
+}
+
+// Checkpoint records the project's current state. Before that, it waits until
+// every change made before the call has been delivered.
+func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint, error) {
+	markerID, isDelivered := t.waitForMarker()
+	t.mu.Lock()
+	dirty, shouldRescan, hasRulesChange := t.dirty, t.shouldRescan || !isDelivered, t.hasRulesChange
+	t.dirty, t.shouldRescan, t.hasRulesChange = map[string]bool{}, false, false
+	t.mu.Unlock()
+
+	if hasRulesChange {
+		// Paths the old rules excluded were never tracked, and a restore would
+		// treat them as created after the checkpoint.
+		t.stream.Close()
+		if err := t.startStream(fsnotify.SinceNow); err != nil {
+			return store.Checkpoint{}, fmt.Errorf("%w: %w", errStreamStopped, err)
+		}
+		shouldRescan = true
+	}
+	checkpoint, err := t.checkpoint(options, dirty, shouldRescan)
+	if err != nil {
+		t.mu.Lock()
+		t.shouldRescan = true
+		t.mu.Unlock()
+		t.listing = nil
+		return checkpoint, err
+	}
+	if isDelivered {
+		t.position = streamPosition{CheckpointID: checkpoint.ID, EventID: uint64(markerID)}
+	}
+	return checkpoint, nil
+}
+
 // startStream reads the exclude rules and starts watching with them. On Linux
 // the stream does not watch excluded directories, so it has to start over
 // when the rules change.
@@ -152,27 +205,6 @@ func (t *tracker) loadListing(id int) error {
 		}
 	}
 	return nil
-}
-
-// Close stops watching and saves the listing, so the next tracker or scan
-// does not have to rebuild it from the layers.
-// Closing it again does nothing.
-func (t *tracker) Close() {
-	t.closeOnce.Do(func() {
-		t.stream.Close()
-		t.saveListing()
-		t.savePosition()
-	})
-}
-
-// SaveState saves where a new tracker can resume, and the listing when the
-// saved one is far behind. The server calls it when it goes quiet, so a
-// watcher that is killed still leaves a recent position.
-func (t *tracker) SaveState() {
-	if t.store.IsListingBehind(t.lastID) {
-		t.saveListing()
-	}
-	t.savePosition()
 }
 
 func (t *tracker) saveListing() {
@@ -254,38 +286,6 @@ func (t *tracker) isExcluded(matcher *exclude.Matcher, dir string) bool {
 
 func (t *tracker) isInRoot(fullPath string) bool {
 	return fullPath == t.root || strings.HasPrefix(fullPath, t.root+string(filepath.Separator))
-}
-
-// Checkpoint records the project's current state. Before that, it waits until
-// every change made before the call has been delivered.
-func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint, error) {
-	markerID, isDelivered := t.waitForMarker()
-	t.mu.Lock()
-	dirty, shouldRescan, hasRulesChange := t.dirty, t.shouldRescan || !isDelivered, t.hasRulesChange
-	t.dirty, t.shouldRescan, t.hasRulesChange = map[string]bool{}, false, false
-	t.mu.Unlock()
-
-	if hasRulesChange {
-		// Paths the old rules excluded were never tracked, and a restore would
-		// treat them as created after the checkpoint.
-		t.stream.Close()
-		if err := t.startStream(fsnotify.SinceNow); err != nil {
-			return store.Checkpoint{}, fmt.Errorf("%w: %w", errStreamStopped, err)
-		}
-		shouldRescan = true
-	}
-	checkpoint, err := t.checkpoint(options, dirty, shouldRescan)
-	if err != nil {
-		t.mu.Lock()
-		t.shouldRescan = true
-		t.mu.Unlock()
-		t.listing = nil
-		return checkpoint, err
-	}
-	if isDelivered {
-		t.position = streamPosition{CheckpointID: checkpoint.ID, EventID: uint64(markerID)}
-	}
-	return checkpoint, nil
 }
 
 func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]bool, shouldRescan bool) (store.Checkpoint, error) {

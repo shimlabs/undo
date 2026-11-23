@@ -63,6 +63,20 @@ func (c Client) Checkpoint(projectStore *store.Store, options store.CheckpointOp
 	return checkpoint, nil
 }
 
+// Status reports whether a server is running for projectStore.
+func (c Client) Status(projectStore *store.Store) (ServerStatus, error) {
+	conn, err := c.connect(projectStore, nil)
+	if err == nil {
+		reply, err := send(conn, serverRequest{Operation: operationStatus})
+		if err != nil {
+			return ServerStatus{}, err
+		}
+		return ServerStatus{IsRunning: true, CheckpointCount: reply.CheckpointCount}, nil
+	}
+	// No server answers, so none is running.
+	return ServerStatus{}, nil
+}
+
 // startFor returns the function that starts the project's server, or nil
 // while an earlier start failure is recent.
 func (c Client) startFor(projectStore *store.Store) startFunc {
@@ -120,20 +134,6 @@ func (c Client) checkpointThroughServer(projectStore *store.Store, options store
 		return store.Checkpoint{}, errors.New(reply.Error)
 	}
 	return reply.Checkpoint, nil
-}
-
-// Status reports whether a server is running for projectStore.
-func (c Client) Status(projectStore *store.Store) (ServerStatus, error) {
-	conn, err := c.connect(projectStore, nil)
-	if err != nil {
-		// No server answers, so none is running.
-		return ServerStatus{}, nil
-	}
-	reply, err := send(conn, serverRequest{Operation: operationStatus})
-	if err != nil {
-		return ServerStatus{}, err
-	}
-	return ServerStatus{IsRunning: true, CheckpointCount: reply.CheckpointCount}, nil
 }
 
 func (c Client) connect(projectStore *store.Store, start startFunc) (net.Conn, error) {
