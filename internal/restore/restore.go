@@ -129,7 +129,7 @@ type restorePlan struct {
 // checkpoint did not save: paths its exclude rules left out, paths in
 // directories that could not be read then or now, and files that cannot be
 // read now, which the safety checkpoint cannot save either. A path that only today's rules exclude is written back if it is
-// missing, but never overwritten.
+// missing, but never overwritten, and nothing inside it is touched.
 func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	root := projectStore.Root()
 	matcherNow, err := exclude.New(root)
@@ -191,6 +191,7 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	}
 	written = slices.DeleteFunc(written, isUnreadable)
 	removed = slices.DeleteFunc(removed, isUnreadable)
+	written = slices.DeleteFunc(written, isInsideAny(kept))
 	restored, err := projectStore.RestoredEntries(id)
 	if err != nil {
 		return restorePlan{}, err
@@ -202,6 +203,23 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	slices.Sort(kept)
 	changes := Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable}
 	return restorePlan{root: root, target: target, current: current, changes: changes}, nil
+}
+
+// isInsideAny returns a function that reports whether a path is inside one of
+// dirs, which the restore leaves as they are.
+func isInsideAny(dirs []string) func(rel string) bool {
+	isDir := make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		isDir[dir] = true
+	}
+	return func(rel string) bool {
+		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
+			if isDir[dir] {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // isAtOrInside reports whether rel is one of dirs or inside one of them.
@@ -268,7 +286,11 @@ func (p *restorePlan) removals() []string {
 // excluded files is left in place.
 func (p *restorePlan) removeAll(paths []string) error {
 	slices.SortFunc(paths, func(a, b string) int { return tree.Depth(b) - tree.Depth(a) })
+	parents := tree.NewParentChecker(p.root)
 	for _, rel := range paths {
+		if err := parents.Check(rel); err != nil {
+			return err
+		}
 		full := p.path(rel)
 		if err := makeParentWritable(full); err != nil {
 			return err
@@ -294,10 +316,14 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 		return nil, err
 	}
 	isCloned := map[string]bool{}
+	parents := tree.NewParentChecker(p.root)
 	for _, rel := range paths {
 		if rel != "." && isCloned[path.Dir(rel)] {
 			isCloned[rel] = true
 			continue
+		}
+		if err := parents.Check(rel); err != nil {
+			return skipped, err
 		}
 		source, full := p.target[rel], p.path(rel)
 		if rel != "." {
@@ -354,10 +380,14 @@ func (p *restorePlan) restoreDirModeAndTimes(paths []string) ([]string, error) {
 	}
 	sorted := slices.Collect(maps.Keys(dirs))
 	slices.SortFunc(sorted, func(a, b string) int { return tree.Depth(b) - tree.Depth(a) })
+	parents := tree.NewParentChecker(p.root)
 	for _, rel := range sorted {
 		source, ok := p.target[rel]
 		if !ok || source.Entry.Kind != tree.Dir {
 			continue
+		}
+		if err := parents.Check(rel); err != nil {
+			return nil, err
 		}
 		if err := setModeAndTimes(p.path(rel), source.Entry); err != nil {
 			return nil, err

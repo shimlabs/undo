@@ -472,6 +472,28 @@ func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
 	}
 }
 
+func TestRestoreNeverWritesThroughSymlinkExcludedLater(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "keys", "authorized_keys"), "attacker key")
+	take(t, projectStore, "first")
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(root, "keys"))
+	if err := os.Symlink(outside, filepath.Join(root, "keys")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "keys\n")
+
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("restore wrote %d entries outside the project through a symlink", len(entries))
+	}
+}
+
 func TestRestoreKeepsChangedFileItCannotReadNow(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read any file")

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shimlabs/undo/internal/testutil"
+	"github.com/shimlabs/undo/internal/tree"
 )
 
 func stateHashes(t *testing.T, projectStore *Store, id int) map[string][32]byte {
@@ -59,7 +60,7 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectStore.mergeLayer(2, base); err != nil {
+	if _, err := projectStore.mergeLayer(2, base, tree.NewParentChecker(projectStore.baseDir())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -108,6 +109,41 @@ func TestPruneWaitsForReaders(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Prune did not run after the reader finished")
+	}
+}
+
+func TestFinishMergeNeverRemovesThroughBaseSymlink(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a/x": "project"})
+	outside := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(outside, "x"), "outside")
+	if _, err := projectStore.Take(CheckpointOptions{Label: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(root, "a"))
+	if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projectStore.Take(CheckpointOptions{Label: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	// An interrupted merge can leave the base half updated: here layer 2
+	// already turned a into a symlink, and the record says to replay it.
+	os.RemoveAll(projectStore.basePath("a"))
+	if err := os.Symlink(outside, projectStore.basePath("a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := projectStore.finishMerge(); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(outside, "x")); err != nil || string(data) != "outside" {
+		t.Fatalf("merge changed a file outside the store: %q, %v", data, err)
+	}
+	if target, err := os.Readlink(projectStore.basePath("a")); err != nil || target != outside {
+		t.Fatalf("base a = %q, %v; want the symlink from layer 2", target, err)
 	}
 }
 
