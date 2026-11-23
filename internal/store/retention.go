@@ -31,7 +31,7 @@ func (s *Store) PruneIfDue(now time.Time, limits Limits) (int, error) {
 	if err := s.writeFileAtomic(marker, nil); err != nil {
 		return 0, err
 	}
-	if err := s.files.Chtimes(s.storeName(marker), now, now); err != nil {
+	if err := s.chtimes(marker, now); err != nil {
 		return 0, err
 	}
 	return s.Prune(now, limits)

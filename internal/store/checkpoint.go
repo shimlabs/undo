@@ -527,7 +527,7 @@ func (s *Store) openLayer(id int) (*os.Root, error) {
 	if err := s.mkdirAll(s.layerFile(id, ".")); err != nil {
 		return nil, err
 	}
-	return s.files.OpenRoot(s.storeName(s.layerFile(id, ".")))
+	return s.openRoot(s.layerFile(id, "."))
 }
 
 // dirPair is one directory open in the project and in a layer.

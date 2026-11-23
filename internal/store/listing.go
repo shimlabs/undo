@@ -115,7 +115,7 @@ func (s *Store) IsListingBehind(id int) bool {
 // savedListingID returns the checkpoint the saved listing belongs to. The ID
 // is encoded first, so this does not decode the listing.
 func (s *Store) savedListingID() (int, error) {
-	file, err := s.files.Open(s.storeName(s.listingPath()))
+	file, err := s.open(s.listingPath())
 	if err != nil {
 		return 0, err
 	}

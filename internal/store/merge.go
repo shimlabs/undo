@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -217,7 +216,7 @@ func (s *Store) mergeFile(id int, rel string, parents *tree.ParentChecker) (int6
 			return 0, err
 		}
 	}
-	dir, err := s.openDir(filepath.Dir(dst))
+	dir, err := s.open(filepath.Dir(dst))
 	if err != nil {
 		return 0, err
 	}
@@ -270,5 +269,5 @@ func (s *Store) makeBaseParents(rel string, parents *tree.ParentChecker) error {
 			break
 		}
 	}
-	return os.MkdirAll(filepath.Dir(s.basePath(rel)), 0o700)
+	return s.mkdirAll(filepath.Dir(s.basePath(rel)))
 }

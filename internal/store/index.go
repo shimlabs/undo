@@ -46,7 +46,7 @@ func (s *Store) Checkpoint(id int) (Checkpoint, error) {
 // Latest returns the most recent checkpoint, and false if there is none. It
 // reads only the end of the index.
 func (s *Store) Latest() (Checkpoint, bool, error) {
-	file, err := s.files.Open(s.storeName(s.indexPath()))
+	file, err := s.open(s.indexPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return Checkpoint{}, false, nil
 	}
@@ -100,7 +100,7 @@ func (s *Store) appendIndex(checkpoint Checkpoint) error {
 	if err != nil {
 		return err
 	}
-	file, err := s.files.OpenFile(s.storeName(s.indexPath()), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
+	file, err := s.openFile(s.indexPath(), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return err
 	}

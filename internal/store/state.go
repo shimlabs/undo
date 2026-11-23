@@ -137,7 +137,7 @@ func (s *Store) openStored(rel string, source Source) (*os.File, string, error) 
 	if _, err := s.lstat(src); errors.Is(err, fs.ErrNotExist) {
 		return nil, "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
 	}
-	dir, err := s.openDir(filepath.Dir(src))
+	dir, err := s.open(filepath.Dir(src))
 	if err != nil {
 		return nil, "", err
 	}

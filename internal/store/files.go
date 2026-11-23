@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/clone"
@@ -57,13 +58,24 @@ func (s *Store) remove(path string) error {
 	return s.files.Remove(s.storeName(path))
 }
 
-// openDir opens the directory path in the store.
-func (s *Store) openDir(path string) (*os.File, error) {
+func (s *Store) open(path string) (*os.File, error) {
 	return s.files.Open(s.storeName(path))
 }
 
+func (s *Store) openFile(path string, flag int, perm os.FileMode) (*os.File, error) {
+	return s.files.OpenFile(s.storeName(path), flag, perm)
+}
+
+func (s *Store) openRoot(path string) (*os.Root, error) {
+	return s.files.OpenRoot(s.storeName(path))
+}
+
+func (s *Store) chtimes(path string, modTime time.Time) error {
+	return s.files.Chtimes(s.storeName(path), modTime, modTime)
+}
+
 func (s *Store) readDir(path string) ([]fs.DirEntry, error) {
-	dir, err := s.openDir(path)
+	dir, err := s.open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +116,7 @@ func (s *Store) cloneFromProject(src string, dir *os.File, name string) error {
 
 // cloneIntoStore copies the project path src to the store path dst.
 func (s *Store) cloneIntoStore(src, dst string) error {
-	dir, err := s.openDir(filepath.Dir(dst))
+	dir, err := s.open(filepath.Dir(dst))
 	if err != nil {
 		return err
 	}
@@ -135,7 +147,7 @@ func (s *Store) unlock(path string) error {
 	if s.storeName(path) == "." {
 		return nil
 	}
-	dir, err := s.openDir(filepath.Dir(path))
+	dir, err := s.open(filepath.Dir(path))
 	if err != nil {
 		return err
 	}

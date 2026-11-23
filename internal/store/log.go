@@ -19,12 +19,11 @@ const maxLogSize = 1 << 20
 // it starts over. Logging is best effort: if the log cannot be written, the
 // failure is lost.
 func (s *Store) LogError(failure error) {
-	name := s.storeName(s.logPath())
 	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY
-	if info, err := s.files.Lstat(name); err == nil && info.Size() > maxLogSize {
+	if info, err := s.lstat(s.logPath()); err == nil && info.Size() > maxLogSize {
 		flags |= os.O_TRUNC
 	}
-	if file, err := s.files.OpenFile(name, flags, 0o600); err == nil {
+	if file, err := s.openFile(s.logPath(), flags, 0o600); err == nil {
 		writeLogLine(file, failure)
 	}
 }
