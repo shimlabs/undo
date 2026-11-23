@@ -182,14 +182,14 @@ func TestDiffGroupsDirectories(t *testing.T) {
 
 func TestInstallClaudeWritesSettings(t *testing.T) {
 	root := newProject(t)
-	config := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 
 	code, out := run(t, root, "", "install", "claude")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	data, err := os.ReadFile(filepath.Join(config, "settings.json"))
+	data, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
 	if err != nil || !strings.Contains(string(data), "hook claude") {
 		t.Fatalf("settings = %s, %v", data, err)
 	}
@@ -197,7 +197,7 @@ func TestInstallClaudeWritesSettings(t *testing.T) {
 	if code, out := run(t, root, "", "uninstall", "claude"); code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	data, _ = os.ReadFile(filepath.Join(config, "settings.json"))
+	data, _ = os.ReadFile(filepath.Join(configDir, "settings.json"))
 	if strings.Contains(string(data), "hook claude") {
 		t.Fatalf("hook still installed: %s", data)
 	}
@@ -268,12 +268,12 @@ func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
 func TestStatusShowsLastError(t *testing.T) {
 	root := newProject(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
-	s, err := store.Create(storeHomeFor(t), root)
+	projectStore, err := store.Create(storeHomeFor(t), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.LogError(errors.New("first failure"))
-	s.LogError(errors.New("disk full"))
+	projectStore.LogError(errors.New("first failure"))
+	projectStore.LogError(errors.New("disk full"))
 
 	_, out := run(t, root, "", "status")
 	if !strings.Contains(out, "Last error   ") || !strings.Contains(out, " disk full\n") {

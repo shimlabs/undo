@@ -46,7 +46,7 @@ func (c Changes) Len() int {
 // Plan returns what restoring checkpoint id would change. It does not change
 // anything.
 func Plan(projectStore *store.Store, id int) (Changes, error) {
-	project, unlock, err := lockAndCompare(projectStore, id)
+	project, unlock, err := lockAndPlan(projectStore, id)
 	if err != nil {
 		return Changes{}, err
 	}
@@ -66,7 +66,7 @@ func Apply(projectStore *store.Store, id int, checkpoint store.Checkpointer) (Ch
 	if err != nil {
 		return Changes{}, err
 	}
-	project, unlock, err := lockAndCompare(projectStore, id)
+	project, unlock, err := lockAndPlan(projectStore, id)
 	if err != nil {
 		return Changes{}, err
 	}
@@ -82,7 +82,7 @@ func Apply(projectStore *store.Store, id int, checkpoint store.Checkpointer) (Ch
 		if _, err := projectStore.Take(options); err != nil {
 			return Changes{}, err
 		}
-		if project, unlock, err = lockAndCompare(projectStore, id); err != nil {
+		if project, unlock, err = lockAndPlan(projectStore, id); err != nil {
 			return Changes{}, err
 		}
 	}
@@ -90,14 +90,14 @@ func Apply(projectStore *store.Store, id int, checkpoint store.Checkpointer) (Ch
 	return project.changes, project.apply(projectStore)
 }
 
-// lockAndCompare takes the store's shared lock, so pruning cannot change the
+// lockAndPlan takes the store's shared lock, so pruning cannot change the
 // stored states during the restore, and plans the restore of checkpoint id.
-func lockAndCompare(projectStore *store.Store, id int) (projectRestore, func(), error) {
+func lockAndPlan(projectStore *store.Store, id int) (projectRestore, func(), error) {
 	unlock, err := projectStore.RLock()
 	if err != nil {
 		return projectRestore{}, nil, err
 	}
-	project, err := compare(projectStore, id)
+	project, err := planRestore(projectStore, id)
 	if err != nil {
 		unlock()
 		return projectRestore{}, nil, err
@@ -125,12 +125,12 @@ type projectRestore struct {
 	changes Changes
 }
 
-// compare plans a restore of checkpoint id. It never touches a path the
+// planRestore plans a restore of checkpoint id. It never touches a path the
 // checkpoint did not save: paths its exclude rules left out, paths in
 // directories that could not be read then or now, and files that cannot be
 // read now. A path that only today's rules exclude is written back if it is
 // missing, but never overwritten.
-func compare(projectStore *store.Store, id int) (projectRestore, error) {
+func planRestore(projectStore *store.Store, id int) (projectRestore, error) {
 	root := projectStore.Root()
 	matcherNow, err := exclude.New(root)
 	if err != nil {
@@ -258,10 +258,10 @@ func (p *projectRestore) writeAll(projectStore *store.Store) (skipped []string, 
 	if err != nil {
 		return nil, err
 	}
-	isWritten := map[string]bool{}
+	isCloned := map[string]bool{}
 	for _, rel := range paths {
-		if rel != "." && isWritten[path.Dir(rel)] {
-			isWritten[rel] = true
+		if rel != "." && isCloned[path.Dir(rel)] {
+			isCloned[rel] = true
 			continue
 		}
 		source, full := p.target[rel], p.path(rel)
@@ -273,7 +273,7 @@ func (p *projectRestore) writeAll(projectStore *store.Store) (skipped []string, 
 		switch {
 		case clonable[rel]:
 			err = projectStore.ExtractBaseDir(rel, full)
-			isWritten[rel] = true
+			isCloned[rel] = true
 		case source.Entry.Kind == tree.Dir:
 			err = os.MkdirAll(full, 0o700)
 		case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:

@@ -4,7 +4,7 @@ package project
 #include <fcntl.h>
 #include <sys/param.h>
 
-static int undoPathOf(int fd, char *buf) {
+static int undoGetPath(int fd, char *buf) {
 	return fcntl(fd, F_GETPATH, buf);
 }
 */
@@ -26,7 +26,7 @@ func canonicalCase(path string) (string, error) {
 	}
 	defer file.Close()
 	buf := make([]byte, C.MAXPATHLEN)
-	if result, err := C.undoPathOf(C.int(file.Fd()), (*C.char)(unsafe.Pointer(&buf[0]))); result != 0 {
+	if status, err := C.undoGetPath(C.int(file.Fd()), (*C.char)(unsafe.Pointer(&buf[0]))); status != 0 {
 		return "", &os.PathError{Op: "fcntl", Path: path, Err: err}
 	}
 	return C.GoString((*C.char)(unsafe.Pointer(&buf[0]))), nil

@@ -68,7 +68,7 @@ func TestScanRecordsSymlinkWithoutFollowing(t *testing.T) {
 	}
 }
 
-func TestChangedDetectsCpPreservedTimes(t *testing.T) {
+func TestChangedDetectsCopyWithPreservedTimes(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "a.txt")
 	testutil.WriteFile(t, path, "aaaa")
@@ -144,11 +144,11 @@ func walkScan(t *testing.T, root string, matcher *exclude.Matcher) (Listing, []s
 			}
 			return nil
 		}
-		stat, err := Stat(path)
+		treeEntry, err := Stat(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		listing[rel] = stat
+		listing[rel] = treeEntry
 		return nil
 	})
 	slices.Sort(excluded)

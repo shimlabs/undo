@@ -41,11 +41,11 @@ func newProject(t *testing.T) (*store.Store, string) {
 	if err := os.Symlink("src/main.go", filepath.Join(root, "entry")); err != nil {
 		t.Fatal(err)
 	}
-	s, err := store.Create(t.TempDir(), root)
+	projectStore, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, root
+	return projectStore, root
 }
 
 func take(t *testing.T, projectStore *store.Store, label string) {
@@ -110,27 +110,27 @@ func requireSame(t *testing.T, want, got map[string]string) {
 
 func restoreAfter(t *testing.T, damage func(root string)) {
 	t.Helper()
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 
 	damage(root)
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
-func TestRestoreRmRf(t *testing.T) {
+func TestRestoreRecursiveDelete(t *testing.T) {
 	restoreAfter(t, func(root string) {
 		os.RemoveAll(filepath.Join(root, "src"))
 	})
 }
 
-func TestRestoreRmRfGit(t *testing.T) {
+func TestRestoreRecursiveDeleteOfGitDir(t *testing.T) {
 	restoreAfter(t, func(root string) {
 		os.RemoveAll(filepath.Join(root, ".git"))
 	})
@@ -152,7 +152,7 @@ func TestRestoreSedInPlace(t *testing.T) {
 	})
 }
 
-func TestRestoreMvOverExisting(t *testing.T) {
+func TestRestoreMoveOverExisting(t *testing.T) {
 	restoreAfter(t, func(root string) {
 		os.Rename(filepath.Join(root, "README.md"), filepath.Join(root, "src", "main.go"))
 	})
@@ -169,16 +169,16 @@ func TestRestoreFileBecameDir(t *testing.T) {
 }
 
 func TestRestoreKeepsNodeModules(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v1")
-	if _, err := s.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 
 	testutil.WriteFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v2")
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "src", "main.go")); err != nil {
@@ -191,32 +191,32 @@ func TestRestoreKeepsNodeModules(t *testing.T) {
 }
 
 func TestRestoreIsUndoable(t *testing.T) {
-	s, root := newProject(t)
-	if _, err := s.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
+	projectStore, root := newProject(t)
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
 	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "written after the checkpoint")
 	damaged := snapshot(t, root)
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Apply(s, 2, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, damaged, snapshot(t, root))
 }
 
 func TestPlanListsChanges(t *testing.T) {
-	s, root := newProject(t)
-	if _, err := s.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
+	projectStore, root := newProject(t)
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(root, "README.md"))
 	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "new")
 
-	changes, err := Plan(s, 1)
+	changes, err := Plan(projectStore, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,62 +226,62 @@ func TestPlanListsChanges(t *testing.T) {
 }
 
 func TestRestoreDirEditedAfterBase(t *testing.T) {
-	s, root := newProject(t)
-	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+	projectStore, root := newProject(t)
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main // edited\n")
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "after edit", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "after edit", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 2, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreDirKeepsEarlierDeletes(t *testing.T) {
-	s, root := newProject(t)
-	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+	projectStore, root := newProject(t)
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(root, "src", "util", "str.go"))
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "after delete", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "after delete", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 2, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreReadOnlyDirectory(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "ro", "f.txt"), "v1")
 	os.Chmod(filepath.Join(root, "ro"), 0o555)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "ro"), 0o755) })
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(root, "ro", "f.txt"), []byte("v2 damaged"), 0o644)
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreAfterChmodReadOnly(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.Chmod(filepath.Join(root, "src", "util", "str.go"), 0o444)
@@ -293,100 +293,100 @@ func TestRestoreAfterChmodReadOnly(t *testing.T) {
 		os.Chmod(filepath.Join(root, "src", "util"), 0o755)
 	})
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreRecreatesNamedPipes(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	if err := syscall.Mkfifo(filepath.Join(root, "src", "pipe"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreHardLinkedFiles(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	os.Link(filepath.Join(root, "README.md"), filepath.Join(root, "README.link"))
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(root, "README.md"), []byte("damaged"), 0o644)
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreAfterPrune(t *testing.T) {
-	s, root := newProject(t)
-	if _, err := s.Take(store.CheckpointOptions{Label: "1", Dir: root}); err != nil {
+	projectStore, root := newProject(t)
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "1", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "v2")
 	os.Remove(filepath.Join(root, "src", "util", "str.go"))
 	testutil.WriteFile(t, filepath.Join(root, "newdir", "deep", "x"), "x")
-	if _, err := s.Take(store.CheckpointOptions{Label: "2", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "2", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "v3")
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "3", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "3", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	if merged, err := s.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil || merged != 2 {
+	if merged, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil || merged != 2 {
 		t.Fatalf("Prune = %d, %v", merged, err)
 	}
 	os.RemoveAll(root)
 
-	if _, err := Apply(s, 3, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 3, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreDirWhoseTimesChanged(t *testing.T) {
-	s, root := newProject(t)
-	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+	projectStore, root := newProject(t)
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	later := time.Now().Add(time.Hour)
 	os.Chtimes(filepath.Join(root, "src"), later, later)
 	want := snapshot(t, root)
-	if _, err := s.Take(store.CheckpointOptions{Label: "after touch", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "after touch", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 2, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreLeavesNewlyExcludedPaths(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "build", "out.bin"), "old build")
-	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "build/\n")
 	testutil.WriteFile(t, filepath.Join(root, "build", "out.bin"), "new build")
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "build", "out.bin")); string(data) != "new build" {
@@ -398,15 +398,15 @@ func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read every directory")
 	}
-	s, root := newProject(t)
-	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+	projectStore, root := newProject(t)
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, filepath.Join(root, "pgdata", "rows"), "data")
 	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	os.Chmod(filepath.Join(root, "pgdata"), 0o755)
@@ -419,17 +419,17 @@ func TestRestoreKeepsUnreadableFiles(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read every file")
 	}
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "secret.key"), "key")
 	os.Chmod(filepath.Join(root, "secret.key"), 0o000)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "secret.key"), 0o644) })
-	take(t, s, "first")
+	take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "later.key"), "key made after the checkpoint")
 	os.Chmod(filepath.Join(root, "later.key"), 0o000)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "later.key"), 0o644) })
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "damaged")
 
-	changes, err := Apply(s, 1, (*store.Store).Take)
+	changes, err := Apply(projectStore, 1, (*store.Store).Take)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,13 +444,13 @@ func TestRestoreLeavesDirectoryUnreadableAtCheckpoint(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read every directory")
 	}
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "pgdata", "rows"), "data")
 	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
-	take(t, s, "pgdata unreadable")
+	take(t, projectStore, "pgdata unreadable")
 	os.Chmod(filepath.Join(root, "pgdata"), 0o755)
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "pgdata", "rows")); string(data) != "data" {
@@ -459,12 +459,12 @@ func TestRestoreLeavesDirectoryUnreadableAtCheckpoint(t *testing.T) {
 }
 
 func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
-	s, root := newProject(t)
-	take(t, s, "first")
+	projectStore, root := newProject(t)
+	take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "src/\n")
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package main\n" {
@@ -473,32 +473,32 @@ func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
 }
 
 func TestRestoreReplacesChangedNamedPipe(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	syscall.Mkfifo(filepath.Join(root, "pipe"), 0o640)
 	want := snapshot(t, root)
-	take(t, s, "first")
+	take(t, projectStore, "first")
 	os.Chmod(filepath.Join(root, "pipe"), 0o600)
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreKeepsNamedPipeAfterPrune(t *testing.T) {
-	s, root := newProject(t)
-	take(t, s, "first")
+	projectStore, root := newProject(t)
+	take(t, projectStore, "first")
 	syscall.Mkfifo(filepath.Join(root, "src", "pipe"), 0o640)
-	take(t, s, "with pipe")
+	take(t, projectStore, "with pipe")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "later")
 	want := snapshot(t, root)
-	take(t, s, "later")
-	if _, err := s.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
+	take(t, projectStore, "later")
+	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 3, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 3, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
@@ -519,66 +519,66 @@ func newGitProject(t *testing.T) (*store.Store, string) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	os.RemoveAll(filepath.Join(root, ".git"))
 	runIn(t, root, "git", "init", "-q")
 	runIn(t, root, "git", "-c", "user.name=test", "-c", "user.email=test@example.com", "add", "-A")
 	runIn(t, root, "git", "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "initial")
-	return s, root
+	return projectStore, root
 }
 
 func TestRestoreAfterGitResetHard(t *testing.T) {
-	s, root := newGitProject(t)
+	projectStore, root := newGitProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main // uncommitted work\n")
 	want := snapshot(t, root)
-	take(t, s, "before reset")
+	take(t, projectStore, "before reset")
 
 	runIn(t, root, "git", "reset", "-q", "--hard")
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreAfterGitCleanFdx(t *testing.T) {
-	s, root := newGitProject(t)
+	projectStore, root := newGitProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "untracked notes\n")
 	testutil.WriteFile(t, filepath.Join(root, "config.local.json"), "{}\n")
 	want := snapshot(t, root)
-	take(t, s, "before clean")
+	take(t, projectStore, "before clean")
 
 	runIn(t, root, "git", "clean", "-q", "-fdx")
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreAfterXargsDeletion(t *testing.T) {
-	s, root := newProject(t)
+	projectStore, root := newProject(t)
 	want := snapshot(t, root)
-	take(t, s, "before xargs")
+	take(t, projectStore, "before xargs")
 
 	runIn(t, root, "sh", "-c", "find . -name '*.go' -print0 | xargs -0 rm -f")
 
-	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
 }
 
 func TestRestoreReportsUnstableFiles(t *testing.T) {
-	s, root := newProject(t)
-	take(t, s, "first")
-	manifest, _ := s.Manifest(1)
+	projectStore, root := newProject(t)
+	take(t, projectStore, "first")
+	manifest, _ := projectStore.Manifest(1)
 	manifest.Unstable = []string{"README.md"}
 	data, _ := json.Marshal(manifest)
-	os.WriteFile(filepath.Join(s.Dir(), "layers", "1", "manifest.json"), data, 0o600)
+	os.WriteFile(filepath.Join(projectStore.Dir(), "layers", "1", "manifest.json"), data, 0o600)
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "damaged")
 
-	changes, err := Apply(s, 1, (*store.Store).Take)
+	changes, err := Apply(projectStore, 1, (*store.Store).Take)
 	if err != nil {
 		t.Fatal(err)
 	}

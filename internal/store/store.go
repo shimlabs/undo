@@ -46,7 +46,7 @@ type Store struct {
 type config struct {
 	Format     int    `json:"format"`
 	Root       string `json:"root"`
-	IsCopyMode bool   `json:"copy"`
+	IsCopyMode bool   `json:"copy_mode"`
 }
 
 // DefaultHome returns the directory that holds the stores of all projects:

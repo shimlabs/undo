@@ -27,18 +27,18 @@ func newServerProject(t *testing.T) (*store.Store, string, string) {
 	t.Cleanup(func() { os.RemoveAll(socketDir) })
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
-	s, err := store.Create(t.TempDir(), root)
+	projectStore, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, root, socketDir
+	return projectStore, root, socketDir
 }
 
 // runServer runs Serve until the test ends, then stops it and waits for it to
 // exit before the test's directories are removed. It returns once the server
 // accepts connections, with a channel that receives Serve's result and a
 // function that stops the server early.
-func runServer(t *testing.T, s *store.Store, options Options) (done chan error, stop func()) {
+func runServer(t *testing.T, projectStore *store.Store, options Options) (done chan error, stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	ready := make(chan struct{})
@@ -46,7 +46,7 @@ func runServer(t *testing.T, s *store.Store, options Options) (done chan error, 
 	result := make(chan error, 1)
 	exited := make(chan struct{})
 	go func() {
-		result <- Serve(ctx, s, options)
+		result <- Serve(ctx, projectStore, options)
 		close(exited)
 	}()
 	t.Cleanup(func() {
@@ -63,20 +63,20 @@ func runServer(t *testing.T, s *store.Store, options Options) (done chan error, 
 	return result, cancel
 }
 
-func checkpointCount(t *testing.T, client Client, s *store.Store) int {
+func checkpointCount(t *testing.T, client Client, projectStore *store.Store) int {
 	t.Helper()
-	status, err := client.Status(s)
+	status, err := client.Status(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return status.CheckpointCount
 }
 
-func waitForCheckpointCount(t *testing.T, s *store.Store, want int) {
+func waitForCheckpointCount(t *testing.T, projectStore *store.Store, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		checkpoints, err := s.List()
+		checkpoints, err := projectStore.List()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,37 +90,37 @@ func waitForCheckpointCount(t *testing.T, s *store.Store, want int) {
 	}
 }
 
-func takeEdits(t *testing.T, client Client, s *store.Store, root string, count int) {
+func takeEdits(t *testing.T, client Client, projectStore *store.Store, root string, count int) {
 	t.Helper()
 	for i := range count {
 		testutil.WriteFile(t, filepath.Join(root, "main.go"), fmt.Sprintf("package main // %d", i))
-		if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
+		if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
 func TestCheckpointUsesRunningServer(t *testing.T) {
-	s, root, socketDir := newServerProject(t)
-	runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
+	projectStore, root, socketDir := newServerProject(t)
+	runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 	client := Client{SocketDir: socketDir}
 
-	takeEdits(t, client, s, root, 2)
+	takeEdits(t, client, projectStore, root, 2)
 
-	if count := checkpointCount(t, client, s); count != 2 {
+	if count := checkpointCount(t, client, projectStore); count != 2 {
 		t.Fatalf("the server took %d checkpoints, want 2", count)
 	}
-	latest, _, _ := s.Latest()
-	manifest, _ := s.Manifest(latest.ID)
+	latest, _, _ := projectStore.Latest()
+	manifest, _ := projectStore.Manifest(latest.ID)
 	if _, ok := manifest.Changed["main.go"]; !ok {
 		t.Fatalf("layer %d = %+v, want main.go", latest.ID, manifest)
 	}
 }
 
 func TestCheckpointFallsBackWithoutServer(t *testing.T) {
-	s, root, socketDir := newServerProject(t)
+	projectStore, root, socketDir := newServerProject(t)
 
-	checkpoint, err := Client{SocketDir: socketDir}.Checkpoint(s, store.CheckpointOptions{Label: "no server", Dir: root})
+	checkpoint, err := Client{SocketDir: socketDir}.Checkpoint(projectStore, store.CheckpointOptions{Label: "no server", Dir: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,27 +130,27 @@ func TestCheckpointFallsBackWithoutServer(t *testing.T) {
 }
 
 func TestCheckpointStartsServer(t *testing.T) {
-	s, root, socketDir := newServerProject(t)
+	projectStore, root, socketDir := newServerProject(t)
 	isStarted := false
 	client := Client{SocketDir: socketDir, Start: func(string) (<-chan error, error) {
 		isStarted = true
-		runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
+		runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 		return nil, nil
 	}}
 
-	if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+	if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	if !isStarted {
 		t.Fatal("Start was not called")
 	}
-	if count := checkpointCount(t, client, s); count != 1 {
+	if count := checkpointCount(t, client, projectStore); count != 1 {
 		t.Fatalf("the started server took %d checkpoints, want 1", count)
 	}
 }
 
 func TestCheckpointRemembersFailedStart(t *testing.T) {
-	s, root, socketDir := newServerProject(t)
+	projectStore, root, socketDir := newServerProject(t)
 	starts := 0
 	client := Client{SocketDir: socketDir, Start: func(string) (<-chan error, error) {
 		starts++
@@ -161,7 +161,7 @@ func TestCheckpointRemembersFailedStart(t *testing.T) {
 
 	began := time.Now()
 	for range 3 {
-		if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
+		if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -171,23 +171,23 @@ func TestCheckpointRemembersFailedStart(t *testing.T) {
 	if starts != 1 {
 		t.Fatalf("the watcher was started %d times, want once until the failure is old", starts)
 	}
-	if reason, isRecent := StartFailure(s); !isRecent || !strings.Contains(reason, "watch limit") {
+	if reason, isRecent := StartFailure(projectStore); !isRecent || !strings.Contains(reason, "watch limit") {
 		t.Fatalf("StartFailure = %q, %v", reason, isRecent)
 	}
 }
 
 func TestCheckpointLogsWhyItScanned(t *testing.T) {
-	s, root, _ := newServerProject(t)
+	projectStore, root, _ := newServerProject(t)
 	shared := t.TempDir()
 	if err := os.Chmod(shared, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	client := Client{SocketDir: shared, Start: func(string) (<-chan error, error) { return nil, nil }}
 
-	if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+	if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	if last := s.LastError(); !strings.Contains(last, "private") {
+	if last := projectStore.LastError(); !strings.Contains(last, "private") {
 		t.Fatalf("last error = %q, want the socket directory problem", last)
 	}
 }
@@ -204,8 +204,8 @@ func TestSocketDirRefusesSymlink(t *testing.T) {
 }
 
 func TestServeStopsWhenIdle(t *testing.T) {
-	s, _, socketDir := newServerProject(t)
-	done, _ := runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: 200 * time.Millisecond})
+	projectStore, _, socketDir := newServerProject(t)
+	done, _ := runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: 200 * time.Millisecond})
 
 	select {
 	case err := <-done:
@@ -218,8 +218,8 @@ func TestServeStopsWhenIdle(t *testing.T) {
 }
 
 func TestServeStopsWhenCanceled(t *testing.T) {
-	s, _, socketDir := newServerProject(t)
-	done, stop := runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
+	projectStore, _, socketDir := newServerProject(t)
+	done, stop := runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 
 	stop()
 	select {
@@ -230,29 +230,29 @@ func TestServeStopsWhenCanceled(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("server kept running after its context was canceled")
 	}
-	if status, _ := (Client{SocketDir: socketDir}).Status(s); status.IsRunning {
+	if status, _ := (Client{SocketDir: socketDir}).Status(projectStore); status.IsRunning {
 		t.Fatal("server still answers after stopping")
 	}
 }
 
 func TestSecondServerExits(t *testing.T) {
-	s, _, socketDir := newServerProject(t)
-	runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
+	projectStore, _, socketDir := newServerProject(t)
+	runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 
-	if err := Serve(t.Context(), s, Options{SocketDir: socketDir, IdleTimeout: time.Minute}); !errors.Is(err, ErrRunning) {
+	if err := Serve(t.Context(), projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute}); !errors.Is(err, ErrRunning) {
 		t.Fatalf("second Serve = %v, want ErrRunning", err)
 	}
 }
 
 func TestServerPrunesWhenQuiet(t *testing.T) {
-	s, root, socketDir := newServerProject(t)
+	projectStore, root, socketDir := newServerProject(t)
 	keepOne := store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
-	runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute, Limits: keepOne, PruneQuietPeriod: 500 * time.Millisecond})
+	runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute, Limits: keepOne, PruneQuietPeriod: 500 * time.Millisecond})
 
-	takeEdits(t, Client{SocketDir: socketDir}, s, root, 3)
+	takeEdits(t, Client{SocketDir: socketDir}, projectStore, root, 3)
 
-	if checkpoints, _ := s.List(); len(checkpoints) != 3 {
+	if checkpoints, _ := projectStore.List(); len(checkpoints) != 3 {
 		t.Fatalf("checkpoints = %d right after the last request, want 3 until the server is quiet", len(checkpoints))
 	}
-	waitForCheckpointCount(t, s, 1)
+	waitForCheckpointCount(t, projectStore, 1)
 }

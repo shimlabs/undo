@@ -63,18 +63,18 @@ func (s *Store) mergeExpired(now time.Time, limits Limits) (int, error) {
 	}
 	defer unlock()
 
-	list, err := s.List()
+	checkpoints, err := s.List()
 	if err != nil {
 		return 0, err
 	}
 	count := 0
-	for count < len(list)-1 && (now.Sub(list[count].Time) > limits.MaxAge || len(list)-count > limits.MaxCount) {
+	for count < len(checkpoints)-1 && (now.Sub(checkpoints[count].Time) > limits.MaxAge || len(checkpoints)-count > limits.MaxCount) {
 		count++
 	}
 	if count == 0 {
 		return 0, nil
 	}
-	_, err = s.merge(list[count-1].ID)
+	_, err = s.merge(checkpoints[count-1].ID)
 	return count, err
 }
 
@@ -88,13 +88,13 @@ func (s *Store) mergeUntilUnder(maxBytes, usage int64) (int, error) {
 	}
 	defer unlock()
 
-	list, err := s.List()
+	checkpoints, err := s.List()
 	if err != nil {
 		return 0, err
 	}
 	count := 0
-	for ; usage > maxBytes && count < len(list)-1; count++ {
-		freed, err := s.merge(list[count].ID)
+	for ; usage > maxBytes && count < len(checkpoints)-1; count++ {
+		freed, err := s.merge(checkpoints[count].ID)
 		if err != nil {
 			return count, err
 		}

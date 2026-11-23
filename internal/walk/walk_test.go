@@ -42,8 +42,8 @@ func TestDirsVisitsEveryDirectoryOnce(t *testing.T) {
 	}
 
 	want := []string{""}
-	for _, kids := range children {
-		want = append(want, kids...)
+	for _, subdirs := range children {
+		want = append(want, subdirs...)
 	}
 	slices.Sort(want)
 	slices.Sort(visited)

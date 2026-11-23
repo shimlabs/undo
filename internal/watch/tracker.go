@@ -41,8 +41,8 @@ type Tracker struct {
 
 	mu             sync.Mutex
 	dirty          map[string]bool
-	needsFullScan  bool
-	isRulesChanged bool
+	shouldRescan   bool
+	hasRulesChange bool
 	markers        map[string]chan struct{}
 
 	listing    tree.Listing
@@ -52,8 +52,8 @@ type Tracker struct {
 
 // NewTracker starts watching the project of s. Its first checkpoint compares
 // the whole project, because changes made before it started are not known.
-func NewTracker(s *store.Store) (*Tracker, error) {
-	markerDir := s.FilePath("markers")
+func NewTracker(projectStore *store.Store) (*Tracker, error) {
+	markerDir := projectStore.FilePath("markers")
 	if err := os.MkdirAll(markerDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -62,12 +62,12 @@ func NewTracker(s *store.Store) (*Tracker, error) {
 		return nil, err
 	}
 	t := &Tracker{
-		store:         s,
-		root:          s.Root(),
-		markerDir:     markerDir,
-		dirty:         map[string]bool{},
-		needsFullScan: true,
-		markers:       map[string]chan struct{}{},
+		store:        projectStore,
+		root:         projectStore.Root(),
+		markerDir:    markerDir,
+		dirty:        map[string]bool{},
+		shouldRescan: true,
+		markers:      map[string]chan struct{}{},
 	}
 	if err := t.startStream(); err != nil {
 		return nil, err
@@ -132,10 +132,10 @@ func (t *Tracker) handleEvents(events []fsnotify.Event) {
 			continue
 		}
 		if event.ShouldRescan {
-			t.needsFullScan = true
+			t.shouldRescan = true
 		}
 		if event.Path == filepath.Join(t.root, ".undoignore") {
-			t.isRulesChanged = true
+			t.hasRulesChange = true
 		}
 		if t.isInRoot(event.Path) {
 			t.dirty[event.Path] = true
@@ -157,63 +157,63 @@ func (t *Tracker) isInRoot(path string) bool {
 func (t *Tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint, error) {
 	isDelivered := t.waitForMarker()
 	t.mu.Lock()
-	dirty, needsFullScan, isRulesChanged := t.dirty, t.needsFullScan || !isDelivered, t.isRulesChanged
-	t.dirty, t.needsFullScan, t.isRulesChanged = map[string]bool{}, false, false
+	dirty, shouldRescan, hasRulesChange := t.dirty, t.shouldRescan || !isDelivered, t.hasRulesChange
+	t.dirty, t.shouldRescan, t.hasRulesChange = map[string]bool{}, false, false
 	t.mu.Unlock()
 
-	if isRulesChanged {
+	if hasRulesChange {
 		// Paths the old rules excluded were never tracked, and a restore would
 		// treat them as created after the checkpoint.
 		t.stream.Close()
 		if err := t.startStream(); err != nil {
 			return store.Checkpoint{}, err
 		}
-		needsFullScan = true
+		shouldRescan = true
 	}
-	cp, err := t.checkpoint(options, dirty, needsFullScan)
+	checkpoint, err := t.checkpoint(options, dirty, shouldRescan)
 	if err != nil {
 		t.mu.Lock()
-		t.needsFullScan = true
+		t.shouldRescan = true
 		t.mu.Unlock()
 		t.listing = nil
 	}
-	return cp, err
+	return checkpoint, err
 }
 
-func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]bool, needsFullScan bool) (store.Checkpoint, error) {
+func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]bool, shouldRescan bool) (store.Checkpoint, error) {
 	latest, hasLatest, err := t.store.Latest()
 	if err != nil {
 		return store.Checkpoint{}, err
 	}
 	if !hasLatest {
-		cp, err := t.store.Take(options)
+		checkpoint, err := t.store.Take(options)
 		if err != nil {
-			return cp, err
+			return checkpoint, err
 		}
 		// Take saved the listing it scanned, and every change since then is in
 		// dirty, so the next checkpoint does not need a full scan.
-		t.listing, err = t.store.ListingAt(cp.ID)
-		t.lastID = cp.ID
-		return cp, err
+		t.listing, err = t.store.ListingAt(checkpoint.ID)
+		t.lastID = checkpoint.ID
+		return checkpoint, err
 	}
 	if t.listing == nil || latest.ID != t.lastID {
 		if t.listing, err = t.store.ListingAt(latest.ID); err != nil {
 			return store.Checkpoint{}, err
 		}
 		t.lastID = latest.ID
-		needsFullScan = true
+		shouldRescan = true
 	}
 
 	var changed, deleted []string
-	if !needsFullScan {
+	if !shouldRescan {
 		changed, deleted, err = t.applyDirty(dirty)
 		if errors.Is(err, fs.ErrPermission) {
-			needsFullScan = true
+			shouldRescan = true
 		} else if err != nil {
 			return store.Checkpoint{}, err
 		}
 	}
-	if needsFullScan {
+	if shouldRescan {
 		current, skipped, err := tree.ScanWithSkipped(t.root, t.matcher.Load())
 		if err != nil {
 			return store.Checkpoint{}, err
@@ -222,7 +222,7 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		t.listing, t.unreadable = current, skipped.Unreadable
 	}
 
-	cp, err := t.store.Commit(latest.ID, options, store.Changes{
+	checkpoint, err := t.store.Commit(latest.ID, options, store.Changes{
 		Listing:         t.listing,
 		Changed:         changed,
 		Deleted:         deleted,
@@ -236,8 +236,8 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 	if err != nil {
 		return store.Checkpoint{}, err
 	}
-	t.lastID = cp.ID
-	return cp, nil
+	t.lastID = checkpoint.ID
+	return checkpoint, nil
 }
 
 // waitForMarker writes a file next to the store and waits for its event.
@@ -326,11 +326,11 @@ func (t *Tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
+		if treeEntry, ok := info.Sys().(*syscall.Stat_t); ok && treeEntry.Nlink > 1 {
 			if inodes == nil {
 				inodes = map[uint64]bool{}
 			}
-			inodes[stat.Ino] = true
+			inodes[treeEntry.Ino] = true
 		}
 	}
 	if inodes == nil {
@@ -396,11 +396,11 @@ func (t *Tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir str
 			}
 			return nil
 		}
-		stat, err := tree.Stat(path)
+		treeEntry, err := tree.Stat(path)
 		if err != nil {
 			return nil
 		}
-		changes.update(rel, stat)
+		changes.update(rel, treeEntry)
 		return nil
 	})
 }

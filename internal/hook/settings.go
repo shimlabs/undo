@@ -57,8 +57,8 @@ func (h hookGroups) isInstalled(path, agent string) bool {
 
 // isUndoGroup reports whether entry is a group holding only undo's handler.
 func isUndoGroup(entry any, agent string) bool {
-	list := handlers(entry)
-	return len(list) > 0 && !slices.ContainsFunc(list, func(handler any) bool { return !isUndoHandler(agent)(handler) })
+	handlers := handlers(entry)
+	return len(handlers) > 0 && !slices.ContainsFunc(handlers, func(handler any) bool { return !isUndoHandler(agent)(handler) })
 }
 
 // removeHandlers removes undo's handlers from every group and drops groups
@@ -67,16 +67,16 @@ func removeHandlers(groups []any, agent string) []any {
 	var kept []any
 	for _, entry := range groups {
 		group, ok := entry.(map[string]any)
-		list := handlers(entry)
-		if !ok || list == nil {
+		handlers := handlers(entry)
+		if !ok || handlers == nil {
 			kept = append(kept, entry)
 			continue
 		}
-		remaining := slices.DeleteFunc(slices.Clone(list), isUndoHandler(agent))
+		remaining := slices.DeleteFunc(slices.Clone(handlers), isUndoHandler(agent))
 		if len(remaining) == 0 {
 			continue
 		}
-		if len(remaining) < len(list) {
+		if len(remaining) < len(handlers) {
 			group = maps.Clone(group)
 			group["hooks"] = remaining
 		}
@@ -87,8 +87,8 @@ func removeHandlers(groups []any, agent string) []any {
 
 func handlers(entry any) []any {
 	group, _ := entry.(map[string]any)
-	list, _ := group["hooks"].([]any)
-	return list
+	handlers, _ := group["hooks"].([]any)
+	return handlers
 }
 
 // hookList installs into a JSON settings file where hooks.<event> lists

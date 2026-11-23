@@ -70,8 +70,8 @@ var settingsCases = []struct {
 	{gemini, ".gemini/settings.json", `{"theme": "dark", "hooks": {"BeforeTool": [{"matcher": "read_file", "hooks": [{"type": "command", "command": "audit"}]}]}}`, "theme"},
 }
 
-// eventOf returns the settings key an agent's hooks go under.
-func eventOf(agent Agent) string {
+// settingsEvent returns the settings key an agent's hooks go under.
+func settingsEvent(agent Agent) string {
 	switch installer := agent.installer.(type) {
 	case hookGroups:
 		return installer.event
@@ -83,7 +83,7 @@ func eventOf(agent Agent) string {
 
 func undoEntries(t *testing.T, agent Agent, settings map[string]any) (all []any, ours []int) {
 	t.Helper()
-	all = hookEntries(settings, eventOf(agent))
+	all = hookEntries(settings, settingsEvent(agent))
 	for i, entry := range all {
 		data, _ := json.Marshal(entry)
 		if strings.Contains(string(data), " hook "+agent.Name) {
@@ -130,7 +130,7 @@ func TestReinstallUpdatesInPlace(t *testing.T) {
 			testutil.WriteFile(t, path, tc.existing)
 			tc.agent.Install(privateBinary(t, "bin"))
 			settings := readJSONFile(t, path)
-			setHookEntries(settings, eventOf(tc.agent), append(hookEntries(settings, eventOf(tc.agent)), map[string]any{"matcher": "later"}))
+			setHookEntries(settings, settingsEvent(tc.agent), append(hookEntries(settings, settingsEvent(tc.agent)), map[string]any{"matcher": "later"}))
 			writeSettings(path, settings)
 
 			updated := privateBinary(t, "new-bin")

@@ -36,7 +36,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 	if _, err := s.Checkpoint(id); err != nil {
 		return nil, err
 	}
-	list, err := s.List()
+	checkpoints, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -48,11 +48,11 @@ func (s *Store) State(id int) (map[string]Source, error) {
 	for rel, entry := range base {
 		state[rel] = Source{Entry: entry}
 	}
-	for _, cp := range list {
-		if cp.ID > id {
+	for _, checkpoint := range checkpoints {
+		if checkpoint.ID > id {
 			break
 		}
-		manifest, err := s.Manifest(cp.ID)
+		manifest, err := s.Manifest(checkpoint.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -60,7 +60,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 			delete(state, rel)
 		}
 		for rel, entry := range manifest.Changed {
-			state[rel] = Source{Entry: entry, Layer: cp.ID}
+			state[rel] = Source{Entry: entry, Layer: checkpoint.ID}
 		}
 	}
 	return state, nil

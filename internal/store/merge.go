@@ -50,16 +50,16 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	list, err := s.List()
+	checkpoints, err := s.List()
 	if err != nil {
 		return 0, err
 	}
 	var freed int64
-	for _, cp := range list {
-		if cp.ID > pending.Through {
+	for _, checkpoint := range checkpoints {
+		if checkpoint.ID > pending.Through {
 			break
 		}
-		layerFreed, err := s.mergeLayer(cp.ID, base)
+		layerFreed, err := s.mergeLayer(checkpoint.ID, base)
 		if err != nil {
 			return freed, err
 		}
@@ -68,7 +68,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err := writeGob(s.baseListingPath(), base); err != nil {
 		return freed, err
 	}
-	remaining := slices.DeleteFunc(list, func(cp Checkpoint) bool { return cp.ID <= pending.Through })
+	remaining := slices.DeleteFunc(checkpoints, func(checkpoint Checkpoint) bool { return checkpoint.ID <= pending.Through })
 	if err := s.writeIndex(remaining); err != nil {
 		return freed, err
 	}

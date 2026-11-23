@@ -104,7 +104,7 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 		return Checkpoint{}, err
 	}
 	changed, deleted := tree.Changed(previous, current)
-	cp, err := s.commit(latest.ID, options, Changes{
+	checkpoint, err := s.commit(latest.ID, options, Changes{
 		Listing:         current,
 		Changed:         changed,
 		Deleted:         deleted,
@@ -114,7 +114,7 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	return cp, s.saveListing(cp.ID, current)
+	return checkpoint, s.saveListing(checkpoint.ID, current)
 }
 
 // Commit records a checkpoint from changes found by a caller that tracks the
@@ -162,8 +162,8 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 		return Checkpoint{}, err
 	}
 	options.Label = shortLabel(options.Label)
-	cp := Checkpoint{ID: id, Time: time.Now(), CheckpointOptions: options}
-	return cp, s.appendIndex(cp)
+	checkpoint := Checkpoint{ID: id, Time: time.Now(), CheckpointOptions: options}
+	return checkpoint, s.appendIndex(checkpoint)
 }
 
 // shortLabel keeps the first line of label, cut to maxLabelLength

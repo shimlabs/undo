@@ -16,14 +16,14 @@ func TestCreateMakesStoreUnderHome(t *testing.T) {
 	home := t.TempDir()
 	root := t.TempDir()
 
-	s, err := Create(home, root)
+	projectStore, err := Create(home, root)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	want := filepath.Join(home, project.ID(root))
-	if s.Dir() != want {
-		t.Fatalf("Dir() = %q, want %q", s.Dir(), want)
+	if projectStore.Dir() != want {
+		t.Fatalf("Dir() = %q, want %q", projectStore.Dir(), want)
 	}
 	info, err := os.Stat(filepath.Join(want, "layers"))
 	if err != nil {
@@ -48,12 +48,12 @@ func TestOpenNeverCreates(t *testing.T) {
 func TestCreatePutsStoreNextToProjectWhenHomeIsInside(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 
-	s, err := Create(filepath.Join(root, "Library", "undo"), root)
+	projectStore, err := Create(filepath.Join(root, "Library", "undo"), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(filepath.Dir(root), ".undo-"+project.ID(root)); s.Dir() != want {
-		t.Fatalf("store = %s, want %s", s.Dir(), want)
+	if want := filepath.Join(filepath.Dir(root), ".undo-"+project.ID(root)); projectStore.Dir() != want {
+		t.Fatalf("store = %s, want %s", projectStore.Dir(), want)
 	}
 }
 
@@ -98,11 +98,11 @@ func TestCreateRefusesHomeAndDiskRoot(t *testing.T) {
 
 func TestOpenRefusesNewerFormat(t *testing.T) {
 	home, root := t.TempDir(), t.TempDir()
-	s, err := Create(home, root)
+	projectStore, err := Create(home, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(s.configPath(), config{Format: format + 1, Root: root})
+	writeJSON(projectStore.configPath(), config{Format: format + 1, Root: root})
 
 	if _, err := Open(home, root); !errors.Is(err, ErrNewerFormat) {
 		t.Fatalf("Open = %v, want ErrNewerFormat", err)
@@ -141,8 +141,8 @@ func TestCreateRefusesPlantedStoreNextToProject(t *testing.T) {
 				os.Chmod(planted, 0o777)
 			}
 
-			if s, err := Create(filepath.Join(root, "Library", "undo"), root); err == nil {
-				t.Fatalf("Create adopted a %s at %s", plant, s.Dir())
+			if projectStore, err := Create(filepath.Join(root, "Library", "undo"), root); err == nil {
+				t.Fatalf("Create adopted a %s at %s", plant, projectStore.Dir())
 			}
 		})
 	}
@@ -162,18 +162,18 @@ func TestCreateRefusesSymlinkedHome(t *testing.T) {
 }
 
 func TestStoredPathsCannotLeaveProject(t *testing.T) {
-	s, root := newProject(t, map[string]string{"a.txt": "a"})
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
 	outside, _ := filepath.EvalSymlinks(t.TempDir())
 	testutil.WriteFile(t, filepath.Join(outside, "precious"), "data")
-	s.Take(CheckpointOptions{Label: "first", Dir: root})
-	escape, _ := filepath.Rel(s.baseDir(), outside)
-	writeJSON(filepath.Join(s.layerDir(1), "manifest.json"), Manifest{Deleted: []string{escape}})
+	projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
+	escape, _ := filepath.Rel(projectStore.baseDir(), outside)
+	writeJSON(filepath.Join(projectStore.layerDir(1), "manifest.json"), Manifest{Deleted: []string{escape}})
 
-	if _, err := s.State(1); err == nil {
+	if _, err := projectStore.State(1); err == nil {
 		t.Fatal("State accepted a stored path outside the project")
 	}
-	writeJSON(s.mergePath(), pendingMerge{Through: 1})
-	s.Take(CheckpointOptions{Label: "second", Dir: root})
+	writeJSON(projectStore.mergePath(), pendingMerge{Through: 1})
+	projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
 	if _, err := os.Stat(filepath.Join(outside, "precious")); err != nil {
 		t.Fatalf("a planted merge deleted a file outside the store: %v", err)
 	}

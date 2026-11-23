@@ -32,15 +32,15 @@ func (s *Store) List() ([]Checkpoint, error) {
 
 // Checkpoint returns checkpoint id.
 func (s *Store) Checkpoint(id int) (Checkpoint, error) {
-	list, err := s.List()
+	checkpoints, err := s.List()
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	i := slices.IndexFunc(list, func(cp Checkpoint) bool { return cp.ID == id })
+	i := slices.IndexFunc(checkpoints, func(checkpoint Checkpoint) bool { return checkpoint.ID == id })
 	if i < 0 {
 		return Checkpoint{}, fmt.Errorf("no checkpoint %d", id)
 	}
-	return list[i], nil
+	return checkpoints[i], nil
 }
 
 // Latest returns the most recent checkpoint, and false if there is none. It
@@ -67,34 +67,34 @@ func (s *Store) Latest() (Checkpoint, bool, error) {
 	if offset > 0 {
 		_, tail, _ = bytes.Cut(tail, []byte("\n"))
 	}
-	list, err := parseIndex(tail)
-	if err != nil || len(list) == 0 {
+	checkpoints, err := parseIndex(tail)
+	if err != nil || len(checkpoints) == 0 {
 		return Checkpoint{}, false, err
 	}
-	return list[len(list)-1], true, nil
+	return checkpoints[len(checkpoints)-1], true, nil
 }
 
 // parseIndex parses index lines. A last line without a newline was cut off by
 // a crash while it was written, and is ignored.
 func parseIndex(data []byte) ([]Checkpoint, error) {
-	var list []Checkpoint
+	var checkpoints []Checkpoint
 	for len(data) > 0 {
 		line, rest, isComplete := bytes.Cut(data, []byte("\n"))
 		if !isComplete {
 			break
 		}
 		data = rest
-		var cp Checkpoint
-		if err := json.Unmarshal(line, &cp); err != nil {
+		var checkpoint Checkpoint
+		if err := json.Unmarshal(line, &checkpoint); err != nil {
 			return nil, err
 		}
-		list = append(list, cp)
+		checkpoints = append(checkpoints, checkpoint)
 	}
-	return list, nil
+	return checkpoints, nil
 }
 
-func (s *Store) appendIndex(cp Checkpoint) error {
-	line, err := json.Marshal(cp)
+func (s *Store) appendIndex(checkpoint Checkpoint) error {
+	line, err := json.Marshal(checkpoint)
 	if err != nil {
 		return err
 	}
@@ -112,10 +112,10 @@ func (s *Store) appendIndex(cp Checkpoint) error {
 	return err
 }
 
-func (s *Store) writeIndex(list []Checkpoint) error {
+func (s *Store) writeIndex(checkpoints []Checkpoint) error {
 	var buf bytes.Buffer
-	for _, cp := range list {
-		line, err := json.Marshal(cp)
+	for _, checkpoint := range checkpoints {
+		line, err := json.Marshal(checkpoint)
 		if err != nil {
 			return err
 		}
