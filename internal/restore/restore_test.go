@@ -506,7 +506,7 @@ func TestPlanRightAfterRestoreIsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changes.Len() != 0 {
+	if len(changes.Written)+len(changes.Removed) != 0 {
 		t.Fatalf("restoring checkpoint 1 again would write %v and remove %v", changes.Written, changes.Removed)
 	}
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "changed again")

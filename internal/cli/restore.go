@@ -220,7 +220,7 @@ func keepReasons() map[restore.KeepReason]string {
 		restore.KeptUnreadable: "undo cannot read it; fix its permissions and run undo again",
 		restore.KeptLocked:     "it or its folder is locked; unlock it and run undo again",
 		restore.KeptExcluded:   "excluded since the checkpoint; remove the rule from " + ".undoignore to restore it",
-		restore.KeptInTheWay:   "it holds files undo leaves alone, such as excluded ones",
+		restore.KeptOccupied:   "it holds files undo leaves alone, such as excluded ones",
 	}
 }
 
