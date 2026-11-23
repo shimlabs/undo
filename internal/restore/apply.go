@@ -89,11 +89,13 @@ func (p *restorePlan) removals() []string {
 func (p *restorePlan) removeAll(paths []string) error {
 	tree.SortDeepestFirst(paths)
 	parents := tree.NewParentChecker(p.root)
+	parent := parentDir{root: p.projectRoot}
+	defer parent.close()
 	for _, rel := range paths {
 		if err := parents.Check(rel); err != nil {
 			return err
 		}
-		if err := p.makeParentWritable(rel); err != nil {
+		if _, err := parent.open(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		err := p.projectRoot.Remove(filepath.FromSlash(rel))
@@ -343,16 +345,6 @@ func (p *restorePlan) restoreDirModeAndTimes(paths []string) ([]string, error) {
 
 func (p *restorePlan) path(rel string) string {
 	return filepath.Join(p.root, filepath.FromSlash(rel))
-}
-
-// makeParentWritable lets the restore remove rel from its directory. The
-// directory's recorded mode is set again at the end.
-func (p *restorePlan) makeParentWritable(rel string) error {
-	parent := filepath.FromSlash(path.Dir(rel))
-	if info, err := p.projectRoot.Lstat(parent); err == nil && info.IsDir() && info.Mode().Perm()&0o300 != 0o300 {
-		return p.projectRoot.Chmod(parent, info.Mode().Perm()|0o300)
-	}
-	return nil
 }
 
 func (p *restorePlan) setModeAndTimes(rel string, entry tree.Entry) error {
