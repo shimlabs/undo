@@ -15,6 +15,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/testutil"
 	"github.com/shimlabs/undo/internal/tree"
+	"golang.org/x/sys/unix"
 )
 
 func take(t *testing.T, projectStore *Store, label string) Checkpoint {
@@ -523,4 +524,47 @@ func TestUsageEstimateAddsLaterCheckpoints(t *testing.T) {
 	if later.StoredBytes == 0 || estimate != measured+later.StoredBytes {
 		t.Fatalf("estimate = %d, want %d measured plus %d stored by the later checkpoint", estimate, measured, later.StoredBytes)
 	}
+}
+
+func TestTakeWithChangesInManyDirectories(t *testing.T) {
+	setOpenFileLimit(t, 512)
+	projectStore, _ := newProject(t, map[string]string{"a.txt": "a"})
+	take(t, projectStore, "first")
+	for i := range 600 {
+		dir := filepath.Join(projectStore.Root(), fmt.Sprintf("dir%04d", i))
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		testutil.WriteFile(t, filepath.Join(dir, "file.txt"), "content")
+	}
+	checkpoint := take(t, projectStore, "second")
+	manifest, err := projectStore.Manifest(checkpoint.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 600 {
+		if rel := fmt.Sprintf("dir%04d/file.txt", i); manifest.Changed[rel] == (tree.Entry{}) {
+			t.Fatalf("checkpoint is missing %s", rel)
+		}
+	}
+}
+
+// setOpenFileLimit lowers the soft limit on open files for the rest of the
+// test, so code that opens a descriptor per path fails within reach.
+func setOpenFileLimit(t *testing.T, limit uint64) {
+	t.Helper()
+	var saved unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
+		t.Fatal(err)
+	}
+	lowered := saved
+	lowered.Cur = limit
+	if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &lowered); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
+			t.Error(err)
+		}
+	})
 }

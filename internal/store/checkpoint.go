@@ -394,36 +394,10 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		return Manifest{}, err
 	}
 	defer layer.Close()
-	// Many changed files share a directory, so each one is created and
-	// opened once, in the project and in the layer.
-	dirs := map[string]dirPair{}
-	defer func() {
-		for _, pair := range dirs {
-			pair.project.Close()
-			pair.layer.Close()
-		}
-	}()
-	for _, rel := range files {
-		dir := path.Dir(rel)
-		if _, isOpen := dirs[dir]; isOpen {
-			continue
-		}
-		pair, err := s.openDirPair(layer, dir)
-		if err != nil {
+	for _, batch := range batchByDir(files, maxOpenDirs) {
+		if err := s.cloneBatch(layer, files, batch, changes.Listing, clonedFiles); err != nil {
 			return Manifest{}, err
 		}
-		dirs[dir] = pair
-	}
-	err = parallel.For(len(files), func(i int) error {
-		entry, isStable, err := s.cloneStable(dirs[path.Dir(files[i])], files[i], changes.Listing[files[i]])
-		clonedFiles[i] = clonedFile{entry, isStable, err}
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
-			return nil
-		}
-		return err
-	})
-	if err != nil {
-		return Manifest{}, err
 	}
 	for i, rel := range files {
 		switch cloned := clonedFiles[i]; {
@@ -445,6 +419,67 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		}
 	}
 	return manifest, nil
+}
+
+// maxOpenDirs bounds how many directories a checkpoint holds open at once.
+// Each takes two descriptors, one in the project and one in the layer, and
+// some systems allow only a few thousand.
+const maxOpenDirs = 128
+
+// cloneBatch clones files[i] for each i in batch into clonedFiles[i]. Many
+// changed files share a directory, so each one is created and opened once,
+// in the project and in the layer.
+func (s *Store) cloneBatch(layer *os.Root, files []string, batch []int, listing tree.Listing, clonedFiles []clonedFile) error {
+	dirs := map[string]dirPair{}
+	defer func() {
+		for _, pair := range dirs {
+			pair.project.Close()
+			pair.layer.Close()
+		}
+	}()
+	for _, i := range batch {
+		dir := path.Dir(files[i])
+		if _, isOpen := dirs[dir]; isOpen {
+			continue
+		}
+		pair, err := s.openDirPair(layer, dir)
+		if err != nil {
+			return err
+		}
+		dirs[dir] = pair
+	}
+	return parallel.For(len(batch), func(j int) error {
+		rel := files[batch[j]]
+		entry, isStable, err := s.cloneStable(dirs[path.Dir(rel)], rel, listing[rel])
+		clonedFiles[batch[j]] = clonedFile{entry, isStable, err}
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			return nil
+		}
+		return err
+	})
+}
+
+// batchByDir groups the indexes of files so that each group holds the files
+// of at most maxDirs directories.
+func batchByDir(files []string, maxDirs int) [][]int {
+	var dirs []string
+	byDir := map[string][]int{}
+	for i, rel := range files {
+		dir := path.Dir(rel)
+		if _, isSeen := byDir[dir]; !isSeen {
+			dirs = append(dirs, dir)
+		}
+		byDir[dir] = append(byDir[dir], i)
+	}
+	var batches [][]int
+	for chunk := range slices.Chunk(dirs, maxDirs) {
+		var batch []int
+		for _, dir := range chunk {
+			batch = append(batch, byDir[dir]...)
+		}
+		batches = append(batches, batch)
+	}
+	return batches
 }
 
 // clonedFile is how cloning one changed file went.
