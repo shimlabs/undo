@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -205,7 +206,10 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 // withPending adds to the changed paths the pending ones the project still
 // holds, so the checkpoint stores them again.
 func withPending(changes Changes, pending []string) []string {
-	changed := changes.Changed
+	if len(pending) == 0 {
+		return changes.Changed
+	}
+	changed := slices.Clone(changes.Changed)
 	isChanged := setOf(changed)
 	for _, rel := range pending {
 		if _, isListed := changes.Listing[rel]; isListed && !isChanged[rel] {
