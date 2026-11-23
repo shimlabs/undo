@@ -472,6 +472,33 @@ func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
 	}
 }
 
+func TestRestoreKeepsChangedFileItCannotReadNow(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	projectStore, root := newProject(t)
+	secret := filepath.Join(root, "secret.key")
+	testutil.WriteFile(t, secret, "v1")
+	take(t, projectStore, "first")
+	testutil.WriteFile(t, secret, "v2")
+	if err := os.Chmod(secret, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(secret, 0o600) })
+
+	changes, err := Apply(projectStore, 1, (*store.Store).Take)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(secret, 0o600)
+	if data, _ := os.ReadFile(secret); string(data) != "v2" {
+		t.Fatalf("secret.key = %q, want v2 left alone, since the restore could not save it first", data)
+	}
+	if !slices.Contains(changes.Kept, "secret.key") {
+		t.Fatalf("Kept = %v, want secret.key", changes.Kept)
+	}
+}
+
 func TestRestoreReplacesChangedNamedPipe(t *testing.T) {
 	projectStore, root := newProject(t)
 	syscall.Mkfifo(filepath.Join(root, "pipe"), 0o640)

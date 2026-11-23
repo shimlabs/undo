@@ -128,7 +128,7 @@ type projectRestore struct {
 // planRestore plans a restore of checkpoint id. It never touches a path the
 // checkpoint did not save: paths its exclude rules left out, paths in
 // directories that could not be read then or now, and files that cannot be
-// read now. A path that only today's rules exclude is written back if it is
+// read now, which the safety checkpoint cannot save either. A path that only today's rules exclude is written back if it is
 // missing, but never overwritten.
 func planRestore(projectStore *store.Store, id int) (projectRestore, error) {
 	root := projectStore.Root()
@@ -160,9 +160,6 @@ func planRestore(projectStore *store.Store, id int) (projectRestore, error) {
 	for rel, entry := range current {
 		if isUnsaved(rel, entry.Kind == tree.Dir) {
 			delete(current, rel)
-		} else if _, inTarget := target[rel]; !inTarget && entry.Kind == tree.File && !isReadable(filepath.Join(root, filepath.FromSlash(rel))) {
-			delete(current, rel)
-			kept = append(kept, rel)
 		}
 	}
 	for rel, source := range target {
@@ -180,6 +177,20 @@ func planRestore(projectStore *store.Store, id int) (projectRestore, error) {
 		targetListing[rel] = source.Entry
 	}
 	written, removed := tree.Changed(current, targetListing)
+	// The safety checkpoint could not save a file undo cannot read, so the
+	// restore must not change it either.
+	isUnreadable := func(rel string) bool {
+		entry, isCurrent := current[rel]
+		if !isCurrent || entry.Kind != tree.File || isReadable(filepath.Join(root, filepath.FromSlash(rel))) {
+			return false
+		}
+		kept = append(kept, rel)
+		delete(current, rel)
+		delete(target, rel)
+		return true
+	}
+	written = slices.DeleteFunc(written, isUnreadable)
+	removed = slices.DeleteFunc(removed, isUnreadable)
 	slices.Sort(kept)
 	changes := Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable}
 	return projectRestore{root: root, target: target, current: current, changes: changes}, nil
