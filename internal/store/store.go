@@ -31,6 +31,9 @@ var (
 	// ErrUnsafeStore means a store directory exists that is not a private
 	// directory of the current user, so someone else could change it.
 	ErrUnsafeStore = errors.New("the store directory must be a directory owned by you and private to you")
+	// ErrStoreInsideProject means the project holds the store home, and no
+	// folder next to it can hold the store instead.
+	ErrStoreInsideProject = errors.New("this folder holds the undo store and has no writable parent on the same volume")
 )
 
 // Store is the data undo keeps on disk for one project.
@@ -146,7 +149,7 @@ func locate(home, root string) (string, error) {
 		}
 	}
 	if isInside {
-		return "", fmt.Errorf("%s holds the undo store and has no writable parent on the same volume: %w", root, project.ErrNotProject)
+		return "", fmt.Errorf("%s: %w", root, ErrStoreInsideProject)
 	}
 	return filepath.Join(home, id), nil
 }
