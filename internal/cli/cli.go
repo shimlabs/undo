@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"unicode"
+	"unicode/utf8"
 
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
@@ -97,7 +97,7 @@ func Run(args []string, env Env) int {
 	case errors.Is(err, store.ErrNotProject):
 		fmt.Fprintf(env.Stderr, "undo: %s.\nRun undo, or start your agent, inside a project folder.\n", err)
 	default:
-		fmt.Fprintf(env.Stderr, "undo: %s\n", err)
+		fmt.Fprintf(env.Stderr, "undo: %s\n", printable(err.Error()))
 	}
 	return 1
 }
@@ -221,7 +221,8 @@ func deletedOrExistingRoot(path, dir string) (string, error) {
 // from agents and projects, and control characters in them could rewrite what
 // the terminal shows.
 func printable(text string) string {
-	if strings.IndexFunc(text, unicode.IsControl) < 0 {
+	isPlain := utf8.ValidString(text) && strings.IndexFunc(text, func(r rune) bool { return !strconv.IsPrint(r) }) < 0
+	if isPlain {
 		return text
 	}
 	return strconv.Quote(text)

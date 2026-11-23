@@ -355,8 +355,10 @@ func TestPrintableEscapesControlCharacters(t *testing.T) {
 	if got := printable("rm -rf build"); got != "rm -rf build" {
 		t.Fatalf("printable changed plain text: %q", got)
 	}
-	if got := printable("echo \x1b]0;pwned\x07"); strings.ContainsRune(got, '\x1b') {
-		t.Fatalf("printable kept an escape sequence: %q", got)
+	for _, text := range []string{"echo \x1b]0;pwned\x07", "a\x9bb", "invoice\u202egpj.exe"} {
+		if got := printable(text); got == text {
+			t.Errorf("printable(%q) left the text unescaped", text)
+		}
 	}
 }
 
@@ -374,5 +376,13 @@ func TestStatusShowsUnreadableDirectories(t *testing.T) {
 	_, out := run(t, root, "", "status")
 	if !strings.Contains(out, "Unreadable   pgdata") {
 		t.Fatalf("status does not report the unreadable directory:\n%s", out)
+	}
+}
+
+func TestErrorsAreEscaped(t *testing.T) {
+	root := newProject(t)
+	code, out := run(t, root, "", "list", "--project", filepath.Join(root, "a\x1b]0;pwned\x07", "b"))
+	if code == 0 || strings.ContainsRune(out, '\x1b') {
+		t.Fatalf("exit %d, output %q", code, out)
 	}
 }
