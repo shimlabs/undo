@@ -78,3 +78,19 @@ func TestRootUsesStoredSpelling(t *testing.T) {
 		t.Fatalf("Root(%s) = %s, want %s", typed, root, stored)
 	}
 }
+
+func TestRootStopsBelowHome(t *testing.T) {
+	home := resolved(t, t.TempDir())
+	t.Setenv("HOME", home)
+	os.Mkdir(filepath.Join(home, ".git"), 0o755)
+	dir := filepath.Join(home, "notes")
+	os.Mkdir(dir, 0o755)
+
+	root, err := Root(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != dir {
+		t.Fatalf("Root(%s) = %s, want the folder itself, not a home directory kept in git", dir, root)
+	}
+}
