@@ -27,12 +27,12 @@ func TestWriteFileReplacesContent(t *testing.T) {
 	}
 }
 
-func TestNewTempPathIsUniqueAndHidden(t *testing.T) {
-	first, second := newTempPath("/p/main.go"), newTempPath("/p/main.go")
+func TestTempNameIsUniqueAndHidden(t *testing.T) {
+	first, second := TempName("main.go"), TempName("main.go")
 	if first == second {
-		t.Fatal("newTempPath returned the same name twice")
+		t.Fatal("TempName returned the same name twice")
 	}
-	if filepath.Dir(first) != "/p" || !strings.HasPrefix(filepath.Base(first), ".main.go.undo-") {
-		t.Fatalf("newTempPath = %q", first)
+	if !strings.HasPrefix(first, ".main.go.undo-") {
+		t.Fatalf("TempName = %q", first)
 	}
 }

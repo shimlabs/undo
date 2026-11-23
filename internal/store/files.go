@@ -74,28 +74,7 @@ func (s *Store) readDir(path string) ([]fs.DirEntry, error) {
 // writeFileAtomic replaces path in one rename, after flushing its new
 // content to disk.
 func (s *Store) writeFileAtomic(path string, data []byte) error {
-	name := s.storeName(path)
-	tempName := filepath.Join(filepath.Dir(name), atomicfile.TempName(filepath.Base(name)))
-	file, err := s.files.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	_, err = file.Write(data)
-	if err == nil {
-		err = atomicfile.Sync(file)
-	}
-	err = errors.Join(err, file.Close())
-	if err == nil {
-		err = s.files.Rename(tempName, name)
-	}
-	if err != nil {
-		return errors.Join(err, s.files.Remove(tempName))
-	}
-	dir, err := s.files.Open(filepath.Dir(name))
-	if err != nil {
-		return err
-	}
-	return errors.Join(atomicfile.Sync(dir), dir.Close())
+	return atomicfile.WriteFileIn(s.files, s.storeName(path), data, 0o600)
 }
 
 // cloneAt copies srcName in srcDir to name in dir the way the store keeps
