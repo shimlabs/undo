@@ -383,7 +383,10 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 			delete(changes.Listing, rel)
 			manifest.Deleted = append(manifest.Deleted, rel)
 		case errors.Is(result.err, fs.ErrPermission):
+			// The file's older content is not what the project holds now, so
+			// later checkpoints must not bring it back either.
 			delete(changes.Listing, rel)
+			manifest.Deleted = append(manifest.Deleted, rel)
 			manifest.Unreadable = append(manifest.Unreadable, rel)
 		default:
 			if !result.isStable {

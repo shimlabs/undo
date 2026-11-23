@@ -478,3 +478,61 @@ func TestTrackerNeverActsThroughSymlinkedParent(t *testing.T) {
 		})
 	}
 }
+
+// A file that was unreadable at checkpoint 2 and unchanged at checkpoint 3.
+// Checkpoint 3 never saved it, so restoring 3 must not write an older copy.
+func TestTrackerDoesNotRestoreOldContentOfUnreadableFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	secret := filepath.Join(root, "secret.txt")
+	testutil.WriteFile(t, secret, "v1")
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, secret, "v2")
+	os.Chmod(secret, 0)
+	takeCheckpoint(t, projectTracker, "2")
+	third := takeCheckpoint(t, projectTracker, "3")
+	os.Chmod(secret, 0o644)
+	os.Remove(secret)
+	takeCheckpoint(t, projectTracker, "4")
+
+	changes, err := restore.Apply(projectStore, third.ID, checkpointThroughTracker(projectTracker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(secret); err == nil && string(data) != "v2" {
+		t.Fatalf("restoring checkpoint 3 wrote secret.txt = %q, which it held only before checkpoint 2 (written %v)", data, changes.Written)
+	}
+}
+
+// Same scenario through scans only, for comparison.
+func TestScanDoesNotRestoreOldContentOfUnreadableFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	_, projectStore, root := newTrackerWithFiles(t)
+	secret := filepath.Join(root, "secret.txt")
+	testutil.WriteFile(t, secret, "v1")
+	take := func() store.Checkpoint {
+		c, err := projectStore.Take(store.CheckpointOptions{Label: "x", Dir: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	take()
+	testutil.WriteFile(t, secret, "v2")
+	os.Chmod(secret, 0)
+	take()
+	third := take()
+	os.Chmod(secret, 0o644)
+	os.Remove(secret)
+	take()
+	if _, err := restore.Apply(projectStore, third.ID, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(secret); err == nil && string(data) != "v2" {
+		t.Fatalf("scan mode: secret.txt = %q", data)
+	}
+}
