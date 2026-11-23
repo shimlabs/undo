@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -69,7 +70,7 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 		}
 		states[taken.ID] = before
 		log = append(log, "#"+strconv.Itoa(taken.ID))
-		if differences := listingDifferences(t, projectStore, taken.ID); differences != "" {
+		if differences := listingDifferences(t, projectStore, taken.ID, isScanning); differences != "" {
 			t.Fatalf("seed %d: %v\nstored listing of checkpoint %d differs from a scan:\n%s", seed, log, taken.ID, differences)
 		}
 	}
@@ -92,7 +93,7 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 		if latest, _, err := projectStore.Latest(); err == nil {
 			if isScanning && latest.ID > latestBefore.ID+1 {
 				t.Fatalf("seed %d: %v\nthe restore's scanned safety checkpoint %d did not cover the project:\n%s",
-					seed, log, latestBefore.ID+1, listingDifferences(t, projectStore, latestBefore.ID+1))
+					seed, log, latestBefore.ID+1, listingDifferences(t, projectStore, latestBefore.ID+1, true))
 			}
 			for id := latestBefore.ID + 1; id <= latest.ID; id++ {
 				states[id] = before
@@ -150,8 +151,10 @@ func describeDifferences(want, got map[string]string, paths []string) string {
 }
 
 // listingDifferences compares the listing the store builds for checkpoint id
-// with a scan of the project as it is now.
-func listingDifferences(t *testing.T, projectStore *store.Store, id int) string {
+// with a scan of the project as it is now. Without isExact, named pipes are
+// left out: FSEvents does not report them on every version of macOS, and the
+// watcher learns of them at its next full comparison, as design.md says.
+func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact bool) string {
 	t.Helper()
 	matcher, err := exclude.New(projectStore.Root())
 	if err != nil {
@@ -164,6 +167,11 @@ func listingDifferences(t *testing.T, projectStore *store.Store, id int) string 
 	stored, err := projectStore.ListingAt(id)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !isExact {
+		for _, listing := range []tree.Listing{stored, scanned} {
+			maps.DeleteFunc(listing, func(_ string, entry tree.Entry) bool { return entry.Kind == tree.Other })
+		}
 	}
 	changed, deleted := tree.Changed(stored, scanned)
 	var lines strings.Builder
