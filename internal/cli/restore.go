@@ -36,7 +36,7 @@ func undoCommand(args []string, env Env) error {
 		printNoCheckpoints(env, parsed)
 		return nil
 	}
-	return restoreTo(projectStore, latest, parsed.isConfirmed, env)
+	return restoreTo(env, projectStore, latest, parsed.isConfirmed)
 }
 
 func toCommand(args []string, env Env) error {
@@ -47,11 +47,11 @@ func toCommand(args []string, env Env) error {
 	if len(parsed.args) != 1 {
 		return usageError{"to needs a checkpoint id"}
 	}
-	projectStore, checkpoint, err := findCheckpoint(parsed, env)
+	projectStore, checkpoint, err := findCheckpoint(env, parsed)
 	if err != nil {
 		return err
 	}
-	return restoreTo(projectStore, checkpoint, parsed.isConfirmed, env)
+	return restoreTo(env, projectStore, checkpoint, parsed.isConfirmed)
 }
 
 func diffCommand(args []string, env Env) error {
@@ -62,7 +62,7 @@ func diffCommand(args []string, env Env) error {
 	if len(parsed.args) != 1 {
 		return usageError{"diff needs a checkpoint id"}
 	}
-	projectStore, checkpoint, err := findCheckpoint(parsed, env)
+	projectStore, checkpoint, err := findCheckpoint(env, parsed)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func printNoCheckpoints(env Env, parsed flags) {
 	}
 }
 
-func findCheckpoint(parsed flags, env Env) (*store.Store, store.Checkpoint, error) {
+func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, error) {
 	id, err := strconv.Atoi(parsed.args[0])
 	if err != nil {
 		return nil, store.Checkpoint{}, usageError{fmt.Sprintf("%q is not a checkpoint id", parsed.args[0])}
@@ -160,7 +160,7 @@ func findCheckpoint(parsed flags, env Env) (*store.Store, store.Checkpoint, erro
 // restoreTo restores checkpoint. Without isConfirmed, it shows the changes
 // and asks first. With it, it skips that preview, which costs a scan of the
 // project, and shows the changes it made instead.
-func restoreTo(projectStore *store.Store, checkpoint store.Checkpoint, isConfirmed bool, env Env) error {
+func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, isConfirmed bool) error {
 	fmt.Fprintf(env.Stdout, "Checkpoint %d, %s, before: %s\n", checkpoint.ID, timeAgo(checkpoint.Time), printable(checkpoint.Label))
 	if !isConfirmed {
 		changes, err := restore.Plan(projectStore, checkpoint.ID)
@@ -189,26 +189,26 @@ func restoreTo(projectStore *store.Store, checkpoint store.Checkpoint, isConfirm
 }
 
 // printNotRestored lists what the restore left alone and why.
-func printNotRestored(writer io.Writer, applied restore.Changes) {
+func printNotRestored(out io.Writer, applied restore.Changes) {
 	for _, rel := range applied.Skipped {
-		fmt.Fprintf(writer, "  skipped  %s  (sockets and devices cannot be restored)\n", printable(rel))
+		fmt.Fprintf(out, "  skipped  %s  (sockets and devices cannot be restored)\n", printable(rel))
 	}
 	for _, rel := range applied.Kept {
-		fmt.Fprintf(writer, "  kept     %s  (never saved: unreadable, or excluded since the checkpoint)\n", printable(rel))
+		fmt.Fprintf(out, "  kept     %s  (never saved: unreadable, or excluded since the checkpoint)\n", printable(rel))
 	}
 	for _, rel := range applied.Unstable {
-		fmt.Fprintf(writer, "  check    %s  (it was changing while it was saved)\n", printable(rel))
+		fmt.Fprintf(out, "  check    %s  (it was changing while it was saved)\n", printable(rel))
 	}
 }
 
-func printChanges(writer io.Writer, changes restore.Changes) {
-	printGrouped(writer, "restore", changes.Written)
-	printGrouped(writer, "delete ", changes.Removed)
+func printChanges(out io.Writer, changes restore.Changes) {
+	printGrouped(out, "restore", changes.Written)
+	printGrouped(out, "delete ", changes.Removed)
 }
 
 // printGrouped prints one line for each top-level path. Everything inside a
 // directory is shown as a single line with a count.
-func printGrouped(writer io.Writer, verb string, paths []string) {
+func printGrouped(out io.Writer, verb string, paths []string) {
 	var order []string
 	groups := map[string][]string{}
 	for _, rel := range paths {
@@ -224,10 +224,10 @@ func printGrouped(writer io.Writer, verb string, paths []string) {
 	for _, top := range order {
 		members := groups[top]
 		if len(members) == 1 {
-			fmt.Fprintf(writer, "  %s  %s\n", verb, printable(members[0]))
+			fmt.Fprintf(out, "  %s  %s\n", verb, printable(members[0]))
 			continue
 		}
-		fmt.Fprintf(writer, "  %s  %s/  (%d paths)\n", verb, printable(top), len(members))
+		fmt.Fprintf(out, "  %s  %s/  (%d paths)\n", verb, printable(top), len(members))
 	}
 }
 
