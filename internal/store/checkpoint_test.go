@@ -475,3 +475,22 @@ func TestUsageBoundIsAtLeastUsage(t *testing.T) {
 		t.Fatalf("usage bound %d is below the measured usage %d", bound, usage)
 	}
 }
+
+func TestUsageEstimateAddsLaterCheckpoints(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+	take(t, projectStore, "first")
+	measured, err := projectStore.UsageEstimate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "b.txt"), strings.Repeat("b", 10_000))
+	later := take(t, projectStore, "second")
+
+	estimate, err := projectStore.UsageEstimate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if later.StoredBytes == 0 || estimate != measured+later.StoredBytes {
+		t.Fatalf("estimate = %d, want %d measured plus %d stored by the later checkpoint", estimate, measured, later.StoredBytes)
+	}
+}

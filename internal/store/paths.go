@@ -18,6 +18,7 @@ const (
 	listingFile         = "listing.gob"
 	manifestFile        = "manifest.json"
 	restoreFile         = "restored.gob"
+	usageFile           = "usage.json"
 	baseDirName         = "base"
 	layersDirName       = "layers"
 	markersDirName      = "markers"
@@ -103,4 +104,8 @@ func (s *Store) manifestPath(id int) string {
 
 func (s *Store) restorePath() string {
 	return filepath.Join(s.dir, restoreFile)
+}
+
+func (s *Store) usagePath() string {
+	return filepath.Join(s.dir, usageFile)
 }

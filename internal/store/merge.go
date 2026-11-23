@@ -22,6 +22,10 @@ type pendingMerge struct {
 // bytes it freed. The merge is recorded first, so if it is interrupted, the
 // next lock finishes it.
 func (s *Store) merge(through int) (int64, error) {
+	// The usage record no longer matches once layers are merged.
+	if err := os.Remove(s.usagePath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return 0, err
+	}
 	if err := writeJSON(s.mergePath(), pendingMerge{Through: through}); err != nil {
 		return 0, err
 	}

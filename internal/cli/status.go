@@ -49,7 +49,7 @@ func statusCommand(args []string, env Env) error {
 
 // printStore prints what the project's store holds and how it is kept.
 func printStore(out io.Writer, env Env, projectStore *store.Store) error {
-	diskUsage, err := projectStore.Usage()
+	diskUsage, err := projectStore.UsageEstimate()
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func printStore(out io.Writer, env Env, projectStore *store.Store) error {
 	} else {
 		fmt.Fprintln(out, "Storage      clones that share data with the project")
 	}
-	fmt.Fprintf(out, "Disk used    %s not shared with the project, limit %s\n", formatBytes(diskUsage), formatBytes(store.DefaultLimits().MaxBytes))
+	fmt.Fprintf(out, "Disk used    about %s not shared with the project, limit %s\n", formatBytes(diskUsage), formatBytes(store.DefaultLimits().MaxBytes))
 	switch reason, isRecent := watch.StartFailure(projectStore); {
 	case watcher.IsRunning:
 		fmt.Fprintf(out, "Watcher      running, %d checkpoints since it started\n", watcher.CheckpointCount)

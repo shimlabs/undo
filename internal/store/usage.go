@@ -104,3 +104,44 @@ func (s *Store) usageBound() (int64, error) {
 	}
 	return bound, nil
 }
+
+// usageRecord is the last measured Usage and the latest checkpoint then.
+type usageRecord struct {
+	Bytes    int64 `json:"bytes"`
+	LatestID int   `json:"latest_id"`
+}
+
+// UsageEstimate returns about the bytes the store uses that are not shared
+// with the project. It measures the store once, which is slow for a large
+// store, and then adds what each later checkpoint stored. Merging measures
+// it again.
+func (s *Store) UsageEstimate() (int64, error) {
+	unlock, err := s.RLock()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+	checkpoints, err := s.List()
+	if err != nil {
+		return 0, err
+	}
+	var record usageRecord
+	if err := readJSON(s.usagePath(), &record); err == nil {
+		estimate := record.Bytes
+		for _, checkpoint := range checkpoints {
+			if checkpoint.ID > record.LatestID {
+				estimate += checkpoint.StoredBytes
+			}
+		}
+		return estimate, nil
+	}
+	usage, err := s.Usage()
+	if err != nil {
+		return 0, err
+	}
+	record = usageRecord{Bytes: usage}
+	if len(checkpoints) > 0 {
+		record.LatestID = checkpoints[len(checkpoints)-1].ID
+	}
+	return usage, writeJSON(s.usagePath(), record)
+}
