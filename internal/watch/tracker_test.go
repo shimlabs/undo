@@ -295,3 +295,16 @@ func TestTrackerRescansAfterDroppedEvents(t *testing.T) {
 
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
+
+func TestTrackerSeesDirectoryReplacedByAnother(t *testing.T) {
+	tracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, tracker, "first")
+	testutil.WriteFile(t, filepath.Join(root, "staging", "new.md"), "fresh docs")
+	os.RemoveAll(filepath.Join(root, "docs"))
+	if err := os.Rename(filepath.Join(root, "staging"), filepath.Join(root, "docs")); err != nil {
+		t.Fatal(err)
+	}
+
+	checkpoint := takeCheckpoint(t, tracker, "after swap")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}

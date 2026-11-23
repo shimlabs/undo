@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -296,12 +297,25 @@ func (t *tracker) waitForMarker() bool {
 	}
 }
 
-// changeSet collects the paths a checkpoint found changed or deleted while it
-// updates the listing.
+// changeSet applies changes to a listing and records which paths changed.
+// Removing everything under a directory is deferred to finish, so deleting
+// many directories costs one pass over the listing instead of one each.
 type changeSet struct {
-	listing tree.Listing
-	changed map[string]bool
-	deleted map[string]bool
+	listing     tree.Listing
+	changed     map[string]bool
+	deleted     map[string]bool
+	seen        map[string]bool
+	removedDirs map[string]bool
+}
+
+func newChangeSet(listing tree.Listing) *changeSet {
+	return &changeSet{
+		listing:     listing,
+		changed:     map[string]bool{},
+		deleted:     map[string]bool{},
+		seen:        map[string]bool{},
+		removedDirs: map[string]bool{},
+	}
 }
 
 func (c *changeSet) remove(rel string) {
@@ -313,6 +327,7 @@ func (c *changeSet) remove(rel string) {
 }
 
 func (c *changeSet) update(rel string, entry tree.Entry) {
+	c.seen[rel] = true
 	if previous, ok := c.listing[rel]; !ok || previous != entry {
 		c.listing[rel] = entry
 		c.changed[rel] = true
@@ -320,14 +335,30 @@ func (c *changeSet) update(rel string, entry tree.Entry) {
 	}
 }
 
+// removeUnder marks everything under rel for removal by finish.
 func (c *changeSet) removeUnder(rel string) {
-	prefix := rel + "/"
-	if rel == "." {
-		prefix = ""
+	c.removedDirs[rel] = true
+}
+
+// finish removes the paths under the directories passed to removeUnder,
+// except paths that were found again since, such as the files of a
+// directory that replaced a removed one.
+func (c *changeSet) finish() {
+	if len(c.removedDirs) == 0 {
+		return
 	}
-	for path := range c.listing {
-		if path != "." && strings.HasPrefix(path, prefix) {
-			c.remove(path)
+	for rel := range c.listing {
+		if rel == "." || c.seen[rel] {
+			continue
+		}
+		for dir := path.Dir(rel); ; dir = path.Dir(dir) {
+			if c.removedDirs[dir] {
+				c.remove(rel)
+				break
+			}
+			if dir == "." {
+				break
+			}
 		}
 	}
 }
@@ -337,13 +368,14 @@ func (c *changeSet) removeUnder(rel string) {
 // returns an error matching fs.ErrPermission, and the caller compares the
 // whole project instead, as a scan handles unreadable paths.
 func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, err error) {
-	changes := changeSet{listing: t.listing, changed: map[string]bool{}, deleted: map[string]bool{}}
+	changes := newChangeSet(t.listing)
 	matcher := t.matcher.Load()
 	for path := range t.withHardLinks(dirty) {
-		if err := t.applyPath(&changes, matcher, path); err != nil {
+		if err := t.applyPath(changes, matcher, path); err != nil {
 			return nil, nil, err
 		}
 	}
+	changes.finish()
 	return slices.Sorted(maps.Keys(changes.changed)), slices.Sorted(maps.Keys(changes.deleted)), nil
 }
 
@@ -381,13 +413,17 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 		return nil
 	}
 	rel = filepath.ToSlash(rel)
-	previous, existed := changes.listing[rel]
-	entry, err := tree.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) {
+	previous, wasTracked := changes.listing[rel]
+	wasDir := wasTracked && previous.Kind == tree.Dir
+	removeRel := func() {
 		changes.remove(rel)
-		if existed && previous.Kind == tree.Dir {
+		if wasDir {
 			changes.removeUnder(rel)
 		}
+	}
+	entry, err := tree.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		removeRel()
 		return nil
 	}
 	if err != nil {
@@ -396,14 +432,16 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 	if matcher.Excludes(rel, entry.Kind == tree.Dir) {
 		return nil
 	}
-	if existed && previous.Kind == tree.Dir && entry.Kind != tree.Dir {
+	// A directory renamed over this one has the same name but other contents,
+	// and its files have no events of their own.
+	isReplaced := wasDir && (entry.Kind != tree.Dir || previous.Inode != entry.Inode)
+	if isReplaced {
 		changes.removeUnder(rel)
 	}
 	changes.update(rel, entry)
-	// A directory that is new, or whose mode changed and may have become
-	// readable, can hold files that never had events of their own.
-	isNewDir := !existed || previous.Kind != tree.Dir
-	if entry.Kind == tree.Dir && (isNewDir || previous.Mode != entry.Mode) {
+	// A directory that is new or replaced, or whose mode changed and may have
+	// become readable, can hold files that never had events of their own.
+	if entry.Kind == tree.Dir && (!wasDir || isReplaced || previous.Mode != entry.Mode) {
 		return t.addUnder(changes, matcher, path)
 	}
 	return nil
