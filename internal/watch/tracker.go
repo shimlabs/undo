@@ -442,7 +442,7 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 		t.mu.Unlock()
 		return 0, false
 	}
-	markerPath := filepath.Join(t.markerDir, fmt.Sprintf("%d-%s-%d", os.Getpid(), t.markerPrefix, t.sequence.Add(1)))
+	markerPath := filepath.Join(t.markerDir, fmt.Sprintf("%s-%d-%d", t.markerPrefix, os.Getpid(), t.sequence.Add(1)))
 	done := make(chan fsnotify.EventID, 1)
 	t.mu.Lock()
 	t.markers[markerPath] = done
