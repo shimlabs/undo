@@ -1,6 +1,7 @@
 package project
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,5 +93,15 @@ func TestRootStopsBelowHome(t *testing.T) {
 	}
 	if root != dir {
 		t.Fatalf("Root(%s) = %s, want the folder itself, not a home directory kept in git", dir, root)
+	}
+}
+
+func TestRootRefusesHomeAndDiskRoot(t *testing.T) {
+	home := resolved(t, t.TempDir())
+	t.Setenv("HOME", home)
+	for _, dir := range []string{home, "/"} {
+		if _, err := Root(dir); !errors.Is(err, ErrNotProject) {
+			t.Errorf("Root(%s) = %v, want ErrNotProject", dir, err)
+		}
 	}
 }

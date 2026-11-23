@@ -90,7 +90,7 @@ func TestCreateRefusesHomeAndDiskRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, root := range []string{home, "/"} {
-		if _, err := Create(t.TempDir(), root); !errors.Is(err, ErrNotProject) {
+		if _, err := Create(t.TempDir(), root); !errors.Is(err, project.ErrNotProject) {
 			t.Errorf("Create(%s) = %v, want ErrNotProject", root, err)
 		}
 	}
@@ -156,7 +156,7 @@ func TestCreateRefusesSymlinkedHome(t *testing.T) {
 	}
 	t.Setenv("HOME", link)
 
-	if _, err := Create(t.TempDir(), realHome); !errors.Is(err, ErrNotProject) {
+	if _, err := Create(t.TempDir(), realHome); !errors.Is(err, project.ErrNotProject) {
 		t.Fatalf("Create(home through a symlink) = %v, want ErrNotProject", err)
 	}
 }

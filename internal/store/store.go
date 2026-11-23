@@ -26,9 +26,6 @@ var (
 	// into the store. Copy mode works there, at the cost of a full copy of the
 	// project.
 	ErrCloneUnsupported = errors.New("this filesystem cannot make copy-on-write clones")
-	// ErrNotProject means the folder is a home directory or the root of the
-	// disk. Taking checkpoints of it would copy far more than a project.
-	ErrNotProject = errors.New("this is a home directory or the disk root, not a project folder")
 	// ErrNewerFormat means a newer version of undo wrote the store.
 	ErrNewerFormat = errors.New("this store was written by a newer version of undo")
 	// ErrUnsafeStore means a store directory exists that is not a private
@@ -124,12 +121,8 @@ func openAt(dir, root string) (*Store, error) {
 // project is on another volume, or when home is inside the project, the store
 // goes next to the project instead.
 func locate(home, root string) (string, error) {
-	userHome, _ := os.UserHomeDir()
-	if resolved, err := filepath.EvalSymlinks(userHome); err == nil {
-		userHome = resolved
-	}
-	if root == "/" || root == userHome {
-		return "", fmt.Errorf("%s: %w", root, ErrNotProject)
+	if err := project.Check(root); err != nil {
+		return "", err
 	}
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
@@ -153,7 +146,7 @@ func locate(home, root string) (string, error) {
 		}
 	}
 	if isInside {
-		return "", fmt.Errorf("%s holds the undo store and has no writable parent on the same volume: %w", root, ErrNotProject)
+		return "", fmt.Errorf("%s holds the undo store and has no writable parent on the same volume: %w", root, project.ErrNotProject)
 	}
 	return filepath.Join(home, id), nil
 }

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
 )
@@ -112,7 +113,7 @@ func listCommand(args []string, env Env) error {
 // here: no store yet, or a folder such as the home directory that is not a
 // project but may hold deleted ones.
 func isMissingProject(err error) bool {
-	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, store.ErrNotProject)
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, project.ErrNotProject)
 }
 
 // printNoCheckpoints says there are no checkpoints for the project, and points
