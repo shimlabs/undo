@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
+	"golang.org/x/sys/unix"
 )
 
 type pendingMerge struct {
@@ -131,9 +134,11 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 	if err != nil {
 		return 0, err
 	}
+	m := &layerMerge{store: s, id: id, parents: parents, baseDirs: s.newDirCache(s.makeWritable), extractor: s.NewExtractor()}
+	defer m.close()
 	var freed int64
 	for _, rel := range manifest.Deleted {
-		size, err := s.removeFromBase(rel, parents)
+		size, err := m.removeFromBase(rel)
 		if err != nil {
 			return freed, err
 		}
@@ -145,21 +150,21 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 	slices.SortFunc(paths, func(a, b string) int { return tree.Depth(a) - tree.Depth(b) })
 	for _, rel := range paths {
 		entry := manifest.Changed[rel]
-		if err := s.makeBaseParents(rel, parents); err != nil {
+		if err := m.makeBaseParents(rel); err != nil {
 			return freed, err
 		}
 		var size int64
 		switch entry.Kind {
 		case tree.Dir:
-			size, err = s.mergeDir(rel, parents)
+			size, err = m.mergeDir(rel)
 		case tree.File, tree.Symlink:
-			size, err = s.mergeFile(id, rel, parents)
+			size, err = m.mergeFile(rel)
 			if errors.Is(err, ErrStoredFileMissing) {
 				// The merge goes on instead of stopping for good. The path
 				// stays in the base listing, marked lost, so a restore never
 				// deletes the file the project still has.
 				s.LogError(fmt.Errorf("merging checkpoint %d: %w", id, err))
-				if size, err = s.removeFromBase(rel, parents); err != nil {
+				if size, err = m.removeFromBase(rel); err != nil {
 					return freed, err
 				}
 				freed += size
@@ -178,74 +183,102 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 	return freed, nil
 }
 
+// layerMerge applies one layer to the base. It keeps the base directories it
+// writes into open, made writable once, and closes them whenever it removes
+// anything, since a removed directory must not take later writes.
+type layerMerge struct {
+	store     *Store
+	id        int
+	parents   *tree.ParentChecker
+	baseDirs  *dirCache
+	extractor *Extractor
+}
+
+func (m *layerMerge) close() {
+	_ = m.baseDirs.reset()
+	_ = m.extractor.Close()
+}
+
+func (m *layerMerge) removeAll(path string) error {
+	if err := m.baseDirs.reset(); err != nil {
+		return err
+	}
+	return m.store.removeAll(path)
+}
+
 // mergeDir makes sure rel is a directory in the base.
-func (s *Store) mergeDir(rel string, parents *tree.ParentChecker) (int64, error) {
-	dst := s.basePath(rel)
+func (m *layerMerge) mergeDir(rel string) (int64, error) {
+	dst := m.store.basePath(rel)
 	var freed int64
-	if info, err := s.lstat(dst); err == nil && !info.IsDir() {
-		size, err := s.removeFromBase(rel, parents)
+	if info, err := m.store.lstat(dst); err == nil && !info.IsDir() {
+		size, err := m.removeFromBase(rel)
 		if err != nil {
 			return 0, err
 		}
 		freed = size
 	}
-	if err := s.makeWritable(filepath.Dir(dst)); err != nil {
+	if err := m.store.makeWritable(filepath.Dir(dst)); err != nil {
 		return freed, err
 	}
-	return freed, s.mkdirAll(dst)
+	return freed, m.store.mkdirAll(dst)
 }
 
-// mergeFile replaces rel in the base with the copy in layer id.
-func (s *Store) mergeFile(id int, rel string, parents *tree.ParentChecker) (int64, error) {
-	dst := s.basePath(rel)
-	if err := s.makeWritable(filepath.Dir(dst)); err != nil {
-		return 0, err
-	}
+// mergeFile replaces rel in the base with the copy in the layer.
+func (m *layerMerge) mergeFile(rel string) (int64, error) {
+	dst := m.store.basePath(rel)
 	size, err := diskUsage(dst)
 	if err != nil {
 		return 0, err
 	}
-	if info, err := s.lstat(dst); err == nil && info.IsDir() {
-		if err := s.removeAll(dst); err != nil {
-			return 0, err
-		}
-		parents.Forget(rel)
-	} else if err == nil {
-		// A whole-directory clone of the base keeps lock flags.
-		if err := s.unlock(dst); err != nil {
-			return 0, err
-		}
-	}
-	dir, err := s.open(filepath.Dir(dst))
+	dir, err := m.baseDirs.open(filepath.Dir(dst))
 	if err != nil {
 		return 0, err
 	}
-	defer dir.Close()
-	return size, s.ExtractAt(rel, Source{Layer: id}, dir, filepath.Base(dst))
+	name := filepath.Base(dst)
+	var stat unix.Stat_t
+	err = unix.Fstatat(int(dir.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	switch {
+	case err == nil && stat.Mode&unix.S_IFMT == unix.S_IFDIR:
+		if err := m.removeAll(dst); err != nil {
+			return 0, err
+		}
+		m.parents.Forget(rel)
+		if dir, err = m.baseDirs.open(filepath.Dir(dst)); err != nil {
+			return 0, err
+		}
+	case err == nil:
+		// A whole-directory clone of the base keeps lock flags.
+		if err := clone.UnlockAt(dir, name); err != nil {
+			return 0, err
+		}
+	case !errors.Is(err, unix.ENOENT):
+		return 0, &os.PathError{Op: "fstatat", Path: name, Err: err}
+	}
+	return size, m.extractor.ExtractAt(rel, Source{Layer: m.id}, dir, name)
 }
 
 // removeFromBase removes rel from the base. A path below something that is
 // not a directory is not in the base, so there is nothing to remove.
-func (s *Store) removeFromBase(rel string, parents *tree.ParentChecker) (int64, error) {
-	if err := parents.Check(rel); errors.Is(err, tree.ErrParentNotDir) {
+func (m *layerMerge) removeFromBase(rel string) (int64, error) {
+	if err := m.parents.Check(rel); errors.Is(err, tree.ErrParentNotDir) {
 		return 0, nil
 	} else if err != nil {
 		return 0, err
 	}
-	basePath := s.basePath(rel)
+	basePath := m.store.basePath(rel)
 	size, err := diskUsage(basePath)
 	if err != nil {
 		return 0, err
 	}
-	parents.Forget(rel)
-	return size, s.removeAll(basePath)
+	m.parents.Forget(rel)
+	return size, m.removeAll(basePath)
 }
 
 // makeBaseParents makes every parent of rel in the base a real directory,
 // replacing what a later layer put there, which that layer puts back when
 // it is replayed.
-func (s *Store) makeBaseParents(rel string, parents *tree.ParentChecker) error {
-	err := parents.Check(rel)
+func (m *layerMerge) makeBaseParents(rel string) error {
+	err := m.parents.Check(rel)
 	if !errors.Is(err, tree.ErrParentNotDir) {
 		return err
 	}
@@ -254,7 +287,7 @@ func (s *Store) makeBaseParents(rel string, parents *tree.ParentChecker) error {
 		dirs = append(dirs, dir)
 	}
 	for _, dir := range slices.Backward(dirs) {
-		info, err := s.lstat(s.basePath(dir))
+		info, err := m.store.lstat(m.store.basePath(dir))
 		if errors.Is(err, fs.ErrNotExist) {
 			break
 		}
@@ -262,12 +295,12 @@ func (s *Store) makeBaseParents(rel string, parents *tree.ParentChecker) error {
 			return err
 		}
 		if !info.IsDir() {
-			if err := s.removeAll(s.basePath(dir)); err != nil {
+			if err := m.removeAll(m.store.basePath(dir)); err != nil {
 				return err
 			}
-			parents.Forget(dir)
+			m.parents.Forget(dir)
 			break
 		}
 	}
-	return s.mkdirAll(filepath.Dir(s.basePath(rel)))
+	return m.store.mkdirAll(filepath.Dir(m.store.basePath(rel)))
 }

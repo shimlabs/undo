@@ -439,6 +439,8 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 	if err != nil {
 		return nil, err
 	}
+	extractor := projectStore.NewExtractor()
+	defer extractor.Close()
 	isCloned := map[string]bool{}
 	var files []string
 	parents := tree.NewParentChecker(p.root)
@@ -459,7 +461,7 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 		switch {
 		case clonable[rel]:
 			err = p.inParent(rel, func(dir *os.File, name string) error {
-				return projectStore.ExtractBaseDir(rel, dir, name)
+				return extractor.ExtractBaseDir(rel, dir, name)
 			})
 			isCloned[rel] = true
 		case source.Entry.Kind == tree.Dir:
@@ -481,7 +483,7 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 	isLost := make([]bool, len(files))
 	err = parallel.For(len(files), func(i int) error {
 		err := p.inParent(files[i], func(dir *os.File, name string) error {
-			return projectStore.ExtractAt(files[i], p.target[files[i]], dir, name)
+			return extractor.ExtractAt(files[i], p.target[files[i]], dir, name)
 		})
 		if errors.Is(err, store.ErrStoredFileMissing) {
 			isLost[i] = true

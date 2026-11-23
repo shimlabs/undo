@@ -3,18 +3,14 @@ package store
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"iter"
 	"maps"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
 
-	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
-	"golang.org/x/sys/unix"
 )
 
 // Source is the state of a path at a checkpoint and where its content is
@@ -99,61 +95,6 @@ func checkLocal(paths iter.Seq[string]) error {
 		}
 	}
 	return nil
-}
-
-// ExtractAt writes the stored copy of the file or symlink rel, as recorded
-// in source, to name in dir. An existing name is replaced in one rename, so
-// it is never left half written. It works relative to dir and reads the
-// copy through the store's root, so no symlink on either side is followed.
-func (s *Store) ExtractAt(rel string, source Source, dir *os.File, name string) error {
-	srcDir, srcName, err := s.openStored(rel, source)
-	if err != nil {
-		return err
-	}
-	defer srcDir.Close()
-	dirFd := int(dir.Fd())
-	var stat unix.Stat_t
-	if err := unix.Fstatat(dirFd, name, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
-		return s.cloneAt(srcDir, srcName, dir, name)
-	}
-	tempName := atomicfile.TempName(name)
-	if err := s.cloneAt(srcDir, srcName, dir, tempName); err != nil {
-		return err
-	}
-	if err := unix.Renameat(dirFd, tempName, dirFd, name); err != nil {
-		return errors.Join(&os.LinkError{Op: "renameat", Old: tempName, New: name, Err: err}, unix.Unlinkat(dirFd, tempName, 0))
-	}
-	return nil
-}
-
-// openStored opens the directory that holds the copy of rel recorded in
-// source, and returns it with the copy's name. It returns an error wrapping
-// ErrStoredFileMissing if the copy is gone.
-func (s *Store) openStored(rel string, source Source) (*os.File, string, error) {
-	src := s.basePath(rel)
-	if source.Layer > 0 {
-		src = s.layerFile(source.Layer, rel)
-	}
-	if _, err := s.lstat(src); errors.Is(err, fs.ErrNotExist) {
-		return nil, "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
-	}
-	dir, err := s.open(filepath.Dir(src))
-	if err != nil {
-		return nil, "", err
-	}
-	return dir, filepath.Base(src), nil
-}
-
-// ExtractBaseDir writes the whole directory rel from the base to name in
-// dir, which must not exist, in one clone. Only use it for a directory
-// UnchangedDirs returned.
-func (s *Store) ExtractBaseDir(rel string, dir *os.File, name string) error {
-	srcDir, srcName, err := s.openStored(rel, Source{})
-	if err != nil {
-		return err
-	}
-	defer srcDir.Close()
-	return clone.FileAt(srcDir, srcName, dir, name)
 }
 
 // UnchangedDirs returns the directories among dirs whose whole content in

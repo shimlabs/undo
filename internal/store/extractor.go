@@ -1,0 +1,93 @@
+package store
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+
+	"github.com/shimlabs/undo/internal/atomicfile"
+	"github.com/shimlabs/undo/internal/clone"
+	"golang.org/x/sys/unix"
+)
+
+// Extractor writes stored copies out of the store. It keeps the store
+// directories it reads from open, so a restore or merge of many files walks
+// the store root to each directory once. It is safe for concurrent use, and
+// must be closed.
+type Extractor struct {
+	store      *Store
+	storedDirs *dirCache
+}
+
+// NewExtractor returns an Extractor for the store. The store must stay locked
+// while it is in use, so no stored directory it holds open is removed.
+func (s *Store) NewExtractor() *Extractor {
+	return &Extractor{store: s, storedDirs: s.newDirCache(nil)}
+}
+
+// Close closes the directories the Extractor holds open.
+func (e *Extractor) Close() error {
+	return e.storedDirs.reset()
+}
+
+// ExtractAt writes the stored copy of the file or symlink rel, as recorded
+// in source, to name in dir. An existing name is replaced in one rename, so
+// it is never left half written. It works relative to dir and reads the
+// copy through the store's root, so no symlink on either side is followed.
+// It returns an error wrapping ErrStoredFileMissing if the copy is gone.
+func (e *Extractor) ExtractAt(rel string, source Source, dir *os.File, name string) error {
+	srcDir, srcName, err := e.openStored(rel, source)
+	if err != nil {
+		return err
+	}
+	dirFd := int(dir.Fd())
+	var stat unix.Stat_t
+	if err := unix.Fstatat(dirFd, name, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return e.store.cloneAt(srcDir, srcName, dir, name)
+	}
+	tempName := atomicfile.TempName(name)
+	if err := e.store.cloneAt(srcDir, srcName, dir, tempName); err != nil {
+		return err
+	}
+	if err := unix.Renameat(dirFd, tempName, dirFd, name); err != nil {
+		return errors.Join(&os.LinkError{Op: "renameat", Old: tempName, New: name, Err: err}, unix.Unlinkat(dirFd, tempName, 0))
+	}
+	return nil
+}
+
+// ExtractBaseDir writes the whole directory rel from the base to name in
+// dir, which must not exist, in one clone. Only use it for a directory
+// UnchangedDirs returned.
+func (e *Extractor) ExtractBaseDir(rel string, dir *os.File, name string) error {
+	srcDir, srcName, err := e.openStored(rel, Source{})
+	if err != nil {
+		return err
+	}
+	return clone.FileAt(srcDir, srcName, dir, name)
+}
+
+// openStored returns the open directory that holds the copy of rel recorded
+// in source, and the copy's name in it.
+func (e *Extractor) openStored(rel string, source Source) (*os.File, string, error) {
+	src := e.store.basePath(rel)
+	if source.Layer > 0 {
+		src = e.store.layerFile(source.Layer, rel)
+	}
+	srcDir, err := e.storedDirs.open(filepath.Dir(src))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	srcName := filepath.Base(src)
+	var stat unix.Stat_t
+	if err := unix.Fstatat(int(srcDir.Fd()), srcName, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return nil, "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
+	} else if err != nil {
+		return nil, "", &os.PathError{Op: "fstatat", Path: srcName, Err: err}
+	}
+	return srcDir, srcName, nil
+}

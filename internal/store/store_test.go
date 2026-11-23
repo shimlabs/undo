@@ -354,7 +354,9 @@ func TestExtractNeverReadsThroughSymlinkInLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dir.Close()
-	_ = projectStore.ExtractAt("leak/id_ed25519", Source{Layer: second.ID}, dir, "id_ed25519")
+	extractor := projectStore.NewExtractor()
+	defer extractor.Close()
+	_ = extractor.ExtractAt("leak/id_ed25519", Source{Layer: second.ID}, dir, "id_ed25519")
 	if data, err := os.ReadFile(filepath.Join(root, "id_ed25519")); err == nil {
 		t.Fatalf("a file from outside the store reached the project: %q", data)
 	}
