@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -70,7 +72,7 @@ func Apply(s *store.Store, id int) (Changes, error) {
 	if err := writeAll(s, changes.Write, target); err != nil {
 		return changes, err
 	}
-	return changes, restoreDirTimes(s.Root(), changes.Write, target)
+	return changes, restoreDirTimes(s.Root(), slices.Concat(changes.Write, changes.Remove), target)
 }
 
 func diff(s *store.Store, target map[string]store.Source) (Changes, tree.Listing, error) {
@@ -167,14 +169,27 @@ func replace(s *store.Store, src, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
-// restoreDirTimes sets directory modes and times at the end, deepest first.
-// Writing into a directory changes its modification time, so this has to come
-// last.
+// restoreDirTimes sets the mode and times of every directory in paths, and of
+// every directory that holds one of paths, deepest first. Writing or removing
+// a path changes its directory's modification time, so this has to come last.
 func restoreDirTimes(root string, paths []string, target map[string]store.Source) error {
-	dirs := slices.DeleteFunc(slices.Clone(paths), func(rel string) bool { return target[rel].Entry.Kind != tree.Dir })
-	slices.SortFunc(dirs, func(a, b string) int { return depth(b) - depth(a) })
-	for _, rel := range dirs {
-		if err := setMeta(filepath.Join(root, filepath.FromSlash(rel)), target[rel].Entry); err != nil {
+	dirs := map[string]bool{}
+	for _, rel := range paths {
+		if target[rel].Entry.Kind == tree.Dir {
+			dirs[rel] = true
+		}
+		if rel != "." {
+			dirs[path.Dir(rel)] = true
+		}
+	}
+	sorted := slices.Collect(maps.Keys(dirs))
+	slices.SortFunc(sorted, func(a, b string) int { return depth(b) - depth(a) })
+	for _, rel := range sorted {
+		entry, ok := target[rel]
+		if !ok || entry.Entry.Kind != tree.Dir {
+			continue
+		}
+		if err := setMeta(filepath.Join(root, filepath.FromSlash(rel)), entry.Entry); err != nil {
 			return err
 		}
 	}

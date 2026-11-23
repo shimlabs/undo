@@ -52,7 +52,8 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-// snapshot records the kind, permissions and content of every path under root.
+// snapshot records the kind, permissions, modification time and content of
+// every path under root.
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
 	snap := map[string]string{}
@@ -70,10 +71,10 @@ func snapshot(t *testing.T, root string) map[string]string {
 			target, _ := os.Readlink(path)
 			snap[rel] = "link " + target
 		case info.IsDir():
-			snap[rel] = fmt.Sprintf("dir %v", info.Mode().Perm())
+			snap[rel] = fmt.Sprintf("dir %v %d", info.Mode().Perm(), info.ModTime().UnixNano())
 		default:
 			data, _ := os.ReadFile(path)
-			snap[rel] = fmt.Sprintf("file %v %q", info.Mode().Perm(), data)
+			snap[rel] = fmt.Sprintf("file %v %d %q", info.Mode().Perm(), info.ModTime().UnixNano(), data)
 		}
 		return nil
 	})
