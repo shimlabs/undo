@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/watch"
 )
@@ -223,6 +224,14 @@ func TestHookForUnknownAgentLogsAndTakesNoCheckpoint(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(storeHome, "errors.log"))
 	if !strings.Contains(string(data), "no-such-agent") {
 		t.Fatalf("errors.log = %q, want the unknown agent named", data)
+	}
+}
+
+func TestUsageListsEveryAgent(t *testing.T) {
+	for _, agent := range hook.Agents() {
+		if !strings.Contains(usage(), agent.Name) {
+			t.Errorf("usage does not mention %s", agent.Name)
+		}
 	}
 }
 

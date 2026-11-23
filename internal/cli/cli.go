@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/watch"
@@ -21,7 +22,7 @@ import (
 // Version is set when the binary is built.
 var Version = "dev"
 
-const usage = `undo puts your project back the way it was before an agent's command.
+const usageFormat = `undo puts your project back the way it was before an agent's command.
 
 Usage:
   undo                     restore the state before the last command
@@ -32,7 +33,7 @@ Usage:
   undo checkpoint          take a checkpoint now
   undo status              show what undo protects
   undo install <agent>     checkpoint before every change the agent makes:
-                           claude, codex, cursor, gemini or opencode
+                           %s
   undo uninstall <agent>   remove that hook
   undo version             print the version
 
@@ -42,6 +43,15 @@ Flags:
   --copy                   keep full copies, for filesystems without clones
   --project <path>         use the project at <path>, even one that was deleted
 `
+
+func usage() string {
+	var names []string
+	for _, agent := range hook.Agents() {
+		names = append(names, agent.Name)
+	}
+	last := len(names) - 1
+	return fmt.Sprintf(usageFormat, strings.Join(names[:last], ", ")+" or "+names[last])
+}
 
 // Env holds the directories, streams and settings a command works with.
 type Env struct {
@@ -88,7 +98,7 @@ func Run(args []string, env Env) int {
 		return exit.ExitCode()
 	}
 	if usageErr, ok := errors.AsType[usageError](err); ok {
-		fmt.Fprintf(env.Stderr, "undo: %s\n\n%s", usageErr.message, usage)
+		fmt.Fprintf(env.Stderr, "undo: %s\n\n%s", usageErr.message, usage())
 		return 2
 	}
 	switch {
@@ -137,7 +147,7 @@ func dispatch(args []string, env Env) error {
 		fmt.Fprintln(env.Stdout, "undo", Version)
 		return nil
 	case "help":
-		fmt.Fprint(env.Stdout, usage)
+		fmt.Fprint(env.Stdout, usage())
 		return nil
 	}
 	return usageError{fmt.Sprintf("unknown command %q", command)}
