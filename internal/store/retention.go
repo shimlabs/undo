@@ -38,7 +38,8 @@ func (s *Store) PruneIfDue(now time.Time, limits Limits) (int, error) {
 	if err := atomicfile.WriteFile(marker, nil, 0o600); err != nil {
 		return 0, err
 	}
-	times := []unix.Timespec{unix.NsecToTimespec(now.UnixNano()), unix.NsecToTimespec(now.UnixNano())}
+	pruneTime := unix.NsecToTimespec(now.UnixNano())
+	times := []unix.Timespec{pruneTime, pruneTime}
 	if err := unix.UtimesNanoAt(unix.AT_FDCWD, marker, times, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return 0, err
 	}
