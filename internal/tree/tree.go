@@ -97,67 +97,96 @@ type scanner struct {
 // must be the one its parent's entry describes: a directory swapped for a
 // symlink, or for another directory, since then counts as gone.
 func (s *scanner) readDir(dir directory) ([]directory, error) {
-	fd, err := unix.Open(dir.path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	file, err := openListed(dir)
 	switch {
-	case errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR):
+	case errors.Is(err, errDirGone):
 		return nil, nil
-	case errors.Is(err, unix.EACCES):
+	case errors.Is(err, fs.ErrPermission):
 		s.addUnreadable(dir.rel)
 		return nil, nil
 	case err != nil:
-		return nil, &fs.PathError{Op: "open", Path: dir.path, Err: err}
+		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), dir.path)
 	defer file.Close()
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
-		return nil, &fs.PathError{Op: "fstat", Path: dir.path, Err: err}
-	}
-	if (fileID{device: toUint64(stat.Dev), inode: stat.Ino}) != dir.id {
-		return nil, nil
-	}
-	children, err := file.ReadDir(-1)
+	found, err := s.readEntries(dir, file)
 	if errors.Is(err, fs.ErrPermission) {
+		// The directory can be listed but not entered.
 		s.addUnreadable(dir.rel)
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	found := make(Listing, len(children))
-	var excluded []string
-	var subdirs []directory
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	maps.Copy(s.listing, found.listing)
+	s.skipped.Excluded = append(s.skipped.Excluded, found.excluded...)
+	return found.subdirs, nil
+}
+
+// dirEntries is what reading one directory found.
+type dirEntries struct {
+	listing  Listing
+	excluded []string
+	subdirs  []directory
+}
+
+// readEntries describes the children of dir, open as file, through the open
+// directory.
+func (s *scanner) readEntries(dir directory, file *os.File) (dirEntries, error) {
+	fd := int(file.Fd())
+	children, err := file.ReadDir(-1)
+	if err != nil {
+		return dirEntries{}, err
+	}
+	found := dirEntries{listing: make(Listing, len(children))}
 	for _, child := range children {
 		rel := child.Name()
 		if dir.rel != "." {
 			rel = dir.rel + "/" + child.Name()
 		}
 		if s.matcher.Match(rel, child.IsDir()) {
-			excluded = append(excluded, rel)
+			found.excluded = append(found.excluded, rel)
 			continue
 		}
 		entry, id, err := statAt(fd, child.Name())
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		if errors.Is(err, fs.ErrPermission) {
-			// The directory can be listed but not entered.
-			s.addUnreadable(dir.rel)
-			return nil, nil
-		}
 		if err != nil {
-			return nil, err
+			return dirEntries{}, err
 		}
-		found[rel] = entry
+		found.listing[rel] = entry
 		if entry.Kind == Dir {
-			subdirs = append(subdirs, directory{path: filepath.Join(dir.path, child.Name()), rel: rel, id: id})
+			found.subdirs = append(found.subdirs, directory{path: filepath.Join(dir.path, child.Name()), rel: rel, id: id})
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	maps.Copy(s.listing, found)
-	s.skipped.Excluded = append(s.skipped.Excluded, excluded...)
-	return subdirs, nil
+	return found, nil
+}
+
+// errDirGone reports that a directory is gone, or is no longer the one its
+// parent listed.
+var errDirGone = errors.New("directory is gone")
+
+// openListed opens dir without following a symlink, and checks that it is
+// the directory its parent listed.
+func openListed(dir directory) (*os.File, error) {
+	fd, err := unix.Open(dir.path, openDirFlags, 0)
+	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+		return nil, errDirGone
+	}
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: dir.path, Err: err}
+	}
+	file := os.NewFile(uintptr(fd), dir.path)
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, errors.Join(&fs.PathError{Op: "fstat", Path: dir.path, Err: err}, file.Close())
+	}
+	if (fileID{device: toUint64(stat.Dev), inode: stat.Ino}) != dir.id {
+		return nil, errors.Join(errDirGone, file.Close())
+	}
+	return file, nil
 }
 
 func (s *scanner) addUnreadable(rel string) {

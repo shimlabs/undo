@@ -144,14 +144,38 @@ type restorePlan struct {
 // today's rules exclude is written back if it is missing, but never
 // overwritten, and nothing inside it is touched.
 func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
-	root := projectStore.Root()
-	matcherNow, err := exclude.New(root)
+	inputs, err := loadRestoreInputs(projectStore, id)
 	if err != nil {
 		return restorePlan{}, err
 	}
+	plan := restorePlan{root: projectStore.Root(), target: inputs.target, current: inputs.current}
+	plan.planChanges(inputs)
+	return plan, nil
+}
+
+// restoreInputs is what planning a restore reads from the store and the
+// project.
+type restoreInputs struct {
+	manifest    store.Manifest
+	matcherThen *exclude.Matcher
+	matcherNow  *exclude.Matcher
+	target      map[string]store.Source
+	current     tree.Listing
+	skipped     tree.Skipped
+	// restored holds the entries an earlier restore to the same checkpoint
+	// left.
+	restored tree.Listing
+}
+
+func loadRestoreInputs(projectStore *store.Store, id int) (restoreInputs, error) {
+	root := projectStore.Root()
+	matcherNow, err := exclude.New(root)
+	if err != nil {
+		return restoreInputs{}, err
+	}
 	manifest, err := projectStore.Manifest(id)
 	if err != nil {
-		return restorePlan{}, err
+		return restoreInputs{}, err
 	}
 	matcherThen := matcherNow
 	if manifest.ExcludePatterns != nil {
@@ -159,47 +183,51 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	}
 	target, err := projectStore.State(id)
 	if err != nil {
-		return restorePlan{}, err
+		return restoreInputs{}, err
 	}
 	current, skipped, err := tree.Scan(root, matcherNow)
 	if err != nil {
-		return restorePlan{}, err
+		return restoreInputs{}, err
 	}
-	plan := restorePlan{root: root, target: target, current: current}
-	lost := plan.lostPaths()
-	plan.drop(lost)
-	kept, untracked := plan.dropUnsaved(matcherThen, matcherNow, manifest.Unreadable, skipped.Unreadable)
 	restored, err := projectStore.RestoredEntries(id)
 	if err != nil {
-		return restorePlan{}, err
+		return restoreInputs{}, err
 	}
-	plan.unchanged = tree.Listing{}
-	isUnchanged := func(rel string) bool {
-		entry, isRestored := restored[rel]
-		if isRestored && current[rel] == entry {
-			plan.unchanged[rel] = entry
-			return true
-		}
-		return false
-	}
-	written, removed := tree.Changed(current, plan.targetListing())
+	return restoreInputs{
+		manifest: manifest, matcherThen: matcherThen, matcherNow: matcherNow,
+		target: target, current: current, skipped: skipped, restored: restored,
+	}, nil
+}
+
+// planChanges works out the changes of the plan, leaving out every path the
+// restore must not touch.
+func (p *restorePlan) planChanges(inputs restoreInputs) {
+	lost := p.lostPaths()
+	p.drop(lost)
+	kept, untracked := p.dropUnsaved(inputs.matcherThen, inputs.matcherNow, inputs.manifest.Unreadable, inputs.skipped.Unreadable)
+	written, removed := tree.Changed(p.current, p.targetListing())
 	// Paths that still match are left alone, so they need none of the checks
 	// below.
+	p.unchanged = unchangedEntries(inputs.restored, p.current, written)
+	isUnchanged := func(rel string) bool {
+		_, isUnchanged := p.unchanged[rel]
+		return isUnchanged
+	}
 	written = slices.DeleteFunc(written, isUnchanged)
 	// The safety checkpoint could not save a file undo cannot read, so the
 	// restore must not change it either.
-	unreadable := plan.unreadableFiles(slices.Concat(written, removed))
-	plan.drop(unreadable)
+	unreadable := p.unreadableFiles(slices.Concat(written, removed))
+	p.drop(unreadable)
 	// A locked file cannot be replaced or removed, so it is kept as it is.
-	locked := plan.lockedPaths(slices.Concat(written, removed))
-	plan.drop(locked)
+	locked := p.lockedPaths(slices.Concat(written, removed))
+	p.drop(locked)
 	// A directory that holds paths the restore must not touch, at any
 	// depth, cannot be replaced by a file either.
-	blocked := plan.dirsHoldingUntracked(written, slices.Concat(untracked, unreadable, locked, skipped.Excluded, skipped.Unreadable))
-	plan.drop(blocked)
+	blocked := p.dirsHoldingUntracked(written, slices.Concat(untracked, unreadable, locked, inputs.skipped.Excluded, inputs.skipped.Unreadable))
+	p.drop(blocked)
 	if left := slices.Concat(unreadable, locked, blocked); len(left) > 0 {
 		kept = append(kept, left...)
-		written, removed = tree.Changed(current, plan.targetListing())
+		written, removed = tree.Changed(p.current, p.targetListing())
 	}
 	written = slices.DeleteFunc(written, isInsideAny(kept))
 	written = slices.DeleteFunc(written, isUnchanged)
@@ -208,8 +236,20 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	// the project folder itself would act outside it, so it stays, empty.
 	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
 	slices.Sort(kept)
-	plan.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable, Lost: lost}
-	return plan, nil
+	p.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: inputs.manifest.Unstable, Lost: lost}
+}
+
+// unchangedEntries returns the entries of the paths in written that an
+// earlier restore to the same checkpoint wrote, and that nothing changed
+// since.
+func unchangedEntries(restored, current tree.Listing, written []string) tree.Listing {
+	unchanged := tree.Listing{}
+	for _, rel := range written {
+		if entry, isRestored := restored[rel]; isRestored && current[rel] == entry {
+			unchanged[rel] = entry
+		}
+	}
+	return unchanged
 }
 
 // dropUnsaved removes from the plan every path the checkpoint did not save:
@@ -479,24 +519,28 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 				return extractor.ExtractBaseDir(rel, dir, name)
 			})
 			p.cloned[rel] = true
-		case source.Entry.Kind == tree.Dir:
-			err = p.projectRoot.MkdirAll(filepath.FromSlash(rel), 0o700)
 		case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:
 			files = append(files, rel)
-		case source.Entry.Mode&fs.ModeNamedPipe != 0:
-			err = p.inParent(rel, func(dir *os.File, name string) error {
-				return clone.MkfifoAt(dir, name, source.Entry.Mode)
-			})
 		default:
-			skipped = append(skipped, rel)
+			var isWritten bool
+			isWritten, err = p.writeOther(rel, source.Entry)
+			if !isWritten {
+				skipped = append(skipped, rel)
+			}
 		}
 		if err != nil {
 			return skipped, err
 		}
 	}
 	// Every directory exists now, so the files can be written in any order.
+	return skipped, p.writeFiles(extractor, files)
+}
+
+// writeFiles writes files from the store in parallel. A file whose stored
+// copy is gone is added to the lost paths instead.
+func (p *restorePlan) writeFiles(extractor *store.Extractor, files []string) error {
 	isLost := make([]bool, len(files))
-	err = parallel.For(len(files), func(i int) error {
+	err := parallel.For(len(files), func(i int) error {
 		err := p.inParent(files[i], func(dir *os.File, name string) error {
 			return extractor.ExtractAt(files[i], p.target[files[i]], dir, name)
 		})
@@ -511,7 +555,22 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 			p.changes.Lost = append(p.changes.Lost, rel)
 		}
 	}
-	return skipped, err
+	return err
+}
+
+// writeOther creates the directory or named pipe rel describes, and reports
+// whether it could. Sockets and devices cannot be restored.
+func (p *restorePlan) writeOther(rel string, entry tree.Entry) (bool, error) {
+	switch {
+	case entry.Kind == tree.Dir:
+		return true, p.projectRoot.MkdirAll(filepath.FromSlash(rel), 0o700)
+	case entry.Mode&fs.ModeNamedPipe != 0:
+		return true, p.inParent(rel, func(dir *os.File, name string) error {
+			return clone.MkfifoAt(dir, name, entry.Mode)
+		})
+	default:
+		return false, nil
+	}
 }
 
 // inParent opens the directory that holds rel through the project root and

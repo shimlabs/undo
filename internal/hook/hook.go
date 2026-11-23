@@ -129,7 +129,15 @@ func checkBinary(binary string) error {
 // logged in the project's store, or under storeHome when there is none yet,
 // and the agent is never blocked.
 func (a Agent) Handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) error {
-	projectStore, err := a.handle(in, storeHome, checkpoint)
+	event, err := a.parseEvent(in)
+	if err != nil {
+		store.LogHomeError(storeHome, fmt.Errorf("%s hook: %w", a.Name, err))
+		return err
+	}
+	if a.isHandledElsewhere != nil && a.isHandledElsewhere(event) {
+		return nil
+	}
+	projectStore, err := a.takeCheckpoint(event, storeHome, checkpoint)
 	if projectStore != nil {
 		defer projectStore.Close()
 	}
@@ -143,16 +151,10 @@ func (a Agent) Handle(in io.Reader, storeHome string, checkpoint store.Checkpoin
 	return err
 }
 
-// handle takes the checkpoint and returns the project's store, if it got as
-// far as opening one.
-func (a Agent) handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) (*store.Store, error) {
-	event, err := a.parseEvent(in)
-	if err != nil {
-		return nil, err
-	}
-	if a.isHandledElsewhere != nil && a.isHandledElsewhere(event) {
-		return nil, nil
-	}
+// takeCheckpoint takes the checkpoint for event and returns the project's store,
+// if it got as far as opening one.
+func (a Agent) takeCheckpoint(event hookEvent, storeHome string, checkpoint store.Checkpointer) (*store.Store, error) {
+	var err error
 	projectDir := cmp.Or(event.ProjectDir, event.Dir)
 	if projectDir == "" {
 		if projectDir, err = os.Getwd(); err != nil {

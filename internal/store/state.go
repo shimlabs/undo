@@ -105,43 +105,57 @@ func checkLocal(paths iter.Seq[string]) error {
 // It returns none where a directory cannot be cloned in one call: on Linux and
 // in copy mode.
 func (s *Store) UnchangedDirs(state map[string]Source, dirs []string) (map[string]bool, error) {
-	if !clone.CanCloneDirs || s.IsCopyMode() {
-		return nil, nil
-	}
-	candidates := map[string]bool{}
-	for _, rel := range dirs {
-		candidates[rel] = true
-	}
-	if len(candidates) == 0 {
+	if !clone.CanCloneDirs || s.IsCopyMode() || len(dirs) == 0 {
 		return nil, nil
 	}
 	base, err := s.baseListing()
 	if err != nil {
 		return nil, err
 	}
-	inState, inBase := map[string]int{}, map[string]int{}
+	candidates := toSet(dirs)
 	for rel, source := range state {
-		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
-			if candidates[dir] {
-				inState[dir]++
-				if source.Layer != 0 || source.Entry.Kind == tree.Other || source.IsLost {
-					candidates[dir] = false
-				}
+		if source.Layer != 0 || source.Entry.Kind == tree.Other || source.IsLost {
+			for dir := range parentDirs(rel) {
+				delete(candidates, dir)
 			}
 		}
 	}
-	for rel := range base {
-		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
-			if candidates[dir] {
-				inBase[dir]++
-			}
-		}
-	}
+	inState := countInside(maps.Keys(state), candidates)
+	inBase := countInside(maps.Keys(base), candidates)
 	unchanged := map[string]bool{}
-	for dir, isCandidate := range candidates {
-		if isCandidate && base[dir].Kind == tree.Dir && inState[dir] == inBase[dir] {
+	for dir := range candidates {
+		if base[dir].Kind == tree.Dir && inState[dir] == inBase[dir] {
 			unchanged[dir] = true
 		}
 	}
 	return unchanged, nil
+}
+
+// countInside returns, for each directory in dirs, how many of paths lie
+// inside it at any depth.
+func countInside(paths iter.Seq[string], dirs map[string]bool) map[string]int {
+	counts := map[string]int{}
+	for rel := range paths {
+		for dir := range parentDirs(rel) {
+			if dirs[dir] {
+				counts[dir]++
+			}
+		}
+	}
+	return counts
+}
+
+// parentDirs yields the directories that hold rel, nearest first, leaving
+// out the project root.
+func parentDirs(rel string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		if rel == "." {
+			return
+		}
+		for dir := path.Dir(rel); dir != "."; dir = path.Dir(dir) {
+			if !yield(dir) {
+				return
+			}
+		}
+	}
 }

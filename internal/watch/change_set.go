@@ -39,6 +39,14 @@ func (c *changeSet) remove(rel string) {
 	}
 }
 
+// removeTree removes rel, and everything under it if it was a directory.
+func (c *changeSet) removeTree(rel string, wasDir bool) {
+	c.remove(rel)
+	if wasDir {
+		c.removeUnder(rel)
+	}
+}
+
 func (c *changeSet) update(rel string, entry tree.Entry) {
 	c.seen[rel] = true
 	if previous, ok := c.listing[rel]; !ok || previous != entry {

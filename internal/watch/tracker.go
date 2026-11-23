@@ -528,41 +528,19 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 	rel = filepath.ToSlash(rel)
 	previous, wasTracked := changes.listing[rel]
 	wasDir := wasTracked && previous.Kind == tree.Dir
-	removeRel := func() {
-		changes.remove(rel)
-		if wasDir {
-			changes.removeUnder(rel)
-		}
-	}
-	if err := parents.Check(rel); errors.Is(err, tree.ErrParentNotDir) {
-		removeRel()
+	entry, storedName, err := lookUp(parents, rel, fullPath)
+	switch {
+	case errors.Is(err, errPathGone):
+		changes.removeTree(rel, wasDir)
 		return nil
-	} else if err != nil {
+	case err != nil:
 		return err
-	}
-	entry, err := tree.Stat(fullPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		removeRel()
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	storedName, err := tree.StoredName(fullPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		removeRel()
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if storedName != filepath.Base(fullPath) {
+	case storedName != filepath.Base(fullPath):
 		// The event names the path before a rename that changed only case or
 		// Unicode form, and the stat reached the renamed file.
-		removeRel()
+		changes.removeTree(rel, wasDir)
 		return t.applyPath(changes, matcher, parents, filepath.Join(filepath.Dir(fullPath), storedName), isRenamed)
-	}
-	if matcher.Excludes(rel, entry.Kind == tree.Dir) {
+	case matcher.Excludes(rel, entry.Kind == tree.Dir):
 		return nil
 	}
 	// A directory renamed into place, even the one that was here before, can
@@ -572,12 +550,43 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 		changes.replaceUnder(rel)
 	}
 	changes.update(rel, entry)
-	// A directory that is new or replaced, or whose mode changed and may have
-	// become readable, can hold files that never had events of their own.
-	if entry.Kind == tree.Dir && (!wasDir || isReplaced || previous.Mode != entry.Mode) {
+	if mayHoldUnseenFiles(entry, previous, wasDir, isReplaced) {
 		return t.addUnder(changes, matcher, fullPath)
 	}
 	return nil
+}
+
+// mayHoldUnseenFiles reports whether a directory can hold files that never
+// had events of their own: it is new or replaced, or its mode changed and it
+// may have become readable.
+func mayHoldUnseenFiles(entry, previous tree.Entry, wasDir, isReplaced bool) bool {
+	return entry.Kind == tree.Dir && (!wasDir || isReplaced || previous.Mode != entry.Mode)
+}
+
+// errPathGone reports that a path is no longer in the project.
+var errPathGone = errors.New("path is gone")
+
+// lookUp returns the entry at fullPath and the name its directory stores for
+// it. A path below something that is not a directory, or that no longer
+// exists, is gone.
+func lookUp(parents *tree.ParentChecker, rel, fullPath string) (tree.Entry, string, error) {
+	if err := parents.Check(rel); errors.Is(err, tree.ErrParentNotDir) {
+		return tree.Entry{}, "", errPathGone
+	} else if err != nil {
+		return tree.Entry{}, "", err
+	}
+	entry, err := tree.Stat(fullPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return tree.Entry{}, "", errPathGone
+	}
+	if err != nil {
+		return tree.Entry{}, "", err
+	}
+	storedName, err := tree.StoredName(fullPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return tree.Entry{}, "", errPathGone
+	}
+	return entry, storedName, err
 }
 
 // addUnder adds everything inside a new directory to the listing, in case some
