@@ -214,8 +214,8 @@ func (t *tracker) isExcluded(matcher *exclude.Matcher, dir string) bool {
 	return matcher.Excludes(filepath.ToSlash(rel), true)
 }
 
-func (t *tracker) isInRoot(path string) bool {
-	return path == t.root || strings.HasPrefix(path, t.root+string(filepath.Separator))
+func (t *tracker) isInRoot(fullPath string) bool {
+	return fullPath == t.root || strings.HasPrefix(fullPath, t.root+string(filepath.Separator))
 }
 
 // Checkpoint records the project's current state. Before that, it waits until
@@ -333,14 +333,14 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 		t.mu.Unlock()
 		return 0, false
 	}
-	path := filepath.Join(t.markerDir, fmt.Sprintf("%d-%d", os.Getpid(), t.sequence.Add(1)))
+	markerPath := filepath.Join(t.markerDir, fmt.Sprintf("%d-%d", os.Getpid(), t.sequence.Add(1)))
 	done := make(chan fsnotify.EventID, 1)
 	t.mu.Lock()
-	t.markers[path] = done
+	t.markers[markerPath] = done
 	t.mu.Unlock()
-	defer os.Remove(path)
+	defer os.Remove(markerPath)
 
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
+	if err := os.WriteFile(markerPath, nil, 0o600); err != nil {
 		return 0, false
 	}
 	select {
@@ -348,7 +348,7 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 		return id, true
 	case <-time.After(markerTimeout):
 		t.mu.Lock()
-		delete(t.markers, path)
+		delete(t.markers, markerPath)
 		t.mu.Unlock()
 		return 0, false
 	}
@@ -376,8 +376,8 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 // event names only the one that was written.
 func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 	var inodes map[uint64]bool
-	for path := range dirty {
-		info, err := os.Lstat(path)
+	for fullPath := range dirty {
+		info, err := os.Lstat(fullPath)
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
@@ -465,11 +465,11 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 // addUnder adds everything inside a new directory to the listing, in case some
 // of its files were created before their events arrived.
 func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir string) error {
-	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || path == dir {
+	return filepath.WalkDir(dir, func(fullPath string, entry fs.DirEntry, err error) error {
+		if err != nil || fullPath == dir {
 			return nil
 		}
-		rel, err := filepath.Rel(t.root, path)
+		rel, err := filepath.Rel(t.root, fullPath)
 		if err != nil {
 			return err
 		}
@@ -480,7 +480,7 @@ func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir str
 			}
 			return nil
 		}
-		treeEntry, err := tree.Stat(path)
+		treeEntry, err := tree.Stat(fullPath)
 		if err != nil {
 			return nil
 		}

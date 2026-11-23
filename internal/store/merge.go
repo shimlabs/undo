@@ -186,13 +186,13 @@ func (s *Store) removeFromBase(rel string, parents *tree.ParentChecker) (int64, 
 	} else if err != nil {
 		return 0, err
 	}
-	path := s.basePath(rel)
-	size, err := diskUsage(path)
+	basePath := s.basePath(rel)
+	size, err := diskUsage(basePath)
 	if err != nil {
 		return 0, err
 	}
 	parents.Forget(rel)
-	return size, removeAll(path)
+	return size, removeAll(basePath)
 }
 
 // makeBaseParents makes every parent of rel in the base a real directory,

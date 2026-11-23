@@ -57,7 +57,7 @@ func AgentNames() []string {
 // FindAgent returns the agent with the given command-line name.
 func FindAgent(name string) (Agent, bool) {
 	agents := Agents()
-	i := slices.IndexFunc(agents, func(a Agent) bool { return a.Name == name })
+	i := slices.IndexFunc(agents, func(agent Agent) bool { return agent.Name == name })
 	if i < 0 {
 		return Agent{}, false
 	}
@@ -102,11 +102,11 @@ func (a Agent) IsInstalled() bool {
 // builds and which is cleaned up later, or in a directory that other users
 // can write to, where anyone could put a program in its place.
 func checkBinary(binary string) error {
-	temps := []string{os.TempDir()}
+	tempDirs := []string{os.TempDir()}
 	if resolved, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
-		temps = append(temps, resolved)
+		tempDirs = append(tempDirs, resolved)
 	}
-	for _, temp := range temps {
+	for _, temp := range tempDirs {
 		if strings.HasPrefix(binary, filepath.Clean(temp)+string(filepath.Separator)) {
 			return fmt.Errorf("%s: %w", binary, ErrUnsafeBinary)
 		}
@@ -166,10 +166,10 @@ func (a Agent) handle(in io.Reader, storeHome string, checkpoint store.Checkpoin
 	return projectStore, err
 }
 
-func homePath(parts ...string) (string, error) {
+func homePath(elements ...string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(append([]string{home}, parts...)...), nil
+	return filepath.Join(append([]string{home}, elements...)...), nil
 }

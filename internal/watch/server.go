@@ -71,19 +71,19 @@ func Serve(ctx context.Context, projectStore *store.Store, options Options) erro
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
 
-	tracker, err := newTracker(projectStore)
+	projectTracker, err := newTracker(projectStore)
 	if err != nil {
 		return err
 	}
-	defer tracker.Close()
+	defer projectTracker.Close()
 	if options.Ready != nil {
 		options.Ready()
 	}
-	pruner := startPruner(projectStore, options.Limits)
-	defer pruner.stop()
+	backgroundPruner := startPruner(projectStore, options.Limits)
+	defer backgroundPruner.stop()
 
-	server := server{listener: listener, tracker: tracker, pruner: pruner, options: options}
-	err = server.acceptLoop()
+	watchServer := server{listener: listener, tracker: projectTracker, pruner: backgroundPruner, options: options}
+	err = watchServer.acceptLoop()
 	if ctx.Err() != nil {
 		return nil
 	}
