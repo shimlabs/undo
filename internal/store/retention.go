@@ -8,9 +8,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/shimlabs/undo/internal/tree"
+	"github.com/shimlabs/undo/internal/walk"
 )
 
 // Limits bound how much history a store keeps.
@@ -95,22 +97,48 @@ func (s *Store) Usage() (int64, error) {
 }
 
 func privateSizeAll(root string) (int64, error) {
-	var total int64
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	info, err := os.Lstat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !info.IsDir() {
+		if !info.Mode().IsRegular() {
+			return 0, nil
+		}
+		return privateSize(root)
+	}
+	var total atomic.Int64
+	err = walk.Dirs(root, walk.Workers, func(dir string) ([]string, error) {
+		children, err := os.ReadDir(dir)
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+			return nil, nil
 		}
-		if err != nil || !d.Type().IsRegular() {
-			return err
+		if err != nil {
+			return nil, err
 		}
-		size, err := privateSize(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+		var subdirs []string
+		for _, child := range children {
+			path := filepath.Join(dir, child.Name())
+			switch {
+			case child.IsDir():
+				subdirs = append(subdirs, path)
+			case child.Type().IsRegular():
+				size, err := privateSize(path)
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				if err != nil {
+					return nil, err
+				}
+				total.Add(size)
+			}
 		}
-		total += size
-		return err
+		return subdirs, nil
 	})
-	return total, err
+	return total.Load(), err
 }
 
 type pendingMerge struct {
