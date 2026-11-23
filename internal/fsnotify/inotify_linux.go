@@ -11,6 +11,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/shimlabs/undo/internal/tree"
 )
 
 const watchMask = unix.IN_CREATE | unix.IN_DELETE | unix.IN_MODIFY | unix.IN_ATTRIB |
@@ -204,7 +206,12 @@ func (s *Stream) addWatch(dir string) error {
 // instead of leading elsewhere or blocking. Below dir, a directory that is
 // gone or cannot be read is passed over.
 func (s *Stream) watchInside(dir string, found *[]string) error {
-	entries, err := readDir(dir)
+	file, err := tree.OpenDir(dir, ".")
+	if err != nil {
+		return err
+	}
+	entries, err := file.ReadDir(-1)
+	file.Close()
 	if err != nil {
 		return err
 	}
@@ -224,14 +231,4 @@ func (s *Stream) watchInside(dir string, found *[]string) error {
 		}
 	}
 	return nil
-}
-
-func readDir(dir string) ([]os.DirEntry, error) {
-	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, &os.PathError{Op: "open", Path: dir, Err: err}
-	}
-	file := os.NewFile(uintptr(fd), dir)
-	defer file.Close()
-	return file.ReadDir(-1)
 }
