@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
@@ -51,7 +53,8 @@ func listCommand(parsed flags, env Env) error {
 }
 
 // printCheckpoints lists checkpoints in a table: id, age, the command that
-// followed, and where and by which agent it ran when that adds something.
+// followed, and where and by which agent it ran when that adds something. On
+// a terminal, each line is cut to its width.
 func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root string) {
 	out.Headingf("Checkpoints in %s", displayPath(root))
 	idWidth := len(strconv.Itoa(checkpoints[len(checkpoints)-1].ID))
@@ -62,19 +65,46 @@ func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root
 		ageWidth = max(ageWidth, len(ages[i]))
 	}
 	for i, checkpoint := range checkpoints {
-		var details []string
-		if checkpoint.Dir != "" && checkpoint.Dir != root {
-			details = append(details, "in "+displayPath(checkpoint.Dir))
+		prefixWidth := 2 + idWidth + 2 + ageWidth + 2
+		text := displayLabel(checkpoint.Label)
+		if details := checkpointDetails(checkpoint, root); details != "" {
+			text += "  " + details
 		}
-		if checkpoint.Agent != "" {
-			details = append(details, terminal.Printable(checkpoint.Agent))
-		}
-		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), terminal.Printable(checkpoint.Label))
-		if len(details) > 0 {
-			line += "  " + out.Cyan(strings.Join(details, " · "))
+		text = truncate(text, out.Width()-prefixWidth)
+		label, details, _ := strings.Cut(text, "  ")
+		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), label)
+		if details != "" {
+			line += "  " + out.Dim(details)
 		}
 		out.Println(line)
 	}
+}
+
+// checkpointDetails says where a checkpoint's command ran, when that was not
+// the project root, and which agent ran it.
+func checkpointDetails(checkpoint store.Checkpoint, root string) string {
+	var details []string
+	if checkpoint.Dir != "" && checkpoint.Dir != root {
+		details = append(details, "in "+displayPath(checkpoint.Dir))
+	}
+	if checkpoint.Agent != "" {
+		title := checkpoint.Agent
+		if agent, ok := hook.FindAgent(checkpoint.Agent); ok {
+			title = agent.Title
+		}
+		details = append(details, "("+terminal.Printable(title)+")")
+	}
+	return strings.Join(details, " ")
+}
+
+// truncate cuts text to width characters, ending it with "…". A width of 0
+// or less leaves it whole.
+func truncate(text string, width int) string {
+	if width <= 0 || utf8.RuneCountInString(text) <= width {
+		return text
+	}
+	runes := []rune(text)
+	return string(runes[:max(width-1, 0)]) + "…"
 }
 
 // isMissingProject reports whether err means there is nothing to restore

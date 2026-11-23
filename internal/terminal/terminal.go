@@ -20,13 +20,20 @@ import (
 type Writer struct {
 	out     io.Writer
 	isColor bool
+	// width is the terminal's width in columns, and 0 when out is not a
+	// terminal.
+	width int
 }
 
 // NewWriter returns a Writer for out, with colors when out is a terminal.
 func NewWriter(out io.Writer) *Writer {
 	file, isFile := out.(*os.File)
 	isTerminal := isFile && term.IsTerminal(int(file.Fd()))
-	return &Writer{out: out, isColor: isColorEnabled(os.Getenv, isTerminal)}
+	width := 0
+	if isTerminal {
+		width, _, _ = term.GetSize(int(file.Fd()))
+	}
+	return &Writer{out: out, isColor: isColorEnabled(os.Getenv, isTerminal), width: width}
 }
 
 // isColorEnabled reports whether output to a terminal, or elsewhere, should
@@ -56,6 +63,10 @@ const (
 	blue   = "\x1b[34m"
 	cyan   = "\x1b[36m"
 )
+
+// Width returns the terminal's width in columns, and 0 when the output is
+// not a terminal, where lines are not cut.
+func (w *Writer) Width() int { return w.width }
 
 // Bold returns text in bold.
 func (w *Writer) Bold(text string) string { return w.style(bold, text) }
