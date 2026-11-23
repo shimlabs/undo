@@ -12,6 +12,7 @@ import (
 	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
+	"golang.org/x/sys/unix"
 )
 
 // openFiles opens dir as the root every file operation of the store goes
@@ -82,7 +83,16 @@ func (s *Store) readDir(path string) ([]fs.DirEntry, error) {
 		return nil, err
 	}
 	defer dir.Close()
-	return dir.ReadDir(-1)
+	// File.ReadDir stats every entry of a directory opened through a Root,
+	// while a plain file for the same directory uses the types readdir
+	// returns.
+	fd, err := unix.Dup(int(dir.Fd()))
+	if err != nil {
+		return nil, &os.PathError{Op: "dup", Path: path, Err: err}
+	}
+	plain := os.NewFile(uintptr(fd), path)
+	defer plain.Close()
+	return plain.ReadDir(-1)
 }
 
 // writeFileAtomic replaces path in one rename, after flushing its new
