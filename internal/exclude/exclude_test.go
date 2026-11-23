@@ -1,9 +1,13 @@
 package exclude
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func newMatcher(t *testing.T, undoignore string) *Matcher {
@@ -74,5 +78,58 @@ func TestExcludesChecksParentDirectories(t *testing.T) {
 		if got := matcher.Excludes(tc.rel, tc.isDir); got != tc.want {
 			t.Errorf("Excludes(%q, %v) = %v, want %v", tc.rel, tc.isDir, got, tc.want)
 		}
+	}
+}
+
+func TestNewRefusesIgnoreFileThatIsNotARegularFile(t *testing.T) {
+	for name, create := range map[string]func(path string) error{
+		"device": func(path string) error { return os.Symlink("/dev/urandom", path) },
+		"pipe":   func(path string) error { return syscall.Mkfifo(path, 0o600) },
+	} {
+		root := t.TempDir()
+		if err := create(filepath.Join(root, IgnoreFile)); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, err := New(root)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if !errors.Is(err, ErrIgnoreFileNotRegular) {
+				t.Errorf("%s: New = %v, want ErrIgnoreFileNotRegular", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: New did not return", name)
+		}
+	}
+}
+
+func TestNewRefusesHugeIgnoreFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, IgnoreFile), []byte(strings.Repeat("a\n", maxIgnoreFileSize)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(root); !errors.Is(err, ErrIgnoreFileTooLarge) {
+		t.Fatalf("New = %v, want ErrIgnoreFileTooLarge", err)
+	}
+}
+
+func TestNewFollowsSymlinkToIgnoreFile(t *testing.T) {
+	root := t.TempDir()
+	shared := filepath.Join(t.TempDir(), "shared.undoignore")
+	if err := os.WriteFile(shared, []byte("dist\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(root, IgnoreFile)); err != nil {
+		t.Fatal(err)
+	}
+	matcher, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matcher.Match("dist", true) {
+		t.Fatal("dist is not excluded")
 	}
 }

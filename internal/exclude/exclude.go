@@ -4,12 +4,16 @@ package exclude
 import (
 	"bufio"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // defaultPatterns lists directories undo skips unless .undoignore brings one
@@ -31,11 +35,27 @@ type Matcher struct {
 // rules, one gitignore-style pattern per line.
 const IgnoreFile = ".undoignore"
 
+// maxIgnoreFileSize and maxPatterns bound what .undoignore can hold. Every
+// pattern is checked against every path in the project, and a real file
+// holds a few dozen lines.
+const (
+	maxIgnoreFileSize = 64 << 10
+	maxPatterns       = 1000
+)
+
+var (
+	// ErrIgnoreFileNotRegular means .undoignore is a device, a named pipe
+	// or a directory, which reading could block or never end.
+	ErrIgnoreFileNotRegular = errors.New(IgnoreFile + " must be a regular file")
+	// ErrIgnoreFileTooLarge means .undoignore holds more than undo reads.
+	ErrIgnoreFileTooLarge = fmt.Errorf("%s must be under %d KB and %d patterns", IgnoreFile, maxIgnoreFileSize>>10, maxPatterns)
+)
+
 // New returns a Matcher with the defaults plus the patterns in the project's
 // .undoignore file.
 func New(root string) (*Matcher, error) {
 	patterns := defaultPatterns()
-	file, err := os.Open(filepath.Join(root, IgnoreFile))
+	file, err := openIgnoreFile(filepath.Join(root, IgnoreFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Matcher{patterns: patterns}, nil
 	}
@@ -44,8 +64,10 @@ func New(root string) (*Matcher, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(io.LimitReader(file, maxIgnoreFileSize+1))
+	size, count := 0, 0
 	for scanner.Scan() {
+		size += len(scanner.Bytes()) + 1
 		line := strings.TrimSpace(scanner.Text())
 		switch {
 		case line == "" || strings.HasPrefix(line, "#"):
@@ -54,9 +76,31 @@ func New(root string) (*Matcher, error) {
 			patterns = slices.DeleteFunc(patterns, func(pattern string) bool { return strings.TrimSuffix(pattern, "/") == name })
 		default:
 			patterns = append(patterns, line)
+			count++
+		}
+		if size > maxIgnoreFileSize || count > maxPatterns {
+			return nil, ErrIgnoreFileTooLarge
 		}
 	}
 	return &Matcher{patterns: patterns}, scanner.Err()
+}
+
+// openIgnoreFile opens path, which a symlink may point elsewhere, without
+// blocking on a named pipe, and refuses anything but a regular file.
+func openIgnoreFile(path string) (*os.File, error) {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+	}
+	file := os.NewFile(uintptr(fd), path)
+	info, err := file.Stat()
+	if err != nil {
+		return nil, errors.Join(err, file.Close())
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.Join(ErrIgnoreFileNotRegular, file.Close())
+	}
+	return file, nil
 }
 
 // FromPatterns returns a Matcher for patterns that a Matcher returned
