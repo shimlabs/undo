@@ -138,7 +138,15 @@ func (t *Tracker) checkpoint(label, dir string, dirty map[string]bool, full bool
 		return store.Checkpoint{}, err
 	}
 	if len(list) == 0 {
-		return t.store.Take(label, dir)
+		cp, err := t.store.Take(label, dir)
+		if err != nil {
+			return cp, err
+		}
+		// Take saved the listing it scanned, and every change since then is in
+		// dirty, so the next checkpoint does not need a full scan.
+		t.listing, err = t.store.ListingAt(cp.ID)
+		t.lastID = cp.ID
+		return cp, err
 	}
 	last := list[len(list)-1].ID
 	if t.listing == nil || last != t.lastID {
