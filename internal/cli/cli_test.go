@@ -459,7 +459,7 @@ func TestStatusShowsUnreadableDirectories(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
 	mustRun(t, root, "", "checkpoint")
 
 	_, out := run(t, root, "", "status")

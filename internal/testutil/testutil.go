@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -19,6 +20,18 @@ func WriteFile(t testing.TB, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// RestoreModeOnCleanup sets path back to mode when the test ends, so a test
+// that takes away permissions leaves a tree its cleanup can remove. A path
+// the test already removed is fine.
+func RestoreModeOnCleanup(tb testing.TB, path string, mode fs.FileMode) {
+	tb.Helper()
+	tb.Cleanup(func() {
+		if err := os.Chmod(path, mode); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			tb.Error(err)
+		}
+	})
 }
 
 // Fingerprint maps every path under root to whether it is a directory and a

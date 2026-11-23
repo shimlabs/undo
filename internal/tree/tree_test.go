@@ -200,7 +200,7 @@ func TestScanSkipsUnreadableDirectories(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
 	matcher, err := exclude.New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "noexec"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "noexec"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "noexec"), 0o755)
 	matcher, err := exclude.New(root)
 	if err != nil {
 		t.Fatal(err)

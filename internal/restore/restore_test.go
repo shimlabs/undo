@@ -285,7 +285,7 @@ func TestRestoreReadOnlyDirectory(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "ro"), 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "ro"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "ro"), 0o755)
 	want := snapshot(t, root)
 	take(t, projectStore, "before")
 	testutil.WriteFile(t, filepath.Join(root, "ro", "f.txt"), "v2 damaged")
@@ -414,7 +414,7 @@ func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
 
 	apply(t, projectStore, 1)
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o755); err != nil {
@@ -434,13 +434,13 @@ func TestRestoreKeepsUnreadableFiles(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "secret.key"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "secret.key"), 0o644) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "secret.key"), 0o644)
 	take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "later.key"), "key made after the checkpoint")
 	if err := os.Chmod(filepath.Join(root, "later.key"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "later.key"), 0o644) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "later.key"), 0o644)
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "damaged")
 
 	changes := apply(t, projectStore, 1)
@@ -516,7 +516,7 @@ func TestRestoreKeepsChangedFileItCannotReadNow(t *testing.T) {
 	if err := os.Chmod(secret, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(secret, 0o600) })
+	testutil.RestoreModeOnCleanup(t, secret, 0o600)
 
 	changes := apply(t, projectStore, 1)
 	if err := os.Chmod(secret, 0o600); err != nil {
@@ -798,7 +798,7 @@ func TestRestoreKeepsDirectoryWithUnreadableFileWhereFileWas(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "cache", "secret"), 0); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "cache", "secret"), 0o644) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "cache", "secret"), 0o644)
 	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +893,7 @@ func TestRestoreKeepsDirectoryWithNestedUnreadableContentWhereFileWas(t *testing
 				if err := os.Chmod(unreadable, 0); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { os.Chmod(unreadable, 0o755) })
+				testutil.RestoreModeOnCleanup(t, unreadable, 0o755)
 			})
 			requireRestoredAroundCache(t, projectStore, root)
 		})

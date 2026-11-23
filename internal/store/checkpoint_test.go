@@ -152,7 +152,7 @@ func TestFirstTakeNeverReadsExcluded(t *testing.T) {
 	if err := os.Chmod(locked, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	testutil.RestoreModeOnCleanup(t, locked, 0o755)
 
 	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatalf("first checkpoint read an excluded directory: %v", err)
@@ -250,7 +250,7 @@ func TestTakeSkipsUnreadableDirectories(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
 
 	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
 	if err != nil {
@@ -339,7 +339,7 @@ func TestMergeIntoReadOnlyDirectory(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "ro"), 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "ro"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "ro"), 0o755)
 	for _, content := range []string{"v1", "v2", "v3"} {
 		testutil.WriteFile(t, filepath.Join(root, "ro", "f.txt"), content)
 		take(t, projectStore, content)

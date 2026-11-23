@@ -272,7 +272,7 @@ func TestTrackerRecordsDirectoryThatBecomesReadable(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "data"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(filepath.Join(root, "data"), 0o755) })
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "data"), 0o755)
 	takeCheckpoint(t, projectTracker, "unreadable")
 
 	if err := os.Chmod(filepath.Join(root, "data"), 0o755); err != nil {
@@ -420,7 +420,7 @@ func TestTrackerKeepsUnreadableDirectoriesUntilReadable(t *testing.T) {
 	if err := os.Chmod(locked, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	testutil.RestoreModeOnCleanup(t, locked, 0o755)
 	takeCheckpoint(t, projectTracker, "first")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# edited")
 
@@ -660,7 +660,7 @@ func TestRestoreOfDirectoryReadableAgain(t *testing.T) {
 	if err := os.Chmod(locked, 0); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	testutil.RestoreModeOnCleanup(t, locked, 0o755)
 	projectTracker.mu.Lock()
 	projectTracker.shouldRescan = true
 	projectTracker.mu.Unlock()
@@ -696,7 +696,7 @@ func TestTrackerKeepsUnreadableDirectoryAcrossResume(t *testing.T) {
 	if err := os.Chmod(locked, 0); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	testutil.RestoreModeOnCleanup(t, locked, 0o755)
 	projectTracker.mu.Lock()
 	projectTracker.shouldRescan = true
 	projectTracker.mu.Unlock()
