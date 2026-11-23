@@ -315,8 +315,12 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		for _, rel := range t.unsavedFiles {
 			markDirty(dirty, t.path(rel))
 		}
+		// A write through a name outside the project has no event here, but
+		// a stat of the project's name shows it.
 		for rel := range t.hardLinked {
-			markDirty(dirty, t.path(rel))
+			if entry, err := tree.Stat(t.path(rel)); err != nil || entry != t.listing[rel] {
+				markDirty(dirty, t.path(rel))
+			}
 		}
 		changed, deleted, err = t.applyDirty(dirty)
 		if errors.Is(err, fs.ErrPermission) {
@@ -480,7 +484,11 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 			inodes[stat.Ino] = true
 		}
 	}
-	if inodes == nil {
+	// The listed names of an inode with several names are already checked.
+	for rel := range t.hardLinked {
+		delete(inodes, t.listing[rel].Inode)
+	}
+	if len(inodes) == 0 {
 		return dirty
 	}
 	for rel, entry := range t.listing {
