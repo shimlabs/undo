@@ -109,6 +109,13 @@ func ScanWithSkipped(root string, matcher *exclude.Matcher) (Listing, Skipped, e
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
+			if errors.Is(err, fs.ErrPermission) {
+				// The directory can be listed but not entered.
+				mu.Lock()
+				skipped.Unreadable = append(skipped.Unreadable, dir.rel)
+				mu.Unlock()
+				return nil, nil
+			}
 			if err != nil {
 				return nil, err
 			}

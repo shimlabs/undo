@@ -230,3 +230,23 @@ func BenchmarkScan(b *testing.B) {
 		}
 	}
 }
+
+func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can enter every directory")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.txt"), "a")
+	writeFile(t, filepath.Join(root, "noexec", "f"), "x")
+	os.Chmod(filepath.Join(root, "noexec"), 0o644)
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, "noexec"), 0o755) })
+	matcher, _ := exclude.New(root)
+
+	_, skipped, err := ScanWithSkipped(root, matcher)
+	if err != nil {
+		t.Fatalf("a directory without search permission failed the scan: %v", err)
+	}
+	if !slices.Equal(skipped.Unreadable, []string{"noexec"}) {
+		t.Fatalf("unreadable = %v, want [noexec]", skipped.Unreadable)
+	}
+}
