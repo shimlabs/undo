@@ -155,3 +155,16 @@ func SetOpenFileLimit(tb testing.TB, limit uint64) {
 		}
 	})
 }
+
+// SocketDir returns a new directory for a watcher's socket, removed when the
+// test ends. A socket path must fit in 104 bytes, which the test's own
+// temporary directory does not on macOS.
+func SocketDir(tb testing.TB) string {
+	tb.Helper()
+	dir, err := os.MkdirTemp("/tmp", "undo-test-") //nolint:usetesting // t.TempDir paths are too long for a socket on macOS
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}

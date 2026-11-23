@@ -335,7 +335,7 @@ func makeTreeWritable(path string) {
 		if err != nil || entry.Type()&fs.ModeSymlink != 0 {
 			return nil //nolint:nilerr // a path that cannot be reached cannot block the removal either
 		}
-		setLocked(entryPath, false)
+		_ = setLocked(entryPath, false)
 		if entry.IsDir() {
 			_ = os.Chmod(entryPath, 0o755)
 		}

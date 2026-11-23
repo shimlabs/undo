@@ -268,11 +268,7 @@ func TestRandomHistoryWithWatcher(t *testing.T) {
 // returns a client that only uses it. Pruning is left to the test.
 func startWatcher(t *testing.T, projectStore *store.Store) watch.Client {
 	t.Helper()
-	socketDir, err := os.MkdirTemp("/tmp", "undo-test-") //nolint:usetesting // a socket path must fit in 104 bytes, which t.TempDir paths do not on macOS
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	socketDir := testutil.SocketDir(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	ready := make(chan struct{})
 	exited := make(chan error, 1)
