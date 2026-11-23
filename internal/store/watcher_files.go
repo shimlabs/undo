@@ -3,7 +3,6 @@ package store
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -13,7 +12,7 @@ import (
 // it waits for, and returns its path. It must be a real directory, so the
 // markers never land outside the store.
 func (s *Store) MarkerDir() (string, error) {
-	path := filepath.Join(s.dir, markersDirName)
+	path := s.markersDir()
 	if err := s.mkdirAll(path); err != nil {
 		return "", err
 	}
@@ -25,7 +24,7 @@ func (s *Store) MarkerDir() (string, error) {
 
 // WriteMarker creates the empty marker file name in the marker directory.
 func (s *Store) WriteMarker(name string) error {
-	file, err := s.openFile(filepath.Join(s.dir, markersDirName, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC|unix.O_NOFOLLOW)
+	file, err := s.openFile(s.markerPath(name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC|unix.O_NOFOLLOW)
 	if err != nil {
 		return err
 	}
@@ -34,12 +33,12 @@ func (s *Store) WriteMarker(name string) error {
 
 // RemoveMarker removes the marker file name.
 func (s *Store) RemoveMarker(name string) error {
-	return s.remove(filepath.Join(s.dir, markersDirName, name))
+	return s.remove(s.markerPath(name))
 }
 
 // WatcherFailure returns why the watcher last failed to start, and when.
 func (s *Store) WatcherFailure() (reason string, failedAt time.Time, err error) {
-	path := filepath.Join(s.dir, watcherFailureFile)
+	path := s.watcherFailurePath()
 	info, err := s.lstat(path)
 	if err != nil {
 		return "", time.Time{}, err
@@ -50,5 +49,5 @@ func (s *Store) WatcherFailure() (reason string, failedAt time.Time, err error) 
 
 // SaveWatcherFailure records why the watcher failed to start.
 func (s *Store) SaveWatcherFailure(reason string) error {
-	return s.writeFileAtomic(filepath.Join(s.dir, watcherFailureFile), []byte(reason))
+	return s.writeFileAtomic(s.watcherFailurePath(), []byte(reason))
 }

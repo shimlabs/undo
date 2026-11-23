@@ -27,6 +27,7 @@ const (
 	layersDirName      = "layers"
 	markersDirName     = "markers"
 	watcherFailureFile = "watcher-failure"
+	layerFilesDirName  = "files"
 )
 
 func (s *Store) configPath() string {
@@ -81,7 +82,7 @@ func (s *Store) layerDir(id int) string {
 }
 
 func (s *Store) layerFile(id int, rel string) string {
-	return filepath.Join(s.layerDir(id), "files", filepath.FromSlash(rel))
+	return filepath.Join(s.layerDir(id), layerFilesDirName, filepath.FromSlash(rel))
 }
 
 func (s *Store) manifestPath(id int) string {
@@ -104,4 +105,16 @@ func locationPath(home, dir string) string {
 
 func (s *Store) lostPath() string {
 	return filepath.Join(s.dir, lostFile)
+}
+
+func (s *Store) markersDir() string {
+	return filepath.Join(s.dir, markersDirName)
+}
+
+func (s *Store) markerPath(name string) string {
+	return filepath.Join(s.markersDir(), name)
+}
+
+func (s *Store) watcherFailurePath() string {
+	return filepath.Join(s.dir, watcherFailureFile)
 }
