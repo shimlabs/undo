@@ -54,3 +54,25 @@ func TestDefaultsSkipOnlyDirectories(t *testing.T) {
 		}
 	}
 }
+
+func TestExcludesChecksParentDirectories(t *testing.T) {
+	matcher := newMatcher(t, "build/\n")
+
+	for _, tc := range []struct {
+		rel   string
+		isDir bool
+		want  bool
+	}{
+		{"build", true, true},
+		{"build/out.bin", false, true},
+		{"web/build/assets/app.js", false, true},
+		{"web/node_modules/react/index.js", false, true},
+		{"build", false, false},
+		{"src/build.go", false, false},
+		{".", true, false},
+	} {
+		if got := matcher.Excludes(tc.rel, tc.isDir); got != tc.want {
+			t.Errorf("Excludes(%q, %v) = %v, want %v", tc.rel, tc.isDir, got, tc.want)
+		}
+	}
+}

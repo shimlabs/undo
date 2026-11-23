@@ -77,6 +77,20 @@ func (m *Matcher) Match(rel string, isDir bool) bool {
 	return false
 }
 
+// Excludes reports whether rel is excluded, either itself or because a
+// directory above it is.
+func (m *Matcher) Excludes(rel string, isDir bool) bool {
+	if rel == "." {
+		return false
+	}
+	for dir := path.Dir(rel); dir != "."; dir = path.Dir(dir) {
+		if m.Match(dir, true) {
+			return true
+		}
+	}
+	return m.Match(rel, isDir)
+}
+
 // Patterns returns the patterns in use.
 func (m *Matcher) Patterns() []string {
 	return slices.Clone(m.patterns)
