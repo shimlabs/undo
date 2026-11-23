@@ -159,11 +159,11 @@ func (s *Store) Commit(after int, options CheckpointOptions, changes Changes) (C
 // checkpoints are unaffected.
 func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes) (Checkpoint, error) {
 	id := latestID + 1
-	lost, err := s.readLost()
+	record, err := s.readLost()
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	changes.Changed = withPending(changes, lost.Pending)
+	changes.Changed = withPending(changes, record.Pending)
 	// A layer left behind by an interrupted checkpoint would mix old files
 	// into this one.
 	if err := os.RemoveAll(s.layerDir(id)); err != nil {
@@ -191,10 +191,11 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 	if err := s.appendIndex(checkpoint); err != nil {
 		return Checkpoint{}, err
 	}
-	// After a crash before this, the next commit stores them once more.
-	if len(lost.Pending) > 0 {
-		lost.Pending = nil
-		if err := writeJSON(s.lostPath(), lost); err != nil {
+	// After a crash before this, the next commit stores the pending paths
+	// once more.
+	if len(record.Pending) > 0 {
+		record.Pending = nil
+		if err := s.writeLost(record); err != nil {
 			return checkpoint, err
 		}
 	}

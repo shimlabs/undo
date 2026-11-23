@@ -91,7 +91,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 		toStoreAgain[rel] = true
 	}
 	record = lostRecord{Paths: slices.Sorted(maps.Keys(lost)), Pending: slices.Sorted(maps.Keys(toStoreAgain))}
-	if err := writeJSON(s.lostPath(), record); err != nil {
+	if err := s.writeLost(record); err != nil {
 		return freed, err
 	}
 	if err := writeGob(s.baseListingPath(), base); err != nil {
@@ -178,29 +178,6 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 		delete(lost, rel)
 	}
 	return freed, nil
-}
-
-// lostRecord lists the paths in the base whose stored copy is gone, and the
-// ones the next commit must store again from the project.
-type lostRecord struct {
-	Paths   []string `json:"paths"`
-	Pending []string `json:"pending"`
-}
-
-func (s *Store) readLost() (lostRecord, error) {
-	var record lostRecord
-	if err := readJSON(s.lostPath(), &record); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return lostRecord{}, err
-	}
-	return record, nil
-}
-
-func setOf(paths []string) map[string]bool {
-	set := make(map[string]bool, len(paths))
-	for _, rel := range paths {
-		set[rel] = true
-	}
-	return set
 }
 
 // mergeDir makes sure rel is a directory in the base.
