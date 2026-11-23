@@ -126,8 +126,14 @@ func startPruner(projectStore *store.Store, limits store.Limits) *pruner {
 	p := &pruner{requests: make(chan struct{}, 1)}
 	p.running.Go(func() {
 		for range p.requests {
-			if _, err := projectStore.PruneIfDue(time.Now(), limits); err != nil {
+			merged, err := projectStore.PruneIfDue(time.Now(), limits)
+			if err != nil {
 				projectStore.LogError(fmt.Errorf("pruning failed: %w", err))
+			}
+			// A prune decodes the base listing and merges layers, and the
+			// server is idle when it runs.
+			if merged > 0 {
+				debug.FreeOSMemory()
 			}
 		}
 	})
