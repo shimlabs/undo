@@ -20,6 +20,7 @@ func watchCommand(env Env) error {
 	if err != nil {
 		return err
 	}
+	defer projectStore.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	err = watch.Serve(ctx, projectStore, watch.Options{SocketDir: env.SocketDir, IdleTimeout: time.Hour, Limits: store.DefaultLimits()})

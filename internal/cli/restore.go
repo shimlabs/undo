@@ -29,6 +29,7 @@ func undoCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	defer projectStore.Close()
 	latest, hasLatest, err := projectStore.Latest()
 	if err != nil {
 		return err
@@ -52,6 +53,7 @@ func toCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	defer projectStore.Close()
 	return restoreTo(env, projectStore, checkpoint, parsed.isConfirmed)
 }
 
@@ -67,6 +69,7 @@ func diffCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	defer projectStore.Close()
 	changes, err := restore.Plan(projectStore, checkpoint.ID)
 	if err != nil {
 		return err
@@ -96,6 +99,7 @@ func listCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	defer projectStore.Close()
 	checkpoints, err := projectStore.List()
 	if err != nil {
 		return err
@@ -157,21 +161,30 @@ func printNoCheckpoints(env Env, parsed flags) {
 		return
 	}
 	for _, other := range stores {
-		root := other.Root()
-		if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if latest, hasLatest, err := other.Latest(); err == nil && hasLatest {
-			if shown := terminal.Printable(root); shown != root {
-				// A path with control characters cannot be shown both readably
-				// and safe to paste, so the command is described instead.
-				out.Warning("%s was deleted. Bring it back with undo to %d and --project set to that path.", shown, latest.ID)
-			} else {
-				out.Warning("%s was deleted. Bring it back with:", displayPath(root))
-				out.Printf("  %s\n", out.Bold(fmt.Sprintf("undo to %d --project %s", latest.ID, shell.Quote(root))))
-			}
-		}
+		printDeletedProject(out, other)
+		other.Close()
 	}
+}
+
+// printDeletedProject says how to bring back the project of projectStore if
+// its folder was deleted.
+func printDeletedProject(out *terminal.Writer, projectStore *store.Store) {
+	root := projectStore.Root()
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	latest, hasLatest, err := projectStore.Latest()
+	if err != nil || !hasLatest {
+		return
+	}
+	if shown := terminal.Printable(root); shown != root {
+		// A path with control characters cannot be shown both readably
+		// and safe to paste, so the command is described instead.
+		out.Warning("%s was deleted. Bring it back with undo to %d and --project set to that path.", shown, latest.ID)
+		return
+	}
+	out.Warning("%s was deleted. Bring it back with:", displayPath(root))
+	out.Printf("  %s\n", out.Bold(fmt.Sprintf("undo to %d --project %s", latest.ID, shell.Quote(root))))
 }
 
 func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, error) {
@@ -185,6 +198,7 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 	}
 	checkpoint, err := projectStore.Checkpoint(id)
 	if err != nil {
+		projectStore.Close()
 		return nil, store.Checkpoint{}, fmt.Errorf("%w (see undo list)", err)
 	}
 	return projectStore, checkpoint, nil

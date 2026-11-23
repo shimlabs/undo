@@ -127,6 +127,9 @@ func checkBinary(binary string) error {
 // and the agent is never blocked.
 func (a Agent) Handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) error {
 	projectStore, err := a.handle(in, storeHome, checkpoint)
+	if projectStore != nil {
+		defer projectStore.Close()
+	}
 	switch {
 	case err == nil:
 	case projectStore != nil:

@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/testutil"
+	"golang.org/x/sys/unix"
 )
 
 func TestCreateMakesStoreUnderHome(t *testing.T) {
@@ -353,4 +355,39 @@ func TestExtractNeverReadsThroughSymlinkInLayer(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(root, "id_ed25519")); err == nil {
 		t.Fatalf("a file from outside the store reached the project: %q", data)
 	}
+}
+
+func TestStoresUnderClosesSkippedStores(t *testing.T) {
+	home := t.TempDir()
+	for i := range 50 {
+		storeDir := filepath.Join(home, fmt.Sprintf("store%02d", i))
+		if err := os.Mkdir(storeDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeJSONFile(filepath.Join(storeDir, configFile), config{Format: format, Root: "/elsewhere/project"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := openDescriptorCount(t)
+	stores, err := StoresUnder(home, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stores) != 0 {
+		t.Fatalf("StoresUnder found %d stores, want 0", len(stores))
+	}
+	if after := openDescriptorCount(t); after > before {
+		t.Fatalf("StoresUnder left %d descriptors open", after-before)
+	}
+}
+
+func openDescriptorCount(t *testing.T) int {
+	t.Helper()
+	count := 0
+	for fd := range 4096 {
+		if _, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0); err == nil {
+			count++
+		}
+	}
+	return count
 }

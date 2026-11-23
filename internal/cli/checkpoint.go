@@ -16,6 +16,7 @@ func checkpointCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	defer projectStore.Close()
 	if parsed.isCopyMode {
 		if err := projectStore.SetCopyMode(true); err != nil {
 			return err
@@ -40,6 +41,7 @@ func runCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	defer projectStore.Close()
 	if _, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: strings.Join(args, " "), Dir: env.Dir}); err != nil {
 		return err
 	}

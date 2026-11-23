@@ -32,6 +32,7 @@ func statusCommand(args []string, env Env) error {
 	case err != nil:
 		return err
 	default:
+		defer projectStore.Close()
 		if err := printStore(out, env, projectStore); err != nil {
 			return err
 		}

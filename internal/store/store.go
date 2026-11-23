@@ -128,6 +128,11 @@ func Create(home, root string) (*Store, error) {
 	return openAt(dir, root)
 }
 
+// Close releases the store directory. The Store must not be used after.
+func (s *Store) Close() error {
+	return s.files.Close()
+}
+
 // openAt opens the store in dir for the project at root, writing its
 // settings if the store is new.
 func openAt(dir, root string) (*Store, error) {
@@ -138,6 +143,17 @@ func openAt(dir, root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	s, err := initStore(dir, root, files)
+	if err != nil {
+		files.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// initStore checks the store layout and settings, writing them if the
+// store is new.
+func initStore(dir, root string, files *os.Root) (*Store, error) {
 	s := &Store{root: root, dir: dir, files: files}
 	// The root already stops a symlink in place of these from leading
 	// outside the store; refusing it here says so plainly.
@@ -297,20 +313,29 @@ func StoresUnder(home, dir string) ([]*Store, error) {
 		if checkPrivateDir(storeDir) != nil {
 			continue
 		}
-		files, err := openFiles(storeDir)
-		if err != nil {
-			continue
+		if s, isInDir := openStoreIn(storeDir, dir); isInDir {
+			stores = append(stores, s)
 		}
-		s := &Store{dir: storeDir, files: files}
-		if s.loadConfig() != nil {
-			continue
-		}
-		settings := s.config.Load()
-		if settings.Root == "" || filepath.Dir(settings.Root) != dir {
-			continue
-		}
-		s.root = settings.Root
-		stores = append(stores, s)
 	}
 	return stores, nil
+}
+
+// openStoreIn opens the store in storeDir if its project is directly inside
+// dir, and closes it otherwise.
+func openStoreIn(storeDir, dir string) (*Store, bool) {
+	files, err := openFiles(storeDir)
+	if err != nil {
+		return nil, false
+	}
+	s := &Store{dir: storeDir, files: files}
+	if err := s.loadConfig(); err != nil {
+		files.Close()
+		return nil, false
+	}
+	s.root = s.config.Load().Root
+	if s.root == "" || filepath.Dir(s.root) != dir {
+		files.Close()
+		return nil, false
+	}
+	return s, true
 }
