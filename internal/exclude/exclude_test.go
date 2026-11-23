@@ -146,3 +146,13 @@ func TestNewRefusesSymlinkToIgnoreFileOutsideProject(t *testing.T) {
 		t.Fatalf("New = %v, %v, want no matcher and ErrIgnoreFileOutsideProject", matcher, err)
 	}
 }
+
+func TestNewRefusesHugeIgnoreFileLine(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, IgnoreFile), []byte(strings.Repeat("a", maxIgnoreFileSize+10)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if matcher, err := New(root); !errors.Is(err, ErrIgnoreFileTooLarge) || matcher != nil {
+		t.Fatalf("New = %v, %v, want no matcher and ErrIgnoreFileTooLarge", matcher, err)
+	}
+}

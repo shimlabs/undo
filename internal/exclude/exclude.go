@@ -67,6 +67,8 @@ func New(root string) (*Matcher, error) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(io.LimitReader(file, maxIgnoreFileSize+1))
+	// One line may be as long as the whole file may be.
+	scanner.Buffer(make([]byte, 0, 4096), maxIgnoreFileSize+2)
 	size, count := 0, 0
 	for scanner.Scan() {
 		size += len(scanner.Bytes()) + 1
@@ -84,7 +86,10 @@ func New(root string) (*Matcher, error) {
 			return nil, ErrIgnoreFileTooLarge
 		}
 	}
-	return &Matcher{patterns: patterns}, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return &Matcher{patterns: patterns}, nil
 }
 
 // openIgnoreFile opens the .undoignore file of the project at root without
