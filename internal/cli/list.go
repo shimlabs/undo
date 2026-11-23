@@ -57,7 +57,7 @@ func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root
 			details = append(details, "in "+displayPath(checkpoint.Dir))
 		}
 		if checkpoint.Agent != "" {
-			details = append(details, checkpoint.Agent)
+			details = append(details, terminal.Printable(checkpoint.Agent))
 		}
 		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), terminal.Printable(checkpoint.Label))
 		if len(details) > 0 {
