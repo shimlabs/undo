@@ -548,3 +548,22 @@ func TestTakeWithChangesInManyDirectories(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedMergeKeepsCheckpointsWorkingAfterSeveral(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+	for i := range 3 {
+		testutil.WriteFile(t, filepath.Join(root, "a.txt"), strings.Repeat("a", i+2))
+		take(t, projectStore, "edit")
+	}
+	if err := projectStore.writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(projectStore.manifestPath(1)); err != nil {
+		t.Fatal(err)
+	}
+
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "changed while the merge fails")
+	if _, err := projectStore.Take(CheckpointOptions{Label: "after", Dir: root}); err != nil {
+		t.Fatalf("a failing merge stopped checkpoints: %v", err)
+	}
+}

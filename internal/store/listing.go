@@ -64,11 +64,10 @@ func (s *Store) ListingAt(id int) (tree.Listing, error) {
 }
 
 // listingForward applies the layers after checkpoint from to listing, which
-// is the listing at from, up to checkpoint to.
+// is the listing at from, up to checkpoint to. It reads only manifests, which
+// a merge never changes, so it works while a merge is pending, and fails if
+// one of them is gone.
 func (s *Store) listingForward(from int, listing tree.Listing, to int) (tree.Listing, error) {
-	if _, err := s.lstat(s.mergePath()); err == nil {
-		return nil, ErrMergePending
-	}
 	checkpoints, err := s.List()
 	if err != nil {
 		return nil, err
