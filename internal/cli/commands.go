@@ -280,11 +280,13 @@ func parseArguments(cmd command, args []string) (parsed flags, isHelp bool, err 
 		return flags{args: args}, false, nil
 	}
 	if cmd.maxArguments < 0 {
-		if len(args) > 0 && isHelpFlag(args[0]) {
+		switch {
+		case len(args) > 0 && isHelpFlag(args[0]):
 			return flags{}, true, nil
-		}
-		if len(args) > 0 && args[0] == "--" {
+		case len(args) > 0 && args[0] == "--":
 			args = args[1:]
+		case len(args) > 0 && strings.HasPrefix(args[0], "-"):
+			return flags{}, false, usageError{message: "undo " + cmd.name + " takes no flags; put the command after --", command: &cmd}
 		}
 		return flags{args: args}, false, nil
 	}

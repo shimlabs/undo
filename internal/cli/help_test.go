@@ -38,6 +38,7 @@ func TestUsageErrors(t *testing.T) {
 		{[]string{"diff", "1", "2"}, "Too many arguments for undo diff <id>."},
 		{[]string{"help", "watch"}, `Unknown command "watch".`},
 		{[]string{"rm"}, `Unknown command "rm".`},
+		{[]string{"run", "--yes", "ls"}, "undo run takes no flags; put the command after --."},
 	}
 	for _, test := range tests {
 		code, out := run(t, t.TempDir(), "", test.args...)
