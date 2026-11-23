@@ -14,13 +14,19 @@ func installCommand(parsed flags, env Env) error {
 	if err != nil {
 		return err
 	}
+	wasInstalled := agent.IsInstalled()
 	path, err := agent.Install(env.Executable)
 	if err != nil {
 		return err
 	}
 	out := env.stdout()
-	out.Successf("Installed the undo hook for %s", agent.Title)
-	out.Printf("  %s %s\n\n%s\n", out.Dim("in"), displayPath(path), agent.Note)
+	if wasInstalled {
+		out.Successf("The undo hook for %s is already installed in %s.", agent.Title, displayPath(path))
+		return nil
+	}
+	out.Successf("Installed the undo hook for %s in %s.", agent.Title, displayPath(path))
+	out.Println()
+	out.Println(agent.Note)
 	return nil
 }
 
@@ -29,11 +35,16 @@ func uninstallCommand(parsed flags, env Env) error {
 	if err != nil {
 		return err
 	}
+	out := env.stdout()
+	if !agent.IsInstalled() {
+		out.Printf("The undo hook for %s is not installed.\n", agent.Title)
+		return nil
+	}
 	path, err := agent.Uninstall()
 	if err != nil {
 		return err
 	}
-	env.stdout().Successf("Removed the undo hook for %s from %s", agent.Title, displayPath(path))
+	out.Successf("Removed the undo hook for %s from %s.", agent.Title, displayPath(path))
 	return nil
 }
 
