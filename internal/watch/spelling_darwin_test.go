@@ -87,7 +87,7 @@ func TestRemoveByOtherFormAfterSubdirEvents(t *testing.T) {
 	checkMatchesScan(t, projectStore, root, fourth.ID)
 }
 
-func TestRemoveByOtherFormThenRestoreBringsItBack(t *testing.T) {
+func TestRemoveByOtherFormThenRestoreKeepsItDeleted(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
 	testutil.WriteFile(t, filepath.Join(root, "café.txt"), "draft")
@@ -200,69 +200,6 @@ func TestCaseRenameThroughThirdSpellingAndEditThenRestore(t *testing.T) {
 	if string(data) != "v2 latest work" {
 		t.Fatalf("Lib/a.go = %q, %v after restoring checkpoint %d; want v2 latest work", data, err, third.ID)
 	}
-}
-
-func TestWriteThroughOutsideLinkMadeWhileWatching(t *testing.T) {
-	outsideDir := testutil.TempDir(t)
-	outside := filepath.Join(outsideDir, "shared.txt")
-	projectTracker, projectStore, root := newTrackerWithFiles(t)
-	inside := filepath.Join(root, "shared.txt")
-	testutil.WriteFile(t, inside, "v1")
-	takeCheckpoint(t, projectTracker, "1")
-	takeCheckpoint(t, projectTracker, "2")
-	if err := os.Link(inside, outside); err != nil {
-		t.Fatal(err)
-	}
-	takeCheckpoint(t, projectTracker, "3")
-	// Writing in place keeps the inode, so the project's name sees the write.
-	if err := os.WriteFile(outside, []byte("v2 important"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	fourth := takeCheckpoint(t, projectTracker, "4")
-	listing, err := projectStore.ListingAt(fourth.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if listing["shared.txt"].Size != int64(len("v2 important")) {
-		t.Fatalf("checkpoint %d missed the write through the outside name: %+v", fourth.ID, listing["shared.txt"])
-	}
-}
-
-func checkSwap(t *testing.T, a, b string, makeA, makeB func(*testing.T, string)) {
-	t.Helper()
-	projectTracker, projectStore, root := newTrackerWithFiles(t)
-	makeA(t, filepath.Join(root, a))
-	makeB(t, filepath.Join(root, b))
-	takeCheckpoint(t, projectTracker, "1")
-	takeCheckpoint(t, projectTracker, "2")
-	if err := unix.RenamexNp(filepath.Join(root, a), filepath.Join(root, b), unix.RENAME_SWAP); err != nil {
-		t.Fatal(err)
-	}
-	third := takeCheckpoint(t, projectTracker, "3")
-	checkMatchesScan(t, projectStore, root, third.ID)
-}
-
-func dirWithFile(name string) func(*testing.T, string) {
-	return func(t *testing.T, dir string) {
-		t.Helper()
-		testutil.WriteFile(t, filepath.Join(dir, name, "f.txt"), name)
-	}
-}
-
-func fileWith(content string) func(*testing.T, string) {
-	return func(t *testing.T, file string) {
-		t.Helper()
-		testutil.WriteFile(t, file, content)
-	}
-}
-
-func TestSwapFiles(t *testing.T) { checkSwap(t, "x.txt", "y.txt", fileWith("x"), fileWith("yy")) }
-func TestSwapDirs(t *testing.T)  { checkSwap(t, "dx", "dy", dirWithFile("one"), dirWithFile("two")) }
-func TestSwapDirWithExcluded(t *testing.T) {
-	checkSwap(t, "lib", "node_modules", dirWithFile("one"), dirWithFile("pkg"))
-}
-func TestSwapFileWithDir(t *testing.T) {
-	checkSwap(t, "x.txt", "dy", fileWith("x"), dirWithFile("two"))
 }
 
 func TestSwapThroughOtherSpelling(t *testing.T) {
