@@ -126,8 +126,8 @@ func TestSecondServerExits(t *testing.T) {
 
 func TestServerPrunesAfterCheckpoints(t *testing.T) {
 	s, root := serverProject(t)
-	pruneInterval = 0
-	t.Cleanup(func() { pruneInterval = time.Hour })
+	pruneInterval, pruneQuiet = 0, 20*time.Millisecond
+	t.Cleanup(func() { pruneInterval, pruneQuiet = time.Hour, 30*time.Second })
 	done := make(chan error, 1)
 	ready := make(chan struct{})
 	limits := store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
@@ -152,6 +152,37 @@ func TestServerPrunesAfterCheckpoints(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("checkpoints = %d after pruning, want only 3", len(list))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestServerPrunesOnlyWhenQuiet(t *testing.T) {
+	s, root := serverProject(t)
+	pruneInterval, pruneQuiet = 0, 500*time.Millisecond
+	t.Cleanup(func() { pruneInterval, pruneQuiet = time.Hour, 30*time.Second })
+	ready := make(chan struct{})
+	limits := store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
+	go Serve(s, Options{Idle: time.Minute, Limits: limits, Ready: func() { close(ready) }})
+	<-ready
+
+	for i := range 3 {
+		write(t, filepath.Join(root, "main.go"), fmt.Sprintf("package main // %d", i))
+		if _, err := Checkpoint(s, "edit", root, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if list, _ := s.List(); len(list) != 3 {
+		t.Fatalf("checkpoints = %d right after the last request, want 3 until the server is quiet", len(list))
+	}
+	isPruned := func() bool {
+		list, _ := s.List()
+		return len(list) == 1
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !isPruned() {
+		if time.Now().After(deadline) {
+			t.Fatal("the server did not prune after going quiet")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

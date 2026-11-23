@@ -31,6 +31,10 @@ type response struct {
 // whole store, which is too slow to do after every checkpoint.
 var pruneInterval = time.Hour
 
+// pruneQuiet is how long the server waits without requests before it prunes,
+// so pruning does not compete with checkpoints for the disk.
+var pruneQuiet = 30 * time.Second
+
 // Options configure Serve.
 type Options struct {
 	// Idle is how long the server waits for a request before it exits.
@@ -43,7 +47,8 @@ type Options struct {
 
 // Serve watches the project of s and takes checkpoints for clients until no
 // request arrives for options.Idle. After checkpoints it prunes the store in
-// the background, at most once per pruneInterval.
+// the background once it has been quiet for pruneQuiet, at most once per
+// pruneInterval.
 func Serve(s *store.Store, options Options) error {
 	path, err := SocketPath(s)
 	if err != nil {
@@ -87,29 +92,38 @@ func Serve(s *store.Store, options Options) error {
 		<-pruned
 	}()
 	var lastPrune time.Time
+	pruneDue := false
 
 	lastID := 0
 	for {
-		if err := listener.SetDeadline(time.Now().Add(options.Idle)); err != nil {
+		wait := options.Idle
+		if pruneDue {
+			wait = min(wait, pruneQuiet)
+		}
+		if err := listener.SetDeadline(time.Now().Add(wait)); err != nil {
 			return err
 		}
 		conn, err := listener.Accept()
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return nil
+			if !pruneDue {
+				return nil
+			}
+			pruneDue = false
+			lastPrune = time.Now()
+			select {
+			case prunes <- struct{}{}:
+			default:
+			}
+			continue
 		}
 		if err != nil {
 			return err
 		}
 		before := lastID
 		lastID = serveOne(conn, tracker, lastID)
-		if lastID == before || time.Since(lastPrune) < pruneInterval {
-			continue
-		}
-		lastPrune = time.Now()
-		select {
-		case prunes <- struct{}{}:
-		default:
+		if lastID != before && time.Since(lastPrune) >= pruneInterval {
+			pruneDue = true
 		}
 	}
 }
