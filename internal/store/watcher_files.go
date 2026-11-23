@@ -2,8 +2,11 @@ package store
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // MarkerDir creates the directory where the watcher writes the marker files
@@ -18,6 +21,20 @@ func (s *Store) MarkerDir() (string, error) {
 		return "", fmt.Errorf("%s: %w", path, ErrUnsafeStore)
 	}
 	return path, nil
+}
+
+// WriteMarker creates the empty marker file name in the marker directory.
+func (s *Store) WriteMarker(name string) error {
+	file, err := s.openFile(filepath.Join(s.dir, markersDirName, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+// RemoveMarker removes the marker file name.
+func (s *Store) RemoveMarker(name string) error {
+	return s.remove(filepath.Join(s.dir, markersDirName, name))
 }
 
 // WatcherFailure returns why the watcher last failed to start, and when.

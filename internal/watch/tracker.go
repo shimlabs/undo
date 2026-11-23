@@ -442,18 +442,16 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 		t.mu.Unlock()
 		return 0, false
 	}
-	markerPath := filepath.Join(t.markerDir, fmt.Sprintf("%s-%d-%d", t.markerPrefix, os.Getpid(), t.sequence.Add(1)))
+	markerName := fmt.Sprintf("%s-%d-%d", t.markerPrefix, os.Getpid(), t.sequence.Add(1))
+	markerPath := filepath.Join(t.markerDir, markerName)
 	done := make(chan fsnotify.EventID, 1)
 	t.mu.Lock()
 	t.markers[markerPath] = done
 	t.mu.Unlock()
-	defer os.Remove(markerPath)
+	// A marker left behind is harmless, as every checkpoint uses a new name.
+	defer func() { _ = t.store.RemoveMarker(markerName) }()
 
-	marker, err := os.OpenFile(markerPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|unix.O_NOFOLLOW, 0o600)
-	if err != nil {
-		return 0, false
-	}
-	if err := marker.Close(); err != nil {
+	if err := t.store.WriteMarker(markerName); err != nil {
 		return 0, false
 	}
 	select {
