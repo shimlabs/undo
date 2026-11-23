@@ -137,7 +137,8 @@ func printNoCheckpoints(env Env, parsed flags) {
 		}
 		if latest, hasLatest, err := other.Latest(); err == nil && hasLatest {
 			if shown := printable(root); shown != root {
-				// No quoting both shows such a path and stays safe to paste.
+				// A path with control characters cannot be shown both readably
+				// and safe to paste, so the command is described instead.
 				fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with undo to %d and --project set to that path.\n", shown, latest.ID)
 			} else {
 				fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with: undo to %d --project %s\n", root, latest.ID, shell.Quote(root))
