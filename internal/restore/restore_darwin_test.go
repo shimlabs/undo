@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -205,4 +206,77 @@ func TestRestoreKeepsFilesInProjectLockedInFinder(t *testing.T) {
 			t.Errorf("Kept = %v, want %s, which sits in the locked project folder", changes.Kept, rel)
 		}
 	}
+}
+
+func TestRestoreDeletedFolderThatWasLockedInFinder(t *testing.T) {
+	projectStore, root := newProject(t)
+	docs := filepath.Join(root, "docs")
+	testutil.WriteFile(t, filepath.Join(docs, "a.txt"), "v1")
+	lockFile(t, docs, root, projectStore.Dir())
+	take(t, projectStore, "1")
+	if err := unix.Chflags(docs, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(docs); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
+	take(t, projectStore, "2")
+
+	apply(t, projectStore, 1)
+	if data, err := os.ReadFile(filepath.Join(docs, "a.txt")); err != nil || string(data) != "v1" {
+		t.Fatalf("docs/a.txt = %q, %v", data, err)
+	}
+	if restored, err := projectStore.RestoredEntries(1); err != nil || len(restored) == 0 {
+		t.Fatalf("restore record = %v, %v, want it saved", restored, err)
+	}
+}
+
+func TestRestoreDeletedTreeWithFolderLockedInFinder(t *testing.T) {
+	projectStore, root := newProject(t)
+	signed := filepath.Join(root, "assets", "signed")
+	testutil.WriteFile(t, filepath.Join(signed, "a.pdf"), "v1")
+	lockFile(t, signed, root, projectStore.Dir())
+	take(t, projectStore, "1")
+	if err := unix.Chflags(signed, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "assets")); err != nil {
+		t.Fatal(err)
+	}
+	take(t, projectStore, "2")
+
+	apply(t, projectStore, 1)
+	apply(t, projectStore, 2)
+	if _, err := os.Lstat(filepath.Join(root, "assets")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("assets after undoing the restore: %v, want it gone", err)
+	}
+}
+
+func TestRestoreFolderLockedInFinderKeepsModesAndTimes(t *testing.T) {
+	projectStore, root := newProject(t)
+	docs := filepath.Join(root, "docs")
+	testutil.WriteFile(t, filepath.Join(docs, "a.txt"), "v1")
+	if err := os.Chmod(filepath.Join(root, "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lockFile(t, docs, root, projectStore.Dir())
+	want := snapshot(t, root)
+	take(t, projectStore, "1")
+	if err := unix.Chflags(docs, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(docs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	take(t, projectStore, "2")
+
+	apply(t, projectStore, 1)
+	requireSame(t, want, snapshot(t, root))
 }

@@ -132,6 +132,9 @@ type restorePlan struct {
 	// unchanged holds the paths an earlier restore to the same checkpoint
 	// wrote and nothing changed since, so they still match the target.
 	unchanged tree.Listing
+	// cloned holds the paths written as part of a whole directory cloned
+	// from the base, which keeps the lock flags they had at the checkpoint.
+	cloned map[string]bool
 }
 
 // planRestore plans a restore of checkpoint id. It never touches a path the
@@ -459,12 +462,12 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 	}
 	extractor := projectStore.NewExtractor()
 	defer extractor.Close()
-	isCloned := map[string]bool{}
+	p.cloned = map[string]bool{}
 	var files []string
 	parents := tree.NewParentChecker(p.root)
 	for _, rel := range paths {
-		if rel != "." && isCloned[path.Dir(rel)] {
-			isCloned[rel] = true
+		if rel != "." && p.cloned[path.Dir(rel)] {
+			p.cloned[rel] = true
 			continue
 		}
 		if err := parents.Check(rel); err != nil {
@@ -481,7 +484,7 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 			err = p.inParent(rel, func(dir *os.File, name string) error {
 				return extractor.ExtractBaseDir(rel, dir, name)
 			})
-			isCloned[rel] = true
+			p.cloned[rel] = true
 		case source.Entry.Kind == tree.Dir:
 			err = p.projectRoot.MkdirAll(filepath.FromSlash(rel), 0o700)
 		case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:
@@ -590,7 +593,17 @@ func (p *restorePlan) makeParentWritable(rel string) error {
 
 func (p *restorePlan) setModeAndTimes(rel string, entry tree.Entry) error {
 	name := filepath.FromSlash(rel)
-	if err := p.projectRoot.Chmod(name, clone.PermissionBits(entry.Mode)); err != nil {
+	err := p.projectRoot.Chmod(name, clone.PermissionBits(entry.Mode))
+	if errors.Is(err, fs.ErrPermission) && p.cloned[rel] {
+		// A directory cloned whole keeps a lock flag it had at the checkpoint,
+		// which forbids setting its mode and times. A restore brings paths
+		// back unlocked, as it does every file it writes on its own.
+		if err := p.inParent(rel, clone.UnlockAt); err != nil {
+			return err
+		}
+		err = p.projectRoot.Chmod(name, clone.PermissionBits(entry.Mode))
+	}
+	if err != nil {
 		return err
 	}
 	modTime := time.Unix(0, entry.ModTime)
