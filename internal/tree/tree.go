@@ -5,12 +5,15 @@ package tree
 import (
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"syscall"
 
 	"github.com/shimlabs/undo/internal/exclude"
+	"github.com/shimlabs/undo/internal/walk"
 )
 
 // Kind is the type of a filesystem entry.
@@ -48,38 +51,67 @@ func Scan(root string, ex *exclude.Matcher) (Listing, error) {
 // ScanAll works like Scan and also returns the excluded paths it skipped. It
 // does not go into excluded directories.
 func ScanAll(root string, ex *exclude.Matcher) (Listing, []string, error) {
-	listing := Listing{}
+	entry, err := Stat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Listing{}, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	listing := Listing{".": entry}
+	if entry.Kind != Dir {
+		return listing, nil, nil
+	}
+	var mu sync.Mutex
 	var excluded []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if rel != "." && ex.Match(rel, d.IsDir()) {
-			excluded = append(excluded, rel)
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		entry, err := Stat(path)
+	err = walk.Dirs(dir{path: root, rel: "."}, walk.Workers, func(d dir) ([]dir, error) {
+		children, err := os.ReadDir(d.path)
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+			return nil, nil
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
-		listing[rel] = entry
-		return nil
+		found := make(Listing, len(children))
+		var skipped []string
+		var subdirs []dir
+		for _, child := range children {
+			rel := child.Name()
+			if d.rel != "." {
+				rel = d.rel + "/" + child.Name()
+			}
+			if ex.Match(rel, child.IsDir()) {
+				skipped = append(skipped, rel)
+				continue
+			}
+			path := filepath.Join(d.path, child.Name())
+			entry, err := Stat(path)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			found[rel] = entry
+			if entry.Kind == Dir {
+				subdirs = append(subdirs, dir{path: path, rel: rel})
+			}
+		}
+		mu.Lock()
+		maps.Copy(listing, found)
+		excluded = append(excluded, skipped...)
+		mu.Unlock()
+		return subdirs, nil
 	})
-	return listing, excluded, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return listing, excluded, nil
+}
+
+type dir struct {
+	path string
+	rel  string
 }
 
 // Stat describes the file at path. If it is a symlink, the link itself is

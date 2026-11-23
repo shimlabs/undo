@@ -1,8 +1,12 @@
 package tree
 
 import (
+	"fmt"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -119,4 +123,92 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// buildTree creates dirs directories with files files each, some of them
+// nested, with an excluded node_modules and a symlink in every directory.
+func buildTree(tb testing.TB, dirs, files int) string {
+	tb.Helper()
+	root := tb.TempDir()
+	for d := range dirs {
+		dir := filepath.Join(root, fmt.Sprintf("pkg%d", d%7), fmt.Sprintf("mod%d", d))
+		if err := os.MkdirAll(filepath.Join(dir, "node_modules", "dep"), 0o755); err != nil {
+			tb.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(dir, "node_modules", "dep", "index.js"), nil, 0o644)
+		os.Symlink("../shared", filepath.Join(dir, "link"))
+		for f := range files {
+			os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.go", f)), []byte("package x"), 0o644)
+		}
+	}
+	return root
+}
+
+func walkScan(t *testing.T, root string, ex *exclude.Matcher) (Listing, []string) {
+	t.Helper()
+	listing := Listing{}
+	var excluded []string
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		if rel != "." && ex.Match(rel, d.IsDir()) {
+			excluded = append(excluded, rel)
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		entry, err := Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listing[rel] = entry
+		return nil
+	})
+	slices.Sort(excluded)
+	return listing, excluded
+}
+
+func TestScanAllMatchesWalk(t *testing.T) {
+	root := buildTree(t, 60, 20)
+	ex, err := exclude.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listing, excluded, err := ScanAll(root, ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(excluded)
+
+	wantListing, wantExcluded := walkScan(t, root, ex)
+	if !maps.Equal(listing, wantListing) {
+		changed, deleted := Changed(wantListing, listing)
+		t.Fatalf("listing differs: changed %v, deleted %v", changed, deleted)
+	}
+	if !slices.Equal(excluded, wantExcluded) {
+		t.Fatalf("excluded = %v, want %v", excluded, wantExcluded)
+	}
+}
+
+func TestScanMissingRoot(t *testing.T) {
+	ex, _ := exclude.New(t.TempDir())
+	listing, err := Scan(filepath.Join(t.TempDir(), "gone"), ex)
+	if err != nil || len(listing) != 0 {
+		t.Fatalf("Scan = %v, %v; want an empty listing", listing, err)
+	}
+}
+
+func BenchmarkScan(b *testing.B) {
+	root := buildTree(b, 500, 20)
+	ex, _ := exclude.New(root)
+	for b.Loop() {
+		if _, err := Scan(root, ex); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
