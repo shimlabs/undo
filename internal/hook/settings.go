@@ -48,11 +48,14 @@ func (h hookGroups) uninstall(path, agent string) error {
 	})
 }
 
-func (h hookGroups) isInstalled(path, agent string) bool {
+func (h hookGroups) isInstalled(path, agent string) (bool, error) {
 	settings, err := readSettings(path)
-	return err == nil && slices.ContainsFunc(hookEntries(settings, h.event), func(entry any) bool {
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(hookEntries(settings, h.event), func(entry any) bool {
 		return slices.ContainsFunc(groupHandlers(entry), isUndoHandler(agent))
-	})
+	}), nil
 }
 
 // isUndoGroup reports whether entry is a group holding only undo's handler.
@@ -121,9 +124,12 @@ func (h hookList) uninstall(path, agent string) error {
 	})
 }
 
-func (h hookList) isInstalled(path, agent string) bool {
+func (h hookList) isInstalled(path, agent string) (bool, error) {
 	settings, err := readSettings(path)
-	return err == nil && slices.ContainsFunc(hookEntries(settings, h.event), isUndoHandler(agent))
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(hookEntries(settings, h.event), isUndoHandler(agent)), nil
 }
 
 // editSettings reads the JSON settings file at path, adds defaults the file

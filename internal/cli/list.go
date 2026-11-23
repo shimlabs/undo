@@ -133,7 +133,7 @@ func printNoCheckpoints(env Env, parsed flags) {
 		root = env.Dir
 	}
 	out.Printf("No checkpoints yet in %s.\n", displayPath(root))
-	if len(installedAgentTitles()) == 0 {
+	if installed, _ := agentHooks(); len(installed) == 0 {
 		out.Printf("Run %s to take one before every agent command, or %s to take one now.\n", out.Bold("undo install <agent>"), out.Bold("undo checkpoint"))
 		return
 	}

@@ -92,7 +92,7 @@ func TestInstallKeepsOtherSettings(t *testing.T) {
 			if len(all) != 2 || len(ours) != 1 || ours[0] != 1 {
 				t.Fatalf("hook entries = %v", all)
 			}
-			if !tc.agent.IsInstalled() {
+			if isInstalled, err := tc.agent.IsInstalled(); err != nil || !isInstalled {
 				t.Fatal("IsInstalled = false after Install")
 			}
 		})
@@ -153,7 +153,7 @@ func TestUninstallRemovesOnlyOurs(t *testing.T) {
 			if _, ok := settings[tc.keep]; !ok {
 				t.Fatalf("%q setting lost: %v", tc.keep, settings)
 			}
-			if tc.agent.IsInstalled() {
+			if isInstalled, err := tc.agent.IsInstalled(); err != nil || isInstalled {
 				t.Fatal("IsInstalled = true after Uninstall")
 			}
 		})
@@ -205,7 +205,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	if !strings.Contains(string(data), strconv.Quote(binary)) {
 		t.Fatalf("plugin does not run the given binary:\n%s", data)
 	}
-	if !openCode().IsInstalled() {
+	if isInstalled, err := openCode().IsInstalled(); err != nil || !isInstalled {
 		t.Fatal("IsInstalled = false after Install")
 	}
 

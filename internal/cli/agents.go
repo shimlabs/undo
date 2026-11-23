@@ -10,11 +10,14 @@ import (
 )
 
 func installCommand(parsed flags, env Env) error {
-	agent, err := agentArg("install", parsed.args)
+	agent, err := parseAgent("install", parsed.args)
 	if err != nil {
 		return err
 	}
-	wasInstalled := agent.IsInstalled()
+	wasInstalled, err := agent.IsInstalled()
+	if err != nil {
+		return err
+	}
 	path, err := agent.Install(env.Executable)
 	if err != nil {
 		return err
@@ -31,12 +34,16 @@ func installCommand(parsed flags, env Env) error {
 }
 
 func uninstallCommand(parsed flags, env Env) error {
-	agent, err := agentArg("uninstall", parsed.args)
+	agent, err := parseAgent("uninstall", parsed.args)
 	if err != nil {
 		return err
 	}
 	out := env.stdout()
-	if !agent.IsInstalled() {
+	isInstalled, err := agent.IsInstalled()
+	if err != nil {
+		return err
+	}
+	if !isInstalled {
 		out.Printf("The undo hook for %s is not installed.\n", agent.Title)
 		return nil
 	}
@@ -48,10 +55,10 @@ func uninstallCommand(parsed flags, env Env) error {
 	return nil
 }
 
-func agentArg(command string, args []string) (hook.Agent, error) {
+func parseAgent(commandName string, args []string) (hook.Agent, error) {
 	agents := strings.Join(hook.AgentNames(), ", ")
 	if len(args) == 0 {
-		return hook.Agent{}, usageError{message: fmt.Sprintf("undo %s needs an agent: %s", command, agents)}
+		return hook.Agent{}, usageError{message: fmt.Sprintf("undo %s needs an agent: %s", commandName, agents)}
 	}
 	if agent, ok := hook.FindAgent(args[0]); ok {
 		return agent, nil
@@ -86,14 +93,17 @@ var (
 	errUnknownAgent = errors.New("hook for unknown agent")
 )
 
-// installedAgentTitles returns the product names of the agents that have
-// undo's hook.
-func installedAgentTitles() []string {
-	var titles []string
+// agentHooks returns the product names of the agents that have undo's hook,
+// and a description of each agent whose settings could not be read.
+func agentHooks() (installed, unreadable []string) {
 	for _, agent := range hook.Agents() {
-		if agent.IsInstalled() {
-			titles = append(titles, agent.Title)
+		isInstalled, err := agent.IsInstalled()
+		switch {
+		case err != nil:
+			unreadable = append(unreadable, agent.Title+": "+userMessage(err))
+		case isInstalled:
+			installed = append(installed, agent.Title)
 		}
 	}
-	return titles
+	return installed, unreadable
 }

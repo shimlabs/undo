@@ -33,10 +33,15 @@ func statusCommand(parsed flags, env Env) error {
 			return err
 		}
 	}
-	if agents := installedAgentTitles(); len(agents) > 0 {
-		printField(out, "Hooks", strings.Join(agents, ", "))
-	} else {
+	installed, unreadable := agentHooks()
+	switch {
+	case len(installed) > 0:
+		printField(out, "Hooks", strings.Join(installed, ", "))
+	case len(unreadable) == 0:
 		printField(out, "Hooks", "none yet; run "+out.Bold("undo install <agent>")+" to add one")
+	}
+	for _, problem := range unreadable {
+		printField(out, "Hooks", out.Yellow(problem))
 	}
 	printField(out, "Excluded", terminal.Printable(strings.Join(matcher.Patterns(), ", ")))
 	printField(out, "Not covered", "anything outside this folder: databases, git push, API calls")

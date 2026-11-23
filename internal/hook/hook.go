@@ -97,9 +97,12 @@ func (a Agent) Uninstall() (string, error) {
 }
 
 // IsInstalled reports whether undo's hook is in the agent's configuration.
-func (a Agent) IsInstalled() bool {
+func (a Agent) IsInstalled() (bool, error) {
 	path, err := a.configPath()
-	return err == nil && a.installer.isInstalled(path, a.Name)
+	if err != nil {
+		return false, err
+	}
+	return a.installer.isInstalled(path, a.Name)
 }
 
 // checkBinary refuses a binary in the temporary directory, where go run

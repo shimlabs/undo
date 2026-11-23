@@ -44,9 +44,15 @@ func (p pluginFile) uninstall(path, _ string) error {
 	return err
 }
 
-func (p pluginFile) isInstalled(path, _ string) bool {
+func (p pluginFile) isInstalled(path, _ string) (bool, error) {
 	data, err := os.ReadFile(path)
-	return err == nil && isUndoPlugin(data)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return isUndoPlugin(data), nil
 }
 
 // checkPluginOwner refuses to change a plugin file that undo did not write.

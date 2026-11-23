@@ -28,7 +28,8 @@ func claude() Agent {
 		// installed, it covers the event, and a second checkpoint would only
 		// repeat the first.
 		isHandledElsewhere: func(event hookEvent) bool {
-			return event.IsFromCursor && cursor().IsInstalled()
+			isInstalled, err := cursor().IsInstalled()
+			return event.IsFromCursor && err == nil && isInstalled
 		},
 	}
 }

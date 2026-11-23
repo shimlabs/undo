@@ -13,7 +13,7 @@ import (
 type installer interface {
 	install(path, binary, agent string) error
 	uninstall(path, agent string) error
-	isInstalled(path, agent string) bool
+	isInstalled(path, agent string) (bool, error)
 }
 
 func withCommand(handler map[string]any, command string) map[string]any {
