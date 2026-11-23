@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/shimlabs/undo/internal/clone"
@@ -40,11 +41,14 @@ var (
 	ErrStoreInsideProject = errors.New("this folder holds the undo store and has no writable parent on the same volume")
 )
 
-// Store is the data undo keeps on disk for one project.
+// Store is the data undo keeps on disk for one project. Several goroutines
+// may use one Store, such as the watcher's server and its pruner.
 type Store struct {
-	root   string
-	dir    string
-	config config
+	root string
+	dir  string
+	// config is read again whenever the store is locked, so it is replaced
+	// as a whole.
+	config atomic.Pointer[config]
 }
 
 type config struct {
@@ -111,14 +115,16 @@ func openAt(dir, root string) (*Store, error) {
 	if err := s.loadConfig(); err != nil {
 		return nil, err
 	}
-	if s.config.Format > format {
+	settings := *s.config.Load()
+	if settings.Format > format {
 		return nil, fmt.Errorf("%s: %w", dir, ErrNewerFormat)
 	}
-	if s.config.Format == 0 {
-		s.config.Format, s.config.Root = format, root
-		if err := writeJSON(s.configPath(), s.config); err != nil {
+	if settings.Format == 0 {
+		settings.Format, settings.Root = format, root
+		if err := writeJSON(s.configPath(), settings); err != nil {
 			return nil, err
 		}
+		s.config.Store(&settings)
 	}
 	return s, nil
 }
@@ -200,26 +206,31 @@ func (s *Store) Root() string { return s.root }
 func (s *Store) Dir() string { return s.dir }
 
 // IsCopyMode reports whether the store keeps full copies instead of clones.
-func (s *Store) IsCopyMode() bool { return s.config.IsCopyMode }
+func (s *Store) IsCopyMode() bool { return s.config.Load().IsCopyMode }
 
 // SetCopyMode switches between clones and full copies, and saves the choice
 // with the store.
 func (s *Store) SetCopyMode(isEnabled bool) error {
-	s.config.IsCopyMode = isEnabled
-	return writeJSON(s.configPath(), s.config)
+	settings := *s.config.Load()
+	settings.IsCopyMode = isEnabled
+	if err := writeJSON(s.configPath(), settings); err != nil {
+		return err
+	}
+	s.config.Store(&settings)
+	return nil
 }
 
 // clone copies src to dst the way the store keeps files: as a clone, or as a
 // full copy in copy mode.
 func (s *Store) clone(src, dst string) error {
-	if s.config.IsCopyMode {
+	if s.IsCopyMode() {
 		return clone.Copy(src, dst)
 	}
 	return clone.File(src, dst)
 }
 
 func (s *Store) cloneAt(src string, dir *os.File, name string) error {
-	if s.config.IsCopyMode {
+	if s.IsCopyMode() {
 		return clone.CopyAt(src, dir, name)
 	}
 	return clone.FileAt(src, dir, name)
@@ -228,10 +239,11 @@ func (s *Store) cloneAt(src string, dir *os.File, name string) error {
 // loadConfig reads the saved settings. It runs whenever the store is locked,
 // so a long-running watcher sees copy mode turned on by another process.
 func (s *Store) loadConfig() error {
-	s.config = config{}
-	if err := readJSON(s.configPath(), &s.config); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	var settings config
+	if err := readJSON(s.configPath(), &settings); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	s.config.Store(&settings)
 	return nil
 }
 
@@ -257,10 +269,10 @@ func StoresUnder(home, dir string) ([]*Store, error) {
 	var stores []*Store
 	for _, storeDir := range candidates {
 		s := &Store{dir: storeDir}
-		if s.loadConfig() != nil || s.config.Root == "" || filepath.Dir(s.config.Root) != dir || checkPrivateDir(storeDir) != nil {
+		if s.loadConfig() != nil || s.config.Load().Root == "" || filepath.Dir(s.config.Load().Root) != dir || checkPrivateDir(storeDir) != nil {
 			continue
 		}
-		s.root = s.config.Root
+		s.root = s.config.Load().Root
 		stores = append(stores, s)
 	}
 	return stores, nil

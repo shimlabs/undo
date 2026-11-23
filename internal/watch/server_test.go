@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,5 +286,28 @@ func TestServerStopsWhenStreamCannotRestart(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server kept running without a stream")
+	}
+}
+
+func TestServerPrunesDuringCheckpoints(t *testing.T) {
+	projectStore, root, socketDir := newServerProject(t)
+	runServer(t, projectStore, Options{
+		SocketDir:        socketDir,
+		IdleTimeout:      time.Minute,
+		PruneQuietPeriod: time.Millisecond,
+		Limits:           store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40},
+	})
+	client := Client{SocketDir: socketDir}
+	for i := range 40 {
+		testutil.WriteFile(t, filepath.Join(root, "main.go"), fmt.Sprint("package main // ", i))
+		// The store prunes at most once an hour; this makes every quiet
+		// period prune, so pruning overlaps the next checkpoint.
+		if err := os.Remove(filepath.Join(projectStore.Dir(), "last-prune")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Fatal(err)
+		}
+		if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(3 * time.Millisecond)
 	}
 }

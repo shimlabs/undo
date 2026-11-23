@@ -159,7 +159,7 @@ func (s *Store) ExtractBaseDir(rel string, dir *os.File, name string) error {
 // It returns none where a directory cannot be cloned in one call: on Linux and
 // in copy mode.
 func (s *Store) UnchangedDirs(state map[string]Source, dirs []string) (map[string]bool, error) {
-	if !clone.CanCloneDirs || s.config.IsCopyMode {
+	if !clone.CanCloneDirs || s.IsCopyMode() {
 		return nil, nil
 	}
 	candidates := map[string]bool{}
