@@ -58,7 +58,7 @@ func randomSeedList(t *testing.T) iter.Seq[uint64] {
 func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, checkpointer store.Checkpointer, isScanning bool) {
 	t.Helper()
 	root := projectStore.Root()
-	mutator := testutil.NewMutator(t, root, seed)
+	mutator := testutil.NewMutator(t, root, seed, testutil.MutatorOptions{ShouldLinkOutside: isScanning})
 	random := rand.New(rand.NewPCG(seed, seed+1))
 	states := map[int]map[string]string{}
 	var log []string
@@ -101,10 +101,7 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 			}
 		}
 		want, got := states[target.ID], testutil.Snapshot(t, root, testutil.SnapshotOptions{ShouldSkipExcluded: true})
-		differences := slices.DeleteFunc(testutil.SnapshotDiff(want, got), func(rel string) bool {
-			return isAtOrInside(filepath.ToSlash(rel), changes.Kept)
-		})
-		if len(differences) > 0 {
+		if differences := unexpectedDifferences(t, projectStore, target.ID, changes, want, got); len(differences) > 0 {
 			t.Fatalf("seed %d: %v\nkept %v, lost %v, skipped %v\nproject differs from checkpoint %d:\n%s",
 				seed, log, changes.Kept, changes.Lost, changes.Skipped, target.ID, describeDifferences(want, got, differences))
 		}
@@ -150,10 +147,39 @@ func describeDifferences(want, got map[string]string, paths []string) string {
 	return lines.String()
 }
 
+// unexpectedDifferences returns the paths where the project, got, differs
+// from checkpoint id, want, other than those the restore kept. A restore
+// also leaves alone what the checkpoint could not read, as it does excluded
+// paths.
+func unexpectedDifferences(t *testing.T, projectStore *store.Store, id int, changes Changes, want, got map[string]string) []string {
+	t.Helper()
+	manifest, err := projectStore.Manifest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slices.DeleteFunc(testutil.SnapshotDiff(want, got), func(rel string) bool {
+		rel = filepath.ToSlash(rel)
+		return isAtOrInside(rel, changes.Kept) || isAtOrInside(rel, manifest.Unreadable) || isAroundKept(rel, want, got, changes.Kept)
+	})
+}
+
+// isAroundKept reports whether rel is a directory the target state lacks
+// that the restore left in place because it holds a kept path.
+func isAroundKept(rel string, want, got map[string]string, kept []string) bool {
+	if _, isWanted := want[rel]; isWanted || !strings.HasPrefix(got[rel], "dir ") {
+		return false
+	}
+	return slices.ContainsFunc(kept, func(keptPath string) bool {
+		return strings.HasPrefix(keptPath, rel+"/")
+	})
+}
+
 // listingDifferences compares the listing the store builds for checkpoint id
-// with a scan of the project as it is now. Without isExact, named pipes are
-// left out: FSEvents does not report them on every version of macOS, and the
-// watcher learns of them at its next full comparison, as design.md says.
+// with a scan of the project as it is now. Files the checkpoint could not
+// read are left out of the scan, as they are of the listing. Without isExact,
+// named pipes are left out too: FSEvents does not report them on every
+// version of macOS, and the watcher learns of them at its next full
+// comparison, as design.md says.
 func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact bool) string {
 	t.Helper()
 	matcher, err := exclude.New(projectStore.Root())
@@ -167,6 +193,15 @@ func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact
 	stored, err := projectStore.ListingAt(id)
 	if err != nil {
 		t.Fatal(err)
+	}
+	manifest, err := projectStore.Manifest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range manifest.Unreadable {
+		if _, isStored := stored[rel]; !isStored {
+			delete(scanned, rel)
+		}
 	}
 	if !isExact {
 		for _, listing := range []tree.Listing{stored, scanned} {

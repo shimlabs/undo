@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -54,19 +55,23 @@ func Snapshot(tb testing.TB, root string, options SnapshotOptions) map[string]st
 }
 
 func describe(path string, info fs.FileInfo, shouldIncludeDirTimes bool) (string, error) {
+	mode := info.Mode() & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky)
 	switch {
 	case info.Mode()&fs.ModeSymlink != 0:
 		target, err := os.Readlink(path)
 		return "link " + target, err
 	case info.Mode()&fs.ModeNamedPipe != 0:
-		return fmt.Sprintf("fifo %v", info.Mode().Perm()), nil
+		return fmt.Sprintf("fifo %v", mode), nil
 	case info.IsDir() && shouldIncludeDirTimes:
-		return fmt.Sprintf("dir %v %d", info.Mode().Perm(), info.ModTime().UnixNano()), nil
+		return fmt.Sprintf("dir %v %d", mode, info.ModTime().UnixNano()), nil
 	case info.IsDir():
-		return fmt.Sprintf("dir %v", info.Mode().Perm()), nil
+		return fmt.Sprintf("dir %v", mode), nil
 	default:
 		data, err := os.ReadFile(path)
-		return fmt.Sprintf("file %v %d %q", info.Mode().Perm(), info.ModTime().UnixNano(), data), err
+		if errors.Is(err, fs.ErrPermission) {
+			return fmt.Sprintf("file %v %d unreadable, %d bytes", mode, info.ModTime().UnixNano(), info.Size()), nil
+		}
+		return fmt.Sprintf("file %v %d %q", mode, info.ModTime().UnixNano(), data), err
 	}
 }
 
