@@ -24,7 +24,11 @@ func checkpointCommand(parsed flags, env Env) error {
 			return err
 		}
 	}
-	checkpoint, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: parsed.label, Dir: env.Dir})
+	label := parsed.label
+	if label == "" {
+		label = "undo checkpoint"
+	}
+	checkpoint, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: label, Dir: env.Dir})
 	if err != nil {
 		return err
 	}
