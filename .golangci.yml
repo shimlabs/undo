@@ -30,6 +30,8 @@ linters:
     - tagliatelle
     # Only golang.org/x/sys and golang.org/x/term are imported, both reviewed.
     - depguard
+    # Deprecated in favor of gomodguard_v2, which default: all enables.
+    - gomodguard
   settings:
     cyclop:
       max-complexity: 15
