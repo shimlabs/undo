@@ -25,12 +25,21 @@ func (s *Store) merge(through int) (int64, error) {
 	return s.mergeRecorded()
 }
 
+// finishMerge completes a merge that was interrupted. The interruption can
+// leave a half-written temporary file in the base, which the replay does not
+// know about, so it is removed too.
 func (s *Store) finishMerge() error {
 	if _, err := os.Stat(s.mergePath()); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	_, err := s.mergeRecorded()
-	return err
+	if _, err := s.mergeRecorded(); err != nil {
+		return err
+	}
+	listing, err := s.baseListing()
+	if err != nil {
+		return err
+	}
+	return s.removeUnlisted(listing)
 }
 
 // mergeRecorded replays the layers named in the merge record from the

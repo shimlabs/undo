@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func stateHashes(t *testing.T, projectStore *Store, id int) map[string][32]byte {
@@ -106,5 +108,54 @@ func TestPruneWaitsForReaders(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Prune did not run after the reader finished")
+	}
+}
+
+func TestRemoveUnlistedLeavesOnlyListedPathsInBase(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"main.go": "package main", ".git/HEAD": "ref"})
+	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
+		t.Fatal(err)
+	}
+	// A file created and removed while the base was cloned is in the base
+	// but in no listing.
+	testutil.WriteFile(t, projectStore.basePath(".git/index.lock"), "")
+	testutil.WriteFile(t, projectStore.basePath("gone/file"), "")
+	listing, err := projectStore.baseListing()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := projectStore.removeUnlisted(listing); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".git/index.lock", "gone"} {
+		if _, err := os.Lstat(projectStore.basePath(rel)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("base still holds %s: %v", rel, err)
+		}
+	}
+	if _, err := os.Lstat(projectStore.basePath(".git/HEAD")); err != nil {
+		t.Errorf("base lost a listed file: %v", err)
+	}
+}
+
+func TestFinishMergeRemovesFilesLeftByInterruptedMerge(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"dir/a.txt": "one"})
+	for _, content := range []string{"two", "three"} {
+		testutil.WriteFile(t, filepath.Join(root, "dir", "a.txt"), content)
+		if _, err := projectStore.Take(CheckpointOptions{Label: content, Dir: root}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	leftover := projectStore.basePath("dir/.a.txt.undo-0123456789ab")
+	testutil.WriteFile(t, leftover, "half written")
+	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := projectStore.finishMerge(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(leftover); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("base still holds the interrupted merge's temporary file: %v", err)
 	}
 }

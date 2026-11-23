@@ -12,6 +12,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/tree"
+	"github.com/shimlabs/undo/internal/walk"
 )
 
 // CheckpointOptions describe a checkpoint: the command that is about to run,
@@ -230,10 +231,46 @@ func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
 			}
 		}
 	}
+	// A file created after the scan and removed before the first checkpoint
+	// would otherwise stay in the base, and a restore that clones a whole
+	// directory from the base would bring it back.
+	if err := s.removeUnlisted(before); err != nil {
+		return nil, err
+	}
 	if err := writeGob(s.baseListingPath(), before); err != nil {
 		return nil, err
 	}
 	return before, nil
+}
+
+// removeUnlisted removes every path in the base that listing does not hold.
+func (s *Store) removeUnlisted(listing tree.Listing) error {
+	return walk.Dirs(".", func(dir string) ([]string, error) {
+		entries, err := os.ReadDir(s.basePath(dir))
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		var subdirs []string
+		for _, entry := range entries {
+			rel := entry.Name()
+			if dir != "." {
+				rel = dir + "/" + entry.Name()
+			}
+			listed, isListed := listing[rel]
+			switch {
+			case !isListed:
+				if err := removeAll(s.basePath(rel)); err != nil {
+					return nil, err
+				}
+			case listed.Kind == tree.Dir && entry.IsDir():
+				subdirs = append(subdirs, rel)
+			}
+		}
+		return subdirs, nil
+	})
 }
 
 // basePlan describes how to clone the project into the base: directories
