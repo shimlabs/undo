@@ -983,3 +983,29 @@ func takeScan(t *testing.T, projectStore *store.Store, label string) store.Check
 	}
 	return checkpoint
 }
+
+func TestTrackerSeesHardLinkWrittenFromOutside(t *testing.T) {
+	outside := filepath.Join(testutil.TempDir(t), "shared.txt")
+	testutil.WriteFile(t, outside, "v1")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	if err := os.Link(outside, filepath.Join(root, "shared.txt")); err != nil {
+		t.Fatal(err)
+	}
+	takeCheckpoint(t, projectTracker, "1")
+	// Only the name outside the project is written, so no event names the
+	// project's file.
+	file, err := os.OpenFile(outside, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("v2 important"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "edited")
+
+	second := takeCheckpoint(t, projectTracker, "2")
+	checkMatchesScan(t, projectStore, root, second.ID)
+}

@@ -59,7 +59,11 @@ type tracker struct {
 	// because they cannot be read. Every checkpoint tries them again, as a
 	// scan would, so each one records them as unsaved.
 	unsavedFiles []string
-	lastID       int
+	// hardLinked are the listed files with more than one name. A write
+	// through a name outside the project has no event here, so every
+	// checkpoint checks them.
+	hardLinked map[string]bool
+	lastID     int
 	// position is where a new tracker can resume the events, as of the last
 	// checkpoint whose marker arrived.
 	position streamPosition
@@ -132,6 +136,7 @@ func (t *tracker) loadListing(id int) error {
 		return err
 	}
 	t.listing, t.lastID = listing, id
+	t.hardLinked = hardLinkedFiles(listing)
 	t.unreadable, t.unsavedFiles = nil, nil
 	for _, rel := range manifest.Unreadable {
 		if listing[rel].Kind == tree.Dir {
@@ -304,6 +309,9 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		for _, rel := range t.unsavedFiles {
 			markDirty(dirty, t.path(rel))
 		}
+		for rel := range t.hardLinked {
+			markDirty(dirty, t.path(rel))
+		}
 		changed, deleted, err = t.applyDirty(dirty)
 		if errors.Is(err, fs.ErrPermission) {
 			shouldRescan = true
@@ -311,6 +319,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 			return store.Checkpoint{}, err
 		}
 		t.unreadable = slices.DeleteFunc(t.unreadable, t.isReadableOrGone)
+		t.updateHardLinked(changed, deleted)
 	}
 	if shouldRescan {
 		current, skipped, err := tree.Scan(t.root, t.matcher.Load())
@@ -319,6 +328,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		}
 		changed, deleted = tree.Changed(t.listing, current)
 		t.listing, t.unreadable = current, skipped.Unreadable
+		t.hardLinked = hardLinkedFiles(current)
 	}
 
 	checkpoint, err := t.store.Commit(latest.ID, options, store.Changes{
@@ -342,6 +352,32 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		return isListed
 	})
 	return checkpoint, nil
+}
+
+// hardLinkedFiles returns the files in listing with more than one name.
+func hardLinkedFiles(listing tree.Listing) map[string]bool {
+	hardLinked := map[string]bool{}
+	for rel, entry := range listing {
+		if entry.Links > 1 {
+			hardLinked[rel] = true
+		}
+	}
+	return hardLinked
+}
+
+// updateHardLinked keeps t.hardLinked in step with the listing after the
+// paths in changed and deleted were applied.
+func (t *tracker) updateHardLinked(changed, deleted []string) {
+	for _, rel := range deleted {
+		delete(t.hardLinked, rel)
+	}
+	for _, rel := range changed {
+		if t.listing[rel].Links > 1 {
+			t.hardLinked[rel] = true
+		} else {
+			delete(t.hardLinked, rel)
+		}
+	}
 }
 
 func (t *tracker) path(rel string) string {
