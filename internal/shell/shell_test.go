@@ -13,3 +13,10 @@ func TestQuoteRoundTrips(t *testing.T) {
 		t.Error("Unquote accepted a word without quotes")
 	}
 }
+
+func TestJoinQuotesOnlyWhereNeeded(t *testing.T) {
+	got := Join([]string{"sed", "-i", "", "s/a b/c/", "src/main.go"})
+	if want := `sed -i '' 's/a b/c/' src/main.go`; got != want {
+		t.Fatalf("Join = %s, want %s", got, want)
+	}
+}

@@ -2,9 +2,14 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
 )
 
@@ -32,12 +37,15 @@ func runCommand(parsed flags, env Env) error {
 	if len(args) == 0 {
 		return usageError{message: "undo run needs a command to run, after --"}
 	}
+	if err := checkRunnable(env.Dir, args[0]); err != nil {
+		return err
+	}
 	projectStore, err := createStore(env, flags{})
 	if err != nil {
 		return err
 	}
 	defer projectStore.Close()
-	if _, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: strings.Join(args, " "), Dir: env.Dir}); err != nil {
+	if _, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: shell.Join(args), Dir: env.Dir}); err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...) //nolint:gosec // undo run runs the command the user typed
@@ -45,3 +53,35 @@ func runCommand(parsed flags, env Env) error {
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = env.Stdin, env.Stdout, env.Stderr
 	return cmd.Run()
 }
+
+// checkRunnable fails the way a shell does when name, as run in dir, cannot
+// be found or run, before any checkpoint is taken for it.
+func checkRunnable(dir, name string) error {
+	if !strings.Contains(name, "/") {
+		if _, err := exec.LookPath(name); err != nil {
+			return commandError{err: fmt.Errorf("%w: %s", errCommandNotFound, name), exitCode: 127}
+		}
+		return nil
+	}
+	path := name
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return commandError{err: fmt.Errorf("%w: %s", errNoSuchFile, name), exitCode: 127}
+	}
+	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		return commandError{
+			err:      withHint(fmt.Errorf("%s %w", name, errNotExecutable), "Run chmod +x "+shell.Join([]string{name})+" to make it executable."),
+			exitCode: 126,
+		}
+	}
+	return nil
+}
+
+var (
+	errCommandNotFound = errors.New("command not found")
+	errNoSuchFile      = errors.New("no such file")
+	errNotExecutable   = errors.New("is not executable")
+)
