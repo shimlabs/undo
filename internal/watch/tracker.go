@@ -499,6 +499,9 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 			inodes[stat.Ino] = true
 		}
 	}
+	if len(inodes) == 0 {
+		return dirty
+	}
 	// The listed names of an inode with several names are already checked.
 	for rel := range t.hardLinked {
 		delete(inodes, t.listing[rel].Inode)
