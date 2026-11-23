@@ -70,10 +70,14 @@ func Apply(s *store.Store, id int, checkpoint store.Checkpointer) (Changes, erro
 		return Changes{}, err
 	}
 
-	if err := removeAll(s.Root(), removals(changes, current, target)); err != nil {
+	removed := removals(changes, current, target)
+	if err := removeAll(s.Root(), removed); err != nil {
 		return changes, err
 	}
-	if err := writeAll(s, changes.Write, target); err != nil {
+	for _, rel := range removed {
+		delete(current, rel)
+	}
+	if err := writeAll(s, changes.Write, current, target); err != nil {
 		return changes, err
 	}
 	return changes, restoreDirTimes(s.Root(), slices.Concat(changes.Write, changes.Remove), target)
@@ -131,38 +135,102 @@ func removeAll(root string, paths []string) error {
 	return nil
 }
 
-func writeAll(s *store.Store, paths []string, target map[string]store.Source) error {
+// writeAll writes paths from target, parents first. A directory that is missing
+// from the project and whose whole content is unchanged since the base is
+// cloned in one call.
+func writeAll(s *store.Store, paths []string, current tree.Listing, target map[string]store.Source) error {
 	root := s.Root()
 	paths = slices.Clone(paths)
 	slices.SortStableFunc(paths, func(a, b string) int { return depth(a) - depth(b) })
+	whole, err := wholeDirs(s, paths, current, target)
+	if err != nil {
+		return err
+	}
+	written := map[string]bool{}
 	for _, rel := range paths {
+		if written[path.Dir(rel)] && rel != "." {
+			written[rel] = true
+			continue
+		}
 		src := target[rel]
 		full := filepath.Join(root, filepath.FromSlash(rel))
+		_, exists := current[rel]
 		switch src.Entry.Kind {
 		case tree.Dir:
+			if whole[rel] {
+				if err := s.Clone(src.Path, full); err != nil {
+					return err
+				}
+				written[rel] = true
+				continue
+			}
 			if err := os.MkdirAll(full, 0o700); err != nil {
 				return err
 			}
 		case tree.File, tree.Symlink:
-			if err := replace(s, src.Path, full); err != nil {
-				return err
+			if exists {
+				err = replace(s, src.Path, full)
+			} else {
+				err = s.Clone(src.Path, full)
 			}
-			if src.Entry.Kind == tree.File {
-				if err := setMeta(full, src.Entry); err != nil {
-					return err
-				}
+			if err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
+// wholeDirs returns the directories in paths that are missing from the
+// project and can be cloned from the base as they are: everything inside them
+// at the checkpoint comes from the base, and nothing was deleted from them
+// since.
+func wholeDirs(s *store.Store, paths []string, current tree.Listing, target map[string]store.Source) (map[string]bool, error) {
+	candidates := map[string]bool{}
+	for _, rel := range paths {
+		if _, exists := current[rel]; !exists && rel != "." && target[rel].Entry.Kind == tree.Dir {
+			candidates[rel] = true
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	base, err := s.BaseListing()
+	if err != nil {
+		return nil, err
+	}
+	baseDir := s.BaseDir()
+	inTarget, inBase := map[string]int{}, map[string]int{}
+	for rel, src := range target {
+		fromBase := src.Path == filepath.Join(baseDir, filepath.FromSlash(rel))
+		for dir := path.Dir(rel); dir != "."; dir = path.Dir(dir) {
+			if candidates[dir] {
+				inTarget[dir]++
+				if !fromBase {
+					candidates[dir] = false
+				}
+			}
+		}
+	}
+	for rel := range base {
+		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
+			if candidates[dir] {
+				inBase[dir]++
+			}
+		}
+	}
+	whole := map[string]bool{}
+	for dir, ok := range candidates {
+		if ok && base[dir].Kind == tree.Dir && inTarget[dir] == inBase[dir] {
+			whole[dir] = true
+		}
+	}
+	return whole, nil
+}
+
 // replace clones src next to dst and renames the clone into place. A clone
 // cannot overwrite an existing path, so this is how dst gets replaced.
 func replace(s *store.Store, src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
 	tmp := dst + ".undo-tmp"
 	if err := os.RemoveAll(tmp); err != nil {
 		return err

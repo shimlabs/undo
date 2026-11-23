@@ -228,3 +228,39 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestRestoreDirEditedAfterBase(t *testing.T) {
+	s, root := setup(t)
+	if _, err := s.Take("first", root); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "src", "main.go"), "package main // edited\n")
+	want := snapshot(t, root)
+	if _, err := s.Take("after edit", root); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(root, "src"))
+
+	if _, err := Apply(s, 2, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	requireSame(t, want, snapshot(t, root))
+}
+
+func TestRestoreDirKeepsEarlierDeletes(t *testing.T) {
+	s, root := setup(t)
+	if _, err := s.Take("first", root); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(root, "src", "util", "str.go"))
+	want := snapshot(t, root)
+	if _, err := s.Take("after delete", root); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(root, "src"))
+
+	if _, err := Apply(s, 2, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	requireSame(t, want, snapshot(t, root))
+}
