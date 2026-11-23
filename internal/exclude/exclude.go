@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -47,6 +46,9 @@ var (
 	// ErrIgnoreFileNotRegular means .undoignore is a device, a named pipe
 	// or a directory, which reading could block or never end.
 	ErrIgnoreFileNotRegular = errors.New(IgnoreFile + " must be a regular file")
+	// ErrIgnoreFileOutsideProject means .undoignore is a symlink that leads
+	// out of the project.
+	ErrIgnoreFileOutsideProject = errors.New(IgnoreFile + " must be a file inside the project")
 	// ErrIgnoreFileTooLarge means .undoignore holds more than undo reads.
 	ErrIgnoreFileTooLarge = fmt.Errorf("%s must be under %d KB and %d patterns", IgnoreFile, maxIgnoreFileSize>>10, maxPatterns)
 )
@@ -55,7 +57,7 @@ var (
 // .undoignore file.
 func New(root string) (*Matcher, error) {
 	patterns := defaultPatterns()
-	file, err := openIgnoreFile(filepath.Join(root, IgnoreFile))
+	file, err := openIgnoreFile(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Matcher{patterns: patterns}, nil
 	}
@@ -85,14 +87,27 @@ func New(root string) (*Matcher, error) {
 	return &Matcher{patterns: patterns}, scanner.Err()
 }
 
-// openIgnoreFile opens path, which a symlink may point elsewhere, without
-// blocking on a named pipe, and refuses anything but a regular file.
-func openIgnoreFile(path string) (*os.File, error) {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+// openIgnoreFile opens the .undoignore file of the project at root without
+// blocking on a named pipe, and refuses anything but a regular file. A
+// symlink is followed only while it stays inside the project: the file's
+// lines reach the store and undo status, so it must not be a secret from
+// elsewhere, such as a key or another process's environment.
+func openIgnoreFile(root string) (*os.File, error) {
+	projectRoot, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), path)
+	defer projectRoot.Close()
+	file, err := projectRoot.OpenFile(IgnoreFile, os.O_RDONLY|unix.O_NONBLOCK, 0)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	if err != nil {
+		if _, statErr := projectRoot.Lstat(IgnoreFile); statErr == nil {
+			return nil, ErrIgnoreFileOutsideProject
+		}
+		return nil, err
+	}
 	info, err := file.Stat()
 	if err != nil {
 		return nil, errors.Join(err, file.Close())

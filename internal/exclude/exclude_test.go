@@ -97,8 +97,8 @@ func TestNewRefusesIgnoreFileThatIsNotARegularFile(t *testing.T) {
 		}()
 		select {
 		case err := <-done:
-			if !errors.Is(err, ErrIgnoreFileNotRegular) {
-				t.Errorf("%s: New = %v, want ErrIgnoreFileNotRegular", name, err)
+			if !errors.Is(err, ErrIgnoreFileNotRegular) && !errors.Is(err, ErrIgnoreFileOutsideProject) {
+				t.Errorf("%s: New = %v, want an error that says why it was refused", name, err)
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("%s: New did not return", name)
@@ -116,13 +116,12 @@ func TestNewRefusesHugeIgnoreFile(t *testing.T) {
 	}
 }
 
-func TestNewFollowsSymlinkToIgnoreFile(t *testing.T) {
+func TestNewFollowsSymlinkToIgnoreFileInsideProject(t *testing.T) {
 	root := t.TempDir()
-	shared := filepath.Join(t.TempDir(), "shared.undoignore")
-	if err := os.WriteFile(shared, []byte("dist\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "shared.undoignore"), []byte("dist\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(shared, filepath.Join(root, IgnoreFile)); err != nil {
+	if err := os.Symlink("shared.undoignore", filepath.Join(root, IgnoreFile)); err != nil {
 		t.Fatal(err)
 	}
 	matcher, err := New(root)
@@ -131,5 +130,19 @@ func TestNewFollowsSymlinkToIgnoreFile(t *testing.T) {
 	}
 	if !matcher.Match("dist", true) {
 		t.Fatal("dist is not excluded")
+	}
+}
+
+func TestNewRefusesSymlinkToIgnoreFileOutsideProject(t *testing.T) {
+	root := t.TempDir()
+	secret := filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(secret, []byte("PRIVATE-KEY-MATERIAL\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, IgnoreFile)); err != nil {
+		t.Fatal(err)
+	}
+	if matcher, err := New(root); !errors.Is(err, ErrIgnoreFileOutsideProject) || matcher != nil {
+		t.Fatalf("New = %v, %v, want no matcher and ErrIgnoreFileOutsideProject", matcher, err)
 	}
 }
