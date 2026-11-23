@@ -1,8 +1,10 @@
 package clone
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -101,4 +103,31 @@ func TestCopyMatchesSource(t *testing.T) {
 	if err := Copy(src, dst); err == nil {
 		t.Fatal("Copy overwrote an existing destination")
 	}
+}
+
+func TestMkfifoAtCreatesPipeInDirectory(t *testing.T) {
+	dirPath := t.TempDir()
+	dir, err := os.Open(dirPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+
+	if err := MkfifoAt(dir, "pipe", 0o640); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(filepath.Join(dirPath, "pipe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&fs.ModeNamedPipe == 0 || info.Mode().Perm() != 0o640&^umask() {
+		t.Fatalf("pipe mode = %v", info.Mode())
+	}
+}
+
+// umask returns the process's file mode creation mask.
+func umask() fs.FileMode {
+	mask := syscall.Umask(0)
+	syscall.Umask(mask)
+	return fs.FileMode(mask)
 }

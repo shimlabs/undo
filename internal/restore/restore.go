@@ -416,7 +416,9 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 		case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:
 			files = append(files, rel)
 		case source.Entry.Mode&fs.ModeNamedPipe != 0:
-			err = syscall.Mkfifo(p.path(rel), uint32(source.Entry.Mode.Perm()))
+			err = p.inParent(rel, func(dir *os.File, name string) error {
+				return clone.MkfifoAt(dir, name, source.Entry.Mode)
+			})
 		default:
 			skipped = append(skipped, rel)
 		}

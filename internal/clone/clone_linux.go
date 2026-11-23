@@ -3,6 +3,7 @@ package clone
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -52,4 +53,13 @@ func markUnsupported(err error) error {
 		}
 	}
 	return err
+}
+
+// MkfifoAt creates the named pipe name in dir. It works relative to dir, so
+// it never follows a symlink that replaced a directory above dir.
+func MkfifoAt(dir *os.File, name string, perm fs.FileMode) error {
+	if err := unix.Mkfifoat(int(dir.Fd()), name, uint32(perm.Perm())); err != nil {
+		return &os.PathError{Op: "mkfifoat", Path: name, Err: err}
+	}
+	return nil
 }
