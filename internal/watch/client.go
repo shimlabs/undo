@@ -3,6 +3,7 @@ package watch
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -21,14 +22,29 @@ type ServerStatus struct {
 // first if no server is running. If the server cannot be reached, it scans
 // the project instead, so a checkpoint is always taken.
 func Checkpoint(s *store.Store, label, dir string, start func() error) (store.Checkpoint, error) {
-	conn, err := connect(s, start)
+	cp, err := checkpointThroughServer(s, label, dir, start)
 	if err == nil {
-		resp, err := send(conn, request{Op: "checkpoint", Label: label, Dir: dir})
-		if err == nil && resp.Error == "" {
-			return resp.Checkpoint, nil
-		}
+		return cp, nil
+	}
+	if start != nil {
+		s.LogError(fmt.Errorf("watcher unavailable, scanned the project instead: %w", err))
 	}
 	return s.Take(label, dir)
+}
+
+func checkpointThroughServer(s *store.Store, label, dir string, start func() error) (store.Checkpoint, error) {
+	conn, err := connect(s, start)
+	if err != nil {
+		return store.Checkpoint{}, err
+	}
+	resp, err := send(conn, request{Op: "checkpoint", Label: label, Dir: dir})
+	if err != nil {
+		return store.Checkpoint{}, err
+	}
+	if resp.Error != "" {
+		return store.Checkpoint{}, errors.New(resp.Error)
+	}
+	return resp.Checkpoint, nil
 }
 
 // Status reports whether a server is running for s and the last checkpoint

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,4 +229,20 @@ func TestServerPrunesOnlyWhenQuiet(t *testing.T) {
 func lastServed(s *store.Store) (int, error) {
 	status, err := Status(s)
 	return status.LastID, err
+}
+
+func TestCheckpointLogsWhyItScanned(t *testing.T) {
+	s, root := serverProject(t)
+	shared := t.TempDir()
+	if err := os.Chmod(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("UNDO_SOCKET_DIR", shared)
+
+	if _, err := Checkpoint(s, "first", root, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if last := s.LastError(); !strings.Contains(last, "private") {
+		t.Fatalf("last error = %q, want the socket directory problem", last)
+	}
 }
