@@ -32,6 +32,7 @@ func cursor() Agent {
 // cursorFields are the fields Cursor sends on top of the shared ones.
 type cursorFields struct {
 	eventFields
+
 	ConversationID string   `json:"conversation_id"`
 	WorkspaceRoots []string `json:"workspace_roots"`
 	CursorVersion  string   `json:"cursor_version"`

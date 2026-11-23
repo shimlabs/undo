@@ -229,6 +229,6 @@ func (s *server) handleConn(conn net.Conn) (bool, error) {
 	}
 	reply.CheckpointCount = s.checkpointCount
 	// A client that does not get the reply scans the project instead.
-	_ = json.NewEncoder(conn).Encode(reply)
+	_ = json.NewEncoder(conn).Encode(reply) //nolint:errchkjson // a client that does not get the reply scans the project instead
 	return isCheckpointed, fatal
 }

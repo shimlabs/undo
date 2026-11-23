@@ -30,9 +30,10 @@ type CheckpointOptions struct {
 // Checkpoint is a point the project can be restored to: its state just before
 // the command in Label ran.
 type Checkpoint struct {
+	CheckpointOptions
+
 	ID   int       `json:"id"`
 	Time time.Time `json:"time"`
-	CheckpointOptions
 	// UnstableCount is how many files changed while the checkpoint saved
 	// them.
 	UnstableCount int `json:"unstable_count,omitempty"`

@@ -50,8 +50,9 @@ func Agents() []Agent {
 
 // AgentNames returns the command-line names of every agent.
 func AgentNames() []string {
-	var names []string
-	for _, agent := range Agents() {
+	agents := Agents()
+	names := make([]string, 0, len(agents))
+	for _, agent := range agents {
 		names = append(names, agent.Name)
 	}
 	return names
@@ -114,11 +115,7 @@ func checkBinary(binary string) error {
 			return fmt.Errorf("%s: %w", binary, ErrUnsafeBinary)
 		}
 	}
-	info, err := os.Stat(filepath.Dir(binary))
-	if err != nil {
-		return nil
-	}
-	if info.Mode().Perm()&0o002 != 0 {
+	if info, err := os.Stat(filepath.Dir(binary)); err == nil && info.Mode().Perm()&0o002 != 0 {
 		return fmt.Errorf("%s: %w", binary, ErrUnsafeBinary)
 	}
 	return nil

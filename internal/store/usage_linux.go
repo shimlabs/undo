@@ -69,7 +69,7 @@ func unsharedBytes(file *os.File) (int64, error) {
 		}
 		for _, extent := range request.Extents[:request.MappedExtents] {
 			if extent.Flags&fiemapExtentShared == 0 {
-				total += int64(extent.Length)
+				total += int64(extent.Length) //nolint:gosec // an extent is part of a file, whose size fits in int64
 			}
 			if extent.Flags&fiemapExtentLast != 0 {
 				return total, nil

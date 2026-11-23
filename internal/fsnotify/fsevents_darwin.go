@@ -158,7 +158,10 @@ func EventStoreID(path string) (string, error) {
 //export undoStreamEvents
 func undoStreamEvents(handle C.uintptr_t, count C.size_t, paths **C.char, flags *C.FSEventStreamEventFlags,
 	ids *C.FSEventStreamEventId) {
-	onEvents := cgo.Handle(handle).Value().(func([]Event))
+	onEvents, ok := cgo.Handle(handle).Value().(func([]Event))
+	if !ok {
+		return
+	}
 	pathList := unsafe.Slice(paths, count)
 	flagList := unsafe.Slice(flags, count)
 	idList := unsafe.Slice(ids, count)

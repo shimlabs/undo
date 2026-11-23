@@ -155,6 +155,9 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 		}
 		var size int64
 		switch entry.Kind {
+		case tree.Other:
+			// A named pipe or other special file has no stored copy; the
+			// listing alone records it.
 		case tree.Dir:
 			size, err = m.mergeDir(rel)
 		case tree.File, tree.Symlink:

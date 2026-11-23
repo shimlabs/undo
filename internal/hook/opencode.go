@@ -32,8 +32,11 @@ const pluginHeader = `// Written by "undo install opencode". Remove it with "und
 
 // openCodePlugin returns a plugin that sends each file-changing tool call to
 // "undo hook opencode" in the shape the other agents use.
-func openCodePlugin(binary string) []byte {
-	quoted, _ := json.Marshal(binary)
+func openCodePlugin(binary string) ([]byte, error) {
+	quoted, err := json.Marshal(binary)
+	if err != nil {
+		return nil, err
+	}
 	return fmt.Appendf(nil, `%s
 const UNDO = %s
 const FILE_TOOLS = new Set(["bash", "edit", "write", "apply_patch"])
@@ -64,12 +67,13 @@ export const UndoPlugin = async ({ directory }) => ({
     } catch {}
   },
 })
-`, pluginHeader, quoted, hookTimeout.Milliseconds())
+`, pluginHeader, quoted, hookTimeout.Milliseconds()), nil
 }
 
 // openCodeFields are the fields undo's OpenCode plugin sends.
 type openCodeFields struct {
 	eventFields
+
 	ProjectDir string `json:"project_dir"`
 }
 

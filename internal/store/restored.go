@@ -27,8 +27,14 @@ func (s *Store) SaveRestore(id int, entries tree.Listing) error {
 func (s *Store) RestoredEntries(id int) (tree.Listing, error) {
 	var record restoreRecord
 	err := s.readGob(s.restorePath(), &record)
-	if errors.Is(err, fs.ErrNotExist) || record.ID != id {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	return record.Entries, err
+	if err != nil {
+		return nil, err
+	}
+	if record.ID != id {
+		return nil, nil
+	}
+	return record.Entries, nil
 }

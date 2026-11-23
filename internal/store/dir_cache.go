@@ -21,7 +21,7 @@ func (s *Store) newDirCache(prepare func(path string) error) *dirCache {
 }
 
 // open returns the open directory path in the store, opening it on first
-// use. The directory stays open until reset or close.
+// use. The directory stays open until reset.
 func (c *dirCache) open(path string) (*os.File, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -46,7 +46,7 @@ func (c *dirCache) open(path string) (*os.File, error) {
 func (c *dirCache) reset() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var errs []error
+	errs := make([]error, 0, len(c.dirs))
 	for path, dir := range c.dirs {
 		errs = append(errs, dir.Close())
 		delete(c.dirs, path)

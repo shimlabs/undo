@@ -176,13 +176,12 @@ func (s *Store) removeAll(path string) error {
 	// Directories that cannot be made writable make the final RemoveAll fail,
 	// and that error is the one to report.
 	_ = fs.WalkDir(s.files.FS(), name, func(entryName string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		entryPath := filepath.Join(s.dir, entryName)
-		_ = s.unlock(entryPath)
-		if entry.IsDir() {
-			_ = s.makeWritable(entryPath)
+		if err == nil {
+			entryPath := filepath.Join(s.dir, entryName)
+			_ = s.unlock(entryPath)
+			if entry.IsDir() {
+				_ = s.makeWritable(entryPath)
+			}
 		}
 		return nil
 	})

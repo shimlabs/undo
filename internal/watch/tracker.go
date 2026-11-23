@@ -523,7 +523,7 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parents *tree.ParentChecker, fullPath string, isRenamed bool) error {
 	rel, err := filepath.Rel(t.root, fullPath)
 	if err != nil {
-		return nil
+		return err
 	}
 	rel = filepath.ToSlash(rel)
 	previous, wasTracked := changes.listing[rel]
@@ -592,8 +592,10 @@ func lookUp(parents *tree.ParentChecker, rel, fullPath string) (tree.Entry, stri
 // addUnder adds everything inside a new directory to the listing, in case some
 // of its files were created before their events arrived.
 func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir string) error {
-	return filepath.WalkDir(dir, func(fullPath string, dirEntry fs.DirEntry, err error) error {
-		if err != nil || fullPath == dir {
+	// A directory that cannot be read is left out, so its entries reach the
+	// listing only with the next full comparison.
+	return filepath.WalkDir(dir, func(fullPath string, dirEntry fs.DirEntry, _ error) error {
+		if fullPath == dir {
 			return nil
 		}
 		rel, err := filepath.Rel(t.root, fullPath)
@@ -607,11 +609,9 @@ func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir str
 			}
 			return nil
 		}
-		entry, err := tree.Stat(fullPath)
-		if err != nil {
-			return nil
+		if entry, err := tree.Stat(fullPath); err == nil {
+			changes.update(rel, entry)
 		}
-		changes.update(rel, entry)
 		return nil
 	})
 }

@@ -13,7 +13,7 @@ import (
 // pluginFile installs a plugin file that the agent loads on start. OpenCode
 // uses this.
 type pluginFile struct {
-	content func(binary string) []byte
+	content func(binary string) ([]byte, error)
 }
 
 var errForeignPlugin = errors.New("not written by undo, left unchanged")
@@ -23,10 +23,14 @@ func (p pluginFile) install(path, binary, _ string) error {
 	if err := checkPluginOwner(path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	return atomicfile.WriteFile(path, p.content(binary), 0o644)
+	content, err := p.content(binary)
+	if err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(path, content, 0o644)
 }
 
 func (p pluginFile) uninstall(path, _ string) error {

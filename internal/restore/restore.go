@@ -637,11 +637,10 @@ func (p *restorePlan) path(rel string) string {
 // The directory's recorded mode is set again at the end.
 func (p *restorePlan) makeParentWritable(rel string) error {
 	parent := filepath.FromSlash(path.Dir(rel))
-	info, err := p.projectRoot.Lstat(parent)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0o300 == 0o300 {
-		return nil
+	if info, err := p.projectRoot.Lstat(parent); err == nil && info.IsDir() && info.Mode().Perm()&0o300 != 0o300 {
+		return p.projectRoot.Chmod(parent, info.Mode().Perm()|0o300)
 	}
-	return p.projectRoot.Chmod(parent, info.Mode().Perm()|0o300)
+	return nil
 }
 
 func (p *restorePlan) setModeAndTimes(rel string, entry tree.Entry) error {

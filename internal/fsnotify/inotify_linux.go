@@ -156,7 +156,7 @@ func (s *Stream) handleRecord(record *unix.InotifyEvent, name string) []Event {
 	}
 	if record.Mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 		if s.isRoot(dir) {
-			_, _ = unix.InotifyRmWatch(s.fd, uint32(record.Wd))
+			_, _ = unix.InotifyRmWatch(s.fd, uint32(record.Wd)) //nolint:gosec // watch descriptors are never negative
 			return []Event{{Path: dir, ShouldRescan: true}}
 		}
 		return nil
