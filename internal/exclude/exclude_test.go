@@ -6,19 +6,25 @@ import (
 	"testing"
 )
 
-func TestExcludeDefaultsAndUndoignore(t *testing.T) {
+func newMatcher(t *testing.T, undoignore string) *Matcher {
+	t.Helper()
 	root := t.TempDir()
-	ignore := "# build output\ndist\n!target\n"
-	if err := os.WriteFile(filepath.Join(root, ".undoignore"), []byte(ignore), 0o644); err != nil {
-		t.Fatal(err)
+	if undoignore != "" {
+		if err := os.WriteFile(filepath.Join(root, ".undoignore"), []byte(undoignore), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-
-	m, err := New(root)
+	matcher, err := New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return matcher
+}
 
-	cases := []struct {
+func TestMatchDefaultsAndUndoignore(t *testing.T) {
+	matcher := newMatcher(t, "# build output\ndist\n!target\n")
+
+	for _, tc := range []struct {
 		rel   string
 		isDir bool
 		want  bool
@@ -29,10 +35,22 @@ func TestExcludeDefaultsAndUndoignore(t *testing.T) {
 		{"target", true, false},
 		{"src", true, false},
 		{"config.local.json", false, false},
+	} {
+		if got := matcher.Match(tc.rel, tc.isDir); got != tc.want {
+			t.Errorf("Match(%q) = %v, want %v", tc.rel, got, tc.want)
+		}
 	}
-	for _, c := range cases {
-		if got := m.Match(c.rel, c.isDir); got != c.want {
-			t.Errorf("Match(%q) = %v, want %v", c.rel, got, c.want)
+}
+
+func TestDefaultsSkipOnlyDirectories(t *testing.T) {
+	matcher := newMatcher(t, "")
+
+	for _, name := range []string{"target", ".cache", "venv"} {
+		if matcher.Match(name, false) {
+			t.Errorf("a file named %q is excluded, but only directories by that name should be", name)
+		}
+		if !matcher.Match(name, true) {
+			t.Errorf("a directory named %q is not excluded", name)
 		}
 	}
 }

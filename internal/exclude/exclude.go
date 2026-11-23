@@ -12,10 +12,12 @@ import (
 	"strings"
 )
 
-// Defaults lists directories that tools rebuild on their own. They are
-// skipped unless .undoignore brings one back with a "!" line.
-var Defaults = []string{
-	"node_modules", ".venv", "venv", "__pycache__", "target", ".next", ".turbo", ".gradle", ".cache",
+// defaults lists directories undo skips unless .undoignore brings one back
+// with a "!" line: directories that tools rebuild on their own, and the
+// stores undo keeps next to projects on other volumes.
+var defaults = []string{
+	"node_modules/", ".venv/", "venv/", "__pycache__/", "target/", ".next/", ".turbo/", ".gradle/", ".cache/",
+	".undo-*/",
 }
 
 // Matcher checks project paths against the exclude patterns.
@@ -26,7 +28,7 @@ type Matcher struct {
 // New returns a Matcher with the defaults plus the patterns in the project's
 // .undoignore file.
 func New(root string) (*Matcher, error) {
-	patterns := slices.Clone(Defaults)
+	patterns := slices.Clone(defaults)
 	file, err := os.Open(filepath.Join(root, ".undoignore"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Matcher{patterns: patterns}, nil
@@ -42,7 +44,8 @@ func New(root string) (*Matcher, error) {
 		switch {
 		case line == "" || strings.HasPrefix(line, "#"):
 		case strings.HasPrefix(line, "!"):
-			patterns = slices.DeleteFunc(patterns, func(p string) bool { return p == line[1:] })
+			name := strings.TrimSuffix(line[1:], "/")
+			patterns = slices.DeleteFunc(patterns, func(pattern string) bool { return strings.TrimSuffix(pattern, "/") == name })
 		default:
 			patterns = append(patterns, line)
 		}
