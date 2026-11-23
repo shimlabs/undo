@@ -109,3 +109,29 @@ func TestTakeRefusesWhenFilesAppearLater(t *testing.T) {
 		t.Fatalf("Take = %v, want ErrCloneUnsupported", err)
 	}
 }
+
+func TestCheckpointSeesCopyModeSetByAnotherProcess(t *testing.T) {
+	root := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a")
+	home := t.TempDir()
+	watcherStore, err := store.Create(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcherStore.Close()
+	commandStore, err := store.Open(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer commandStore.Close()
+
+	if err := commandStore.SetCopyMode(true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := watcherStore.Take(store.CheckpointOptions{Label: "after --copy", Dir: root}); err != nil {
+		t.Fatal(err)
+	}
+	if !watcherStore.IsCopyMode() {
+		t.Fatal("a store opened earlier still takes clones after copy mode was set")
+	}
+}
