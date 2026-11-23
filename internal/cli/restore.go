@@ -60,7 +60,7 @@ func diffCommand(parsed flags, env Env) error {
 	out := env.stdout()
 	printCheckpointHeading(out, checkpoint, projectStore.Root())
 	if changes.Len() == 0 {
-		out.Success("The project already matches checkpoint %d.", checkpoint.ID)
+		out.Successf("The project already matches checkpoint %d.", checkpoint.ID)
 		return nil
 	}
 	printChanges(out, changes)
@@ -98,7 +98,7 @@ func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, 
 			return err
 		}
 		if changes.Len() == 0 {
-			out.Success("Nothing to restore: the project already matches checkpoint %d.", checkpoint.ID)
+			out.Successf("Nothing to restore: the project already matches checkpoint %d.", checkpoint.ID)
 			return nil
 		}
 		printChanges(out, changes)
@@ -119,14 +119,14 @@ func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, 
 		out.Println()
 	}
 	restored := applied.Len() - len(applied.Skipped) - len(applied.Lost)
-	out.Success("Restored %s. Run %s again to put them back.", pluralize(restored, "path"), out.Bold("undo"))
+	out.Successf("Restored %s. Run %s again to put them back.", pluralize(restored, "path"), out.Bold("undo"))
 	return nil
 }
 
 // printCheckpointHeading names checkpoint, its age, and the command that
 // followed it.
 func printCheckpointHeading(out *terminal.Writer, checkpoint store.Checkpoint, root string) {
-	out.Heading("Checkpoint %d · %s", checkpoint.ID, timeAgo(checkpoint.Time))
+	out.Headingf("Checkpoint %d · %s", checkpoint.ID, timeAgo(checkpoint.Time))
 	if checkpoint.Label != "" {
 		out.Printf("    %s %s\n", out.Dim("before"), terminal.Printable(checkpoint.Label))
 	}

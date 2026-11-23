@@ -8,10 +8,10 @@ import (
 func TestWriterLeavesOutColorsWhenNotATerminal(t *testing.T) {
 	var out bytes.Buffer
 	writer := NewWriter(&out)
-	writer.Heading("Checkpoint %d", 3)
-	writer.Success("Restored %s", writer.Green("2 paths"))
-	writer.Warning("watch out")
-	writer.Error("failed")
+	writer.Headingf("Checkpoint %d", 3)
+	writer.Successf("Restored %s", writer.Green("2 paths"))
+	writer.Warningf("watch out")
+	writer.Errorf("failed")
 
 	want := "==> Checkpoint 3\n✔ Restored 2 paths\nWarning: watch out\nError: failed\n"
 	if out.String() != want {

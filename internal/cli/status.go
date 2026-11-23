@@ -20,7 +20,7 @@ func statusCommand(parsed flags, env Env) error {
 		return err
 	}
 	out := env.stdout()
-	out.Heading("%s", displayPath(root))
+	out.Headingf("%s", displayPath(root))
 	projectStore, err := store.Open(env.StoreHome, root)
 	switch {
 	case isMissingProject(err):

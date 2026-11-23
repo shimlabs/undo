@@ -92,23 +92,23 @@ func (w *Writer) Println(args ...any) {
 	fmt.Fprintln(w.out, args...)
 }
 
-// Heading writes a section heading: a blue arrow and bold text.
-func (w *Writer) Heading(format string, args ...any) {
+// Headingf writes a section heading: a blue arrow and bold text.
+func (w *Writer) Headingf(format string, args ...any) {
 	fmt.Fprintf(w.out, "%s %s\n", w.style(bold+blue, "==>"), w.Bold(fmt.Sprintf(format, args...)))
 }
 
-// Success writes a line that reports something done, after a green check
+// Successf writes a line that reports something done, after a green check
 // mark.
-func (w *Writer) Success(format string, args ...any) {
+func (w *Writer) Successf(format string, args ...any) {
 	fmt.Fprintf(w.out, "%s %s\n", w.style(bold+green, "✔"), fmt.Sprintf(format, args...))
 }
 
-// Warning writes a line that needs the user's attention.
-func (w *Writer) Warning(format string, args ...any) {
+// Warningf writes a line that needs the user's attention.
+func (w *Writer) Warningf(format string, args ...any) {
 	fmt.Fprintf(w.out, "%s %s\n", w.style(bold+yellow, "Warning:"), fmt.Sprintf(format, args...))
 }
 
-// Error writes a line that reports a failure.
-func (w *Writer) Error(format string, args ...any) {
+// Errorf writes a line that reports a failure.
+func (w *Writer) Errorf(format string, args ...any) {
 	fmt.Fprintf(w.out, "%s %s\n", w.style(bold+red, "Error:"), fmt.Sprintf(format, args...))
 }

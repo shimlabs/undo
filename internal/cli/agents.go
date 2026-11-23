@@ -18,7 +18,7 @@ func installCommand(parsed flags, env Env) error {
 		return err
 	}
 	out := env.stdout()
-	out.Success("Installed the undo hook for %s", agent.Title)
+	out.Successf("Installed the undo hook for %s", agent.Title)
 	out.Printf("  %s %s\n\n%s\n", out.Dim("in"), displayPath(path), agent.Note)
 	return nil
 }
@@ -32,7 +32,7 @@ func uninstallCommand(parsed flags, env Env) error {
 	if err != nil {
 		return err
 	}
-	env.stdout().Success("Removed the undo hook for %s from %s", agent.Title, displayPath(path))
+	env.stdout().Successf("Removed the undo hook for %s from %s", agent.Title, displayPath(path))
 	return nil
 }
 

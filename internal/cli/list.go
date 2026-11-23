@@ -40,7 +40,7 @@ func listCommand(parsed flags, env Env) error {
 // printCheckpoints lists checkpoints in a table: id, age, the command that
 // followed, and where and by which agent it ran when that adds something.
 func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root string) {
-	out.Heading("Checkpoints in %s", displayPath(root))
+	out.Headingf("Checkpoints in %s", displayPath(root))
 	idWidth := len(strconv.Itoa(checkpoints[len(checkpoints)-1].ID))
 	ages := make([]string, len(checkpoints))
 	ageWidth := 0
@@ -111,9 +111,9 @@ func printDeletedProject(out *terminal.Writer, projectStore *store.Store) {
 	if shown := terminal.Printable(root); shown != root {
 		// A path with control characters cannot be shown both readably
 		// and safe to paste, so the command is described instead.
-		out.Warning("%s was deleted. Bring it back with undo to %d and --project set to that path.", shown, latest.ID)
+		out.Warningf("%s was deleted. Bring it back with undo to %d and --project set to that path.", shown, latest.ID)
 		return
 	}
-	out.Warning("%s was deleted. Bring it back with:", displayPath(root))
+	out.Warningf("%s was deleted. Bring it back with:", displayPath(root))
 	out.Printf("  %s\n", out.Bold(fmt.Sprintf("undo to %d --project %s", latest.ID, shell.Quote(root))))
 }

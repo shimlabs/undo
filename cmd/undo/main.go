@@ -47,7 +47,7 @@ func main() {
 }
 
 func exitWithError(err error) {
-	terminal.NewWriter(os.Stderr).Error("%s", terminal.Printable(err.Error()))
+	terminal.NewWriter(os.Stderr).Errorf("%s", terminal.Printable(err.Error()))
 	os.Exit(1)
 }
 

@@ -84,13 +84,13 @@ func Run(args []string, env Env) int {
 	switch {
 	case errors.Is(err, errDeclined):
 	case errors.Is(err, store.ErrCloneUnsupported):
-		errOut.Error("%s, so undo cannot protect this project cheaply.", terminal.Printable(err.Error()))
+		errOut.Errorf("%s, so undo cannot protect this project cheaply.", terminal.Printable(err.Error()))
 		errOut.Printf("Run %s once to keep full copies instead. They take as much disk as the project.\n", errOut.Bold("undo checkpoint --copy"))
 	case errors.Is(err, project.ErrNotProject):
-		errOut.Error("%s.", terminal.Printable(err.Error()))
+		errOut.Errorf("%s.", terminal.Printable(err.Error()))
 		errOut.Println("Run undo, or start your agent, inside a project folder.")
 	default:
-		errOut.Error("%s", terminal.Printable(err.Error()))
+		errOut.Errorf("%s", terminal.Printable(err.Error()))
 	}
 	return 1
 }
@@ -98,7 +98,7 @@ func Run(args []string, env Env) int {
 // printUsageError writes err, how its command is typed, and where to read
 // more.
 func printUsageError(out *terminal.Writer, err usageError) {
-	out.Error("%s", terminal.Printable(err.message))
+	out.Errorf("%s", terminal.Printable(err.message))
 	if err.command == nil {
 		out.Printf("Run %s for the list of commands.\n", out.Bold("undo help"))
 		return
