@@ -11,7 +11,9 @@ import (
 	"slices"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
+	"golang.org/x/sys/unix"
 )
 
 // Source is the state of a path at a checkpoint and where its content is
@@ -106,11 +108,34 @@ func (s *Store) Extract(rel string, source Source, dst string) error {
 	})
 }
 
-// ExtractBaseDir writes the whole directory rel from the base to dst, which
-// must not exist, in one clone. Only use it for a directory UnchangedDirs
-// returned.
-func (s *Store) ExtractBaseDir(rel, dst string) error {
-	return s.clone(s.basePath(rel), dst)
+// ExtractAt writes the stored copy of the file or symlink rel, as recorded
+// in source, to name in dir, like Extract. It works relative to dir, so a
+// symlink that replaced a directory above dir is never followed.
+func (s *Store) ExtractAt(rel string, source Source, dir *os.File, name string) error {
+	src := s.basePath(rel)
+	if source.Layer > 0 {
+		src = s.layerFile(source.Layer, rel)
+	}
+	dirFd := int(dir.Fd())
+	var stat unix.Stat_t
+	if err := unix.Fstatat(dirFd, name, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return s.cloneAt(src, dir, name)
+	}
+	tempName := atomicfile.TempName(name)
+	if err := s.cloneAt(src, dir, tempName); err != nil {
+		return err
+	}
+	if err := unix.Renameat(dirFd, tempName, dirFd, name); err != nil {
+		return errors.Join(&os.LinkError{Op: "renameat", Old: tempName, New: name, Err: err}, unix.Unlinkat(dirFd, tempName, 0))
+	}
+	return nil
+}
+
+// ExtractBaseDir writes the whole directory rel from the base to name in
+// dir, which must not exist, in one clone. Only use it for a directory
+// UnchangedDirs returned.
+func (s *Store) ExtractBaseDir(rel string, dir *os.File, name string) error {
+	return clone.FileAt(s.basePath(rel), dir, name)
 }
 
 // UnchangedDirs returns the directories among dirs whose whole content in
@@ -118,7 +143,12 @@ func (s *Store) ExtractBaseDir(rel, dst string) error {
 // the base, nothing was deleted from them since, and none of them holds a
 // named pipe or other special file, which the base may not keep. Such a
 // directory can be written with one ExtractBaseDir.
+// It returns none where a directory cannot be cloned in one call: on Linux and
+// in copy mode.
 func (s *Store) UnchangedDirs(state map[string]Source, dirs []string) (map[string]bool, error) {
+	if !clone.CanCloneDirs || s.config.IsCopyMode {
+		return nil, nil
+	}
 	candidates := map[string]bool{}
 	for _, rel := range dirs {
 		candidates[rel] = true

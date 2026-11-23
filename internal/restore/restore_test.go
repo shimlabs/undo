@@ -45,7 +45,7 @@ func newProject(t *testing.T) (*store.Store, string) {
 	return projectStore, root
 }
 
-func take(t *testing.T, projectStore *store.Store, label string) {
+func take(t testing.TB, projectStore *store.Store, label string) {
 	t.Helper()
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: projectStore.Root()}); err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func take(t *testing.T, projectStore *store.Store, label string) {
 }
 
 // apply restores checkpoint id, taking the safety checkpoint with a scan.
-func apply(t *testing.T, projectStore *store.Store, id int) Changes {
+func apply(t testing.TB, projectStore *store.Store, id int) Changes {
 	t.Helper()
 	changes, err := Apply(projectStore, id, (*store.Store).Take)
 	if err != nil {
@@ -566,5 +566,57 @@ func TestRestoreReportsUnstableFiles(t *testing.T) {
 	changes := apply(t, projectStore, 1)
 	if !slices.Contains(changes.Unstable, "README.md") {
 		t.Fatalf("unstable = %v, want README.md reported", changes.Unstable)
+	}
+}
+
+// BenchmarkRestore measures restoring 1,000 changed files in a project of
+// 10,000 files.
+func BenchmarkRestore(b *testing.B) {
+	root := testutil.TempDir(b)
+	for i := range 10_000 {
+		testutil.WriteFile(b, filepath.Join(root, fmt.Sprintf("dir%03d", i%200), fmt.Sprintf("file%05d.go", i)), "package main")
+	}
+	projectStore, err := store.Create(b.TempDir(), root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	take(b, projectStore, "first")
+	for b.Loop() {
+		b.StopTimer()
+		for i := range 1_000 {
+			testutil.WriteFile(b, filepath.Join(root, fmt.Sprintf("dir%03d", i%200), fmt.Sprintf("file%05d.go", i)), "changed")
+		}
+		b.StartTimer()
+		apply(b, projectStore, 1)
+	}
+}
+
+func TestRestoreNeverWritesOutsideWhenDirectoryIsSwappedForSymlink(t *testing.T) {
+	projectStore, root := newProject(t)
+	for i := range 20 {
+		testutil.WriteFile(t, filepath.Join(root, "keys", fmt.Sprintf("key%d", i)), "saved")
+	}
+	take(t, projectStore, "first")
+	for i := range 20 {
+		testutil.WriteFile(t, filepath.Join(root, "keys", fmt.Sprintf("key%d", i)), "changed")
+	}
+	plan, unlock, err := lockAndPlan(projectStore, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	outside := testutil.TempDir(t)
+	if err := os.Rename(filepath.Join(root, "keys"), filepath.Join(root, "keys-old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "keys")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := plan.apply(projectStore, 1); err == nil {
+		t.Fatal("restore went on after a directory was replaced by a symlink")
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("restore wrote %d entries outside the project", len(entries))
 	}
 }

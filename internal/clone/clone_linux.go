@@ -8,15 +8,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// CanCloneDirs reports whether File and FileAt clone a whole directory in one
+// call. FICLONE clones one file at a time.
+const CanCloneDirs = false
+
 // File clones src to dst with FICLONE, so the copy shares its data with src.
 // Directories are cloned file by file. A symlink is cloned as a link, not
 // followed. It fails if dst already exists, and returns an error matching
 // errors.ErrUnsupported when the filesystem cannot clone.
 func File(src, dst string) error {
-	err := copyTree(src, dst, func(src, dst *os.File) error {
-		err := unix.IoctlFileClone(int(dst.Fd()), int(src.Fd()))
+	err := copyTree(src, dst, func(in, out *os.File) error {
+		err := unix.IoctlFileClone(int(out.Fd()), int(in.Fd()))
 		if err != nil {
-			return &os.LinkError{Op: "ficlone", Old: src.Name(), New: dst.Name(), Err: markUnsupported(err)}
+			return &os.LinkError{Op: "ficlone", Old: in.Name(), New: out.Name(), Err: markUnsupported(err)}
 		}
 		return nil
 	})
@@ -26,8 +30,21 @@ func File(src, dst string) error {
 	return err
 }
 
-// markUnsupported marks the errors FICLONE returns on filesystems without clones,
-// or across filesystems, as errors.ErrUnsupported.
+// FileAt clones the file or symlink src to name in dir with FICLONE. It works
+// relative to dir, so it never follows a symlink that replaced a directory
+// above dir.
+func FileAt(src string, dir *os.File, name string) error {
+	return copyAt(src, dir, name, func(in, out *os.File) error {
+		err := unix.IoctlFileClone(int(out.Fd()), int(in.Fd()))
+		if err != nil {
+			return &os.LinkError{Op: "ficlone", Old: in.Name(), New: out.Name(), Err: markUnsupported(err)}
+		}
+		return nil
+	})
+}
+
+// markUnsupported marks the errors FICLONE returns on filesystems without
+// clones, or across filesystems, as errors.ErrUnsupported.
 func markUnsupported(err error) error {
 	for _, errno := range []error{unix.EXDEV, unix.EINVAL, unix.ENOTTY, unix.EOPNOTSUPP, unix.ENOSYS} {
 		if errors.Is(err, errno) {

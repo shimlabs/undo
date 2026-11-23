@@ -214,6 +214,13 @@ func (s *Store) clone(src, dst string) error {
 	return clone.File(src, dst)
 }
 
+func (s *Store) cloneAt(src string, dir *os.File, name string) error {
+	if s.config.IsCopyMode {
+		return clone.CopyAt(src, dir, name)
+	}
+	return clone.FileAt(src, dir, name)
+}
+
 // loadConfig reads the saved settings. It runs whenever the store is locked,
 // so a long-running watcher sees copy mode turned on by another process.
 func (s *Store) loadConfig() error {

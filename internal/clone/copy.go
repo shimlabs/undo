@@ -16,14 +16,14 @@ import (
 // modification times. A symlink is copied as a link, not followed. It fails if
 // dst already exists. It is for filesystems that cannot clone.
 func Copy(src, dst string) error {
-	return copyTree(src, dst, func(src, dst *os.File) error {
-		_, err := io.Copy(dst, src)
+	return copyTree(src, dst, func(in, out *os.File) error {
+		_, err := io.Copy(out, in)
 		return err
 	})
 }
 
 // copyTree recreates src at dst and fills each regular file with copyData.
-func copyTree(src, dst string, copyData func(src, dst *os.File) error) error {
+func copyTree(src, dst string, copyData func(in, out *os.File) error) error {
 	info, err := os.Lstat(src)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func copyTree(src, dst string, copyData func(src, dst *os.File) error) error {
 	return setTimes(dst, info)
 }
 
-func copyFile(src, dst string, info fs.FileInfo, copyData func(src, dst *os.File) error) error {
+func copyFile(src, dst string, info fs.FileInfo, copyData func(in, out *os.File) error) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func copyFile(src, dst string, info fs.FileInfo, copyData func(src, dst *os.File
 	return err
 }
 
-func copyDir(src, dst string, info fs.FileInfo, copyData func(src, dst *os.File) error) error {
+func copyDir(src, dst string, info fs.FileInfo, copyData func(in, out *os.File) error) error {
 	if err := os.Mkdir(dst, 0o700); err != nil {
 		return err
 	}
@@ -90,8 +90,8 @@ func copyDir(src, dst string, info fs.FileInfo, copyData func(src, dst *os.File)
 }
 
 func setTimes(path string, info fs.FileInfo) error {
-	mtime := unix.NsecToTimespec(info.ModTime().UnixNano())
-	return unix.UtimesNanoAt(unix.AT_FDCWD, path, []unix.Timespec{mtime, mtime}, unix.AT_SYMLINK_NOFOLLOW)
+	modTime := unix.NsecToTimespec(info.ModTime().UnixNano())
+	return unix.UtimesNanoAt(unix.AT_FDCWD, path, []unix.Timespec{modTime, modTime}, unix.AT_SYMLINK_NOFOLLOW)
 }
 
 // PermissionBits returns the part of mode that chmod sets.

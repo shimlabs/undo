@@ -48,11 +48,17 @@ func Replace(path string, create func(tempPath string) error) error {
 }
 
 // newTempPath returns an unused name next to path for building its replacement.
-// The name is random, so it never matches a file the user created.
 func newTempPath(path string) string {
+	return filepath.Join(filepath.Dir(path), TempName(filepath.Base(path)))
+}
+
+// TempName returns an unused name in the same directory as name for building
+// its replacement. The name is random, so it never matches a file the user
+// created.
+func TempName(name string) string {
 	suffix := make([]byte, 6)
 	rand.Read(suffix)
-	return filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".undo-"+hex.EncodeToString(suffix))
+	return "." + name + ".undo-" + hex.EncodeToString(suffix)
 }
 
 // syncDir flushes a directory's entries to disk, so a rename into it survives

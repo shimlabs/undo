@@ -18,6 +18,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/exclude"
+	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/tree"
 )
@@ -119,10 +120,12 @@ func isCoveredBy(projectStore *store.Store, id int, current tree.Listing) (bool,
 // restorePlan is a planned restore: the target state, the project as it
 // is, and the changes between them.
 type restorePlan struct {
-	root    string
-	target  map[string]store.Source
-	current tree.Listing
-	changes Changes
+	// projectRoot is open while the plan is applied.
+	projectRoot *os.Root
+	root        string
+	target      map[string]store.Source
+	current     tree.Listing
+	changes     Changes
 }
 
 // planRestore plans a restore of checkpoint id. It never touches a path the
@@ -263,7 +266,21 @@ func exists(fullPath string) bool {
 	return err == nil
 }
 
+// apply makes the changes. Every write, removal and mode change goes through
+// a root opened at the project, so a directory swapped for a symlink while
+// the restore runs cannot lead it outside the project.
 func (p *restorePlan) apply(projectStore *store.Store, id int) error {
+	// The project folder itself may have been deleted. Its mode and times
+	// are set at the end, with the other directories.
+	if err := os.MkdirAll(p.root, 0o700); err != nil {
+		return err
+	}
+	projectRoot, err := os.OpenRoot(p.root)
+	if err != nil {
+		return err
+	}
+	defer projectRoot.Close()
+	p.projectRoot = projectRoot
 	if err := p.removeAll(p.removals()); err != nil {
 		return err
 	}
@@ -316,11 +333,10 @@ func (p *restorePlan) removeAll(paths []string) error {
 		if err := parents.Check(rel); err != nil {
 			return err
 		}
-		full := p.path(rel)
-		if err := makeParentWritable(full); err != nil {
+		if err := p.makeParentWritable(rel); err != nil {
 			return err
 		}
-		err := os.Remove(full)
+		err := p.projectRoot.Remove(filepath.FromSlash(rel))
 		if err == nil || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTEMPTY) {
 			continue
 		}
@@ -341,6 +357,7 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 		return nil, err
 	}
 	isCloned := map[string]bool{}
+	var files []string
 	parents := tree.NewParentChecker(p.root)
 	for _, rel := range paths {
 		if rel != "." && isCloned[path.Dir(rel)] {
@@ -350,22 +367,24 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 		if err := parents.Check(rel); err != nil {
 			return skipped, err
 		}
-		source, full := p.target[rel], p.path(rel)
+		source := p.target[rel]
 		if rel != "." {
-			if err := makeParentWritable(full); err != nil {
+			if err := p.makeParentWritable(rel); err != nil {
 				return skipped, err
 			}
 		}
 		switch {
 		case clonable[rel]:
-			err = projectStore.ExtractBaseDir(rel, full)
+			err = p.inParent(rel, func(dir *os.File, name string) error {
+				return projectStore.ExtractBaseDir(rel, dir, name)
+			})
 			isCloned[rel] = true
 		case source.Entry.Kind == tree.Dir:
-			err = os.MkdirAll(full, 0o700)
+			err = p.projectRoot.MkdirAll(filepath.FromSlash(rel), 0o700)
 		case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:
-			err = projectStore.Extract(rel, source, full)
+			files = append(files, rel)
 		case source.Entry.Mode&fs.ModeNamedPipe != 0:
-			err = syscall.Mkfifo(full, uint32(source.Entry.Mode.Perm()))
+			err = syscall.Mkfifo(p.path(rel), uint32(source.Entry.Mode.Perm()))
 		default:
 			skipped = append(skipped, rel)
 		}
@@ -373,7 +392,23 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 			return skipped, err
 		}
 	}
-	return skipped, nil
+	// Every directory exists now, so the files can be written in any order.
+	return skipped, parallel.For(len(files), func(i int) error {
+		return p.inParent(files[i], func(dir *os.File, name string) error {
+			return projectStore.ExtractAt(files[i], p.target[files[i]], dir, name)
+		})
+	})
+}
+
+// inParent opens the directory that holds rel through the project root and
+// calls write with it and rel's name.
+func (p *restorePlan) inParent(rel string, write func(dir *os.File, name string) error) error {
+	dir, err := p.projectRoot.Open(filepath.FromSlash(path.Dir(rel)))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return write(dir, path.Base(rel))
 }
 
 // clonableDirs returns the directories in paths that are missing from the
@@ -414,7 +449,7 @@ func (p *restorePlan) restoreDirModeAndTimes(paths []string) ([]string, error) {
 		if err := parents.Check(rel); err != nil {
 			return nil, err
 		}
-		if err := setModeAndTimes(p.path(rel), source.Entry); err != nil {
+		if err := p.setModeAndTimes(rel, source.Entry); err != nil {
 			return nil, err
 		}
 	}
@@ -425,21 +460,22 @@ func (p *restorePlan) path(rel string) string {
 	return filepath.Join(p.root, filepath.FromSlash(rel))
 }
 
-// makeParentWritable lets the restore add or remove path in its directory.
+// makeParentWritable lets the restore add or remove rel in its directory.
 // The directory's recorded mode is set again at the end.
-func makeParentWritable(path string) error {
-	parent := filepath.Dir(path)
-	info, err := os.Lstat(parent)
+func (p *restorePlan) makeParentWritable(rel string) error {
+	parent := filepath.FromSlash(path.Dir(rel))
+	info, err := p.projectRoot.Lstat(parent)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0o300 == 0o300 {
 		return nil
 	}
-	return os.Chmod(parent, info.Mode().Perm()|0o300)
+	return p.projectRoot.Chmod(parent, info.Mode().Perm()|0o300)
 }
 
-func setModeAndTimes(path string, entry tree.Entry) error {
-	if err := os.Chmod(path, clone.PermissionBits(entry.Mode)); err != nil {
+func (p *restorePlan) setModeAndTimes(rel string, entry tree.Entry) error {
+	name := filepath.FromSlash(rel)
+	if err := p.projectRoot.Chmod(name, clone.PermissionBits(entry.Mode)); err != nil {
 		return err
 	}
 	modTime := time.Unix(0, entry.ModTime)
-	return os.Chtimes(path, modTime, modTime)
+	return p.projectRoot.Chtimes(name, modTime, modTime)
 }
