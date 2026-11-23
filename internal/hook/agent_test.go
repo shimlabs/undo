@@ -298,6 +298,19 @@ func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 	}
 }
 
+func TestInstallKeepsOtherProgramsNamedLikeHooks(t *testing.T) {
+	home := agentHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
+	writeFile(t, path, `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh hook claude"}]}]}}`)
+
+	claude.Install(privateBinary(t, "bin"))
+	claude.Uninstall()
+
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "guard.sh hook claude") {
+		t.Fatalf("a user's own hook was treated as undo's:\n%s", data)
+	}
+}
+
 func TestInstallQuotesBinaryPath(t *testing.T) {
 	home := agentHome(t)
 	binary := privateBinary(t, "R&D tools")
@@ -312,7 +325,7 @@ func TestInstallQuotesBinaryPath(t *testing.T) {
 
 func TestInstallRefusesTemporaryBinary(t *testing.T) {
 	agentHome(t)
-	for _, binary := range []string{filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "undo"), "/tmp/undo"} {
+	for _, binary := range []string{filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "undo"), "/tmp/undo", "/var/tmp/undo"} {
 		if _, err := claude.Install(binary); !errors.Is(err, ErrUnsafeBinary) {
 			t.Errorf("Install(%s) = %v, want ErrUnsafeBinary", binary, err)
 		}

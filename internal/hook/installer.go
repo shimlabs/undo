@@ -159,8 +159,12 @@ func isUndoHandler(agent string) func(handler any) bool {
 		if !ok {
 			return false
 		}
-		isQuoted := len(program) >= 2 && strings.HasPrefix(program, "'") && strings.HasSuffix(program, "'")
-		return isQuoted || !strings.ContainsAny(program, " \t")
+		if len(program) >= 2 && strings.HasPrefix(program, "'") && strings.HasSuffix(program, "'") {
+			program = strings.ReplaceAll(program[1:len(program)-1], `'\''`, "'")
+		} else if strings.ContainsAny(program, " \t") {
+			return false
+		}
+		return filepath.Base(program) == "undo"
 	}
 }
 
