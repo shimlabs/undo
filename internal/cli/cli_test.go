@@ -39,9 +39,7 @@ func privateBinary(t *testing.T) string {
 	return filepath.Join(parent, "bin", "undo")
 }
 
-// run runs undo with args in dir, with the store home and socket directory
-// taken from the environment, as the binary does.
-func storeHomeFor(t *testing.T) string {
+func defaultStoreHome(t *testing.T) string {
 	t.Helper()
 	storeHome, err := store.DefaultHome()
 	if err != nil {
@@ -50,19 +48,17 @@ func storeHomeFor(t *testing.T) string {
 	return storeHome
 }
 
+// run runs undo with args in dir, with the store home and socket directory
+// taken from the environment, as the binary does.
 func run(t *testing.T, dir string, stdin string, args ...string) (int, string) {
 	t.Helper()
-	storeHome, err := store.DefaultHome()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var out bytes.Buffer
 	code := Run(args, Env{
 		Dir:        dir,
 		Stdin:      strings.NewReader(stdin),
 		Stdout:     &out,
 		Stderr:     &out,
-		StoreHome:  storeHome,
+		StoreHome:  defaultStoreHome(t),
 		SocketDir:  watch.DefaultSocketDir(),
 		Executable: privateBinary(t),
 	})
@@ -268,7 +264,7 @@ func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
 func TestStatusShowsLastError(t *testing.T) {
 	root := newProject(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
-	projectStore, err := store.Create(storeHomeFor(t), root)
+	projectStore, err := store.Create(defaultStoreHome(t), root)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -69,7 +69,7 @@ func takeCheckpoint(t *testing.T, tracker *Tracker, label string) store.Checkpoi
 func checkMatchesScan(t *testing.T, projectStore *store.Store, root string, id int) {
 	t.Helper()
 	matcher, _ := exclude.New(root)
-	scanned, err := tree.Scan(root, matcher)
+	scanned, _, err := tree.Scan(root, matcher)
 	if err != nil {
 		t.Fatal(err)
 	}

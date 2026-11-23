@@ -21,7 +21,7 @@ func newProject(t *testing.T) (root, storeHome string) {
 	return root, t.TempDir()
 }
 
-func checkpoints(t *testing.T, storeHome, root string) []store.Checkpoint {
+func listCheckpoints(t *testing.T, storeHome, root string) []store.Checkpoint {
 	t.Helper()
 	projectStore, err := store.Open(storeHome, root)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -66,7 +66,7 @@ func TestHandleLabelsEachAgentsEvents(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			checkpoints := checkpoints(t, storeHome, root)
+			checkpoints := listCheckpoints(t, storeHome, root)
 			if len(checkpoints) != 1 || checkpoints[0].Label != tc.label {
 				t.Fatalf("checkpoints = %+v, want one labeled %q", checkpoints, tc.label)
 			}
@@ -82,7 +82,7 @@ func TestHandleRecordsAgentAndSession(t *testing.T) {
 	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	checkpoints := checkpoints(t, storeHome, root)
+	checkpoints := listCheckpoints(t, storeHome, root)
 	if len(checkpoints) != 1 || checkpoints[0].Agent != "claude" || checkpoints[0].Session != "abc123" {
 		t.Fatalf("checkpoints = %+v", checkpoints)
 	}
@@ -98,7 +98,7 @@ func TestHandleFindsProjectFromEnvironment(t *testing.T) {
 	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if checkpoints := checkpoints(t, storeHome, root); len(checkpoints) != 1 {
+	if checkpoints := listCheckpoints(t, storeHome, root); len(checkpoints) != 1 {
 		t.Fatalf("checkpoints = %+v, want one in the project from CLAUDE_PROJECT_DIR", checkpoints)
 	}
 }
@@ -111,7 +111,7 @@ func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if checkpoints := checkpoints(t, storeHome, root); len(checkpoints) != 1 {
+	if checkpoints := listCheckpoints(t, storeHome, root); len(checkpoints) != 1 {
 		t.Fatalf("checkpoints = %d, want 1 while the Cursor hook is not installed", len(checkpoints))
 	}
 
@@ -121,7 +121,7 @@ func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if checkpoints := checkpoints(t, storeHome, root); len(checkpoints) != 1 {
+	if checkpoints := listCheckpoints(t, storeHome, root); len(checkpoints) != 1 {
 		t.Fatalf("checkpoints = %d, want the Claude hook to leave Cursor events to the Cursor hook", len(checkpoints))
 	}
 }
@@ -137,11 +137,11 @@ func TestHandleUsesSessionProject(t *testing.T) {
 	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	found := checkpoints(t, storeHome, root)
+	found := listCheckpoints(t, storeHome, root)
 	if len(found) != 1 || found[0].Dir != subdir {
 		t.Fatalf("checkpoints of the session project = %+v, want one that ran in %s", found, subdir)
 	}
-	if other := checkpoints(t, storeHome, subdir); len(other) != 0 {
+	if other := listCheckpoints(t, storeHome, subdir); len(other) != 0 {
 		t.Fatalf("a command in a subfolder started a store of its own: %+v", other)
 	}
 }

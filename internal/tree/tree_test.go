@@ -22,7 +22,7 @@ func scan(t *testing.T, root string) Listing {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing, err := Scan(root, matcher)
+	listing, _, err := Scan(root, matcher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestScanWithSkippedMatchesWalkDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	listing, skipped, err := ScanWithSkipped(root, matcher)
+	listing, skipped, err := Scan(root, matcher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestScanSkipsUnreadableDirectories(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
 	matcher, _ := exclude.New(root)
 
-	listing, skipped, err := ScanWithSkipped(root, matcher)
+	listing, skipped, err := Scan(root, matcher)
 	if err != nil {
 		t.Fatalf("one unreadable directory failed the whole scan: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestScanSkipsUnreadableDirectories(t *testing.T) {
 
 func TestScanMissingRoot(t *testing.T) {
 	matcher, _ := exclude.New(t.TempDir())
-	listing, err := Scan(filepath.Join(t.TempDir(), "gone"), matcher)
+	listing, _, err := Scan(filepath.Join(t.TempDir(), "gone"), matcher)
 	if err != nil || len(listing) != 0 {
 		t.Fatalf("Scan = %v, %v; want an empty listing", listing, err)
 	}
@@ -217,7 +217,7 @@ func BenchmarkScan(b *testing.B) {
 	root := buildTree(b, 500, 20)
 	matcher, _ := exclude.New(root)
 	for b.Loop() {
-		if _, err := Scan(root, matcher); err != nil {
+		if _, _, err := Scan(root, matcher); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -234,7 +234,7 @@ func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "noexec"), 0o755) })
 	matcher, _ := exclude.New(root)
 
-	_, skipped, err := ScanWithSkipped(root, matcher)
+	_, skipped, err := Scan(root, matcher)
 	if err != nil {
 		t.Fatalf("a directory without search permission failed the scan: %v", err)
 	}

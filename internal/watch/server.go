@@ -54,7 +54,7 @@ type Options struct {
 	Ready func()
 }
 
-// Serve watches the project of s and takes checkpoints for clients until ctx
+// Serve watches the project in projectStore and takes checkpoints for clients until ctx
 // is canceled or no request arrives for options.IdleTimeout. After
 // checkpoints, once it has been quiet for options.PruneQuietPeriod, it prunes
 // the store in the background if pruning is due.

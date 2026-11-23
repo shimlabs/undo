@@ -46,7 +46,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err := readJSON(s.mergePath(), &pending); err != nil {
 		return 0, err
 	}
-	base, err := s.BaseListing()
+	base, err := s.baseListing()
 	if err != nil {
 		return 0, err
 	}

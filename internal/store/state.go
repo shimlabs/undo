@@ -40,7 +40,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	base, err := s.BaseListing()
+	base, err := s.baseListing()
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func (s *Store) UnchangedDirs(state map[string]Source, dirs []string) (map[strin
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	base, err := s.BaseListing()
+	base, err := s.baseListing()
 	if err != nil {
 		return nil, err
 	}

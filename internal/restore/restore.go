@@ -148,7 +148,7 @@ func planRestore(projectStore *store.Store, id int) (projectRestore, error) {
 	if err != nil {
 		return projectRestore{}, err
 	}
-	current, skipped, err := tree.ScanWithSkipped(root, matcherNow)
+	current, skipped, err := tree.Scan(root, matcherNow)
 	if err != nil {
 		return projectRestore{}, err
 	}

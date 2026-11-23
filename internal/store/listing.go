@@ -20,8 +20,8 @@ type savedListing struct {
 	Listing tree.Listing
 }
 
-// BaseListing returns the listing of what the base holds.
-func (s *Store) BaseListing() (tree.Listing, error) {
+// baseListing returns the listing of what the base holds.
+func (s *Store) baseListing() (tree.Listing, error) {
 	var listing tree.Listing
 	err := readGob(s.baseListingPath(), &listing)
 	if errors.Is(err, fs.ErrNotExist) {

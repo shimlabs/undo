@@ -30,9 +30,9 @@ type ServerStatus struct {
 	CheckpointCount int
 }
 
-// StartFunc starts a server for the project in the background. The channel
+// startFunc starts a server for the project in the background. The channel
 // it returns receives the server's error if it exits.
-type StartFunc func() (exited <-chan error, err error)
+type startFunc func() (exited <-chan error, err error)
 
 // Client talks to the servers in SocketDir.
 type Client struct {
@@ -69,7 +69,7 @@ func (c Client) Checkpoint(projectStore *store.Store, options store.CheckpointOp
 
 // startFor returns the function that starts the project's server, or nil
 // while an earlier start failure is recent.
-func (c Client) startFor(projectStore *store.Store) StartFunc {
+func (c Client) startFor(projectStore *store.Store) startFunc {
 	if c.Start == nil {
 		return nil
 	}
@@ -116,7 +116,7 @@ func recordStartFailure(projectStore *store.Store, failure error) {
 	}
 }
 
-func (c Client) checkpointThroughServer(projectStore *store.Store, options store.CheckpointOptions, start StartFunc) (store.Checkpoint, error) {
+func (c Client) checkpointThroughServer(projectStore *store.Store, options store.CheckpointOptions, start startFunc) (store.Checkpoint, error) {
 	conn, err := c.connect(projectStore, start)
 	if err != nil {
 		return store.Checkpoint{}, err
@@ -145,7 +145,7 @@ func (c Client) Status(projectStore *store.Store) (ServerStatus, error) {
 	return ServerStatus{IsRunning: true, CheckpointCount: reply.CheckpointCount}, nil
 }
 
-func (c Client) connect(projectStore *store.Store, start StartFunc) (net.Conn, error) {
+func (c Client) connect(projectStore *store.Store, start startFunc) (net.Conn, error) {
 	path, err := socketPath(c.SocketDir, projectStore)
 	if err != nil {
 		return nil, err

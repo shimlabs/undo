@@ -50,7 +50,7 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	}
 	wantAtThird, wantAtFourth := stateHashes(t, projectStore, 3), stateHashes(t, projectStore, 4)
 
-	base, err := projectStore.BaseListing()
+	base, err := projectStore.baseListing()
 	if err != nil {
 		t.Fatal(err)
 	}

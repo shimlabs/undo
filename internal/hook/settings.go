@@ -51,13 +51,13 @@ func (h hookGroups) uninstall(path, agent string) error {
 func (h hookGroups) isInstalled(path, agent string) bool {
 	settings, err := readSettings(path)
 	return err == nil && slices.ContainsFunc(hookEntries(settings, h.event), func(entry any) bool {
-		return slices.ContainsFunc(handlers(entry), isUndoHandler(agent))
+		return slices.ContainsFunc(groupHandlers(entry), isUndoHandler(agent))
 	})
 }
 
 // isUndoGroup reports whether entry is a group holding only undo's handler.
 func isUndoGroup(entry any, agent string) bool {
-	handlers := handlers(entry)
+	handlers := groupHandlers(entry)
 	return len(handlers) > 0 && !slices.ContainsFunc(handlers, func(handler any) bool { return !isUndoHandler(agent)(handler) })
 }
 
@@ -67,7 +67,7 @@ func removeHandlers(groups []any, agent string) []any {
 	var kept []any
 	for _, entry := range groups {
 		group, ok := entry.(map[string]any)
-		handlers := handlers(entry)
+		handlers := groupHandlers(entry)
 		if !ok || handlers == nil {
 			kept = append(kept, entry)
 			continue
@@ -85,7 +85,7 @@ func removeHandlers(groups []any, agent string) []any {
 	return kept
 }
 
-func handlers(entry any) []any {
+func groupHandlers(entry any) []any {
 	group, _ := entry.(map[string]any)
 	handlers, _ := group["hooks"].([]any)
 	return handlers

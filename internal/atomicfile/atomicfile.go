@@ -29,7 +29,7 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return SyncDir(filepath.Dir(path))
+	return syncDir(filepath.Dir(path))
 }
 
 // Replace calls create to build path's replacement at a temporary path next
@@ -55,9 +55,9 @@ func newTempPath(path string) string {
 	return filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".undo-"+hex.EncodeToString(suffix))
 }
 
-// SyncDir flushes a directory's entries to disk, so a rename into it survives
+// syncDir flushes a directory's entries to disk, so a rename into it survives
 // a crash.
-func SyncDir(dir string) error {
+func syncDir(dir string) error {
 	file, err := os.Open(dir)
 	if err != nil {
 		return err

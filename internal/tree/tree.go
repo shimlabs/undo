@@ -56,16 +56,10 @@ type Skipped struct {
 	Unreadable []string
 }
 
-// Scan lists every path under root that matcher does not exclude. Symlinks
-// are recorded but never followed. Directories it cannot read are left out.
-func Scan(root string, matcher *exclude.Matcher) (Listing, error) {
-	listing, _, err := ScanWithSkipped(root, matcher)
-	return listing, err
-}
-
-// ScanWithSkipped works like Scan and also returns the paths it skipped. It
-// does not go into excluded or unreadable directories.
-func ScanWithSkipped(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
+// Scan lists every path under root that matcher does not exclude,
+// and returns the paths it skipped. Symlinks are recorded but never
+// followed, and excluded or unreadable directories are not gone into.
+func Scan(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
 	entry, err := Stat(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Listing{}, Skipped{}, nil

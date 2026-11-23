@@ -31,9 +31,9 @@ type Checkpoint struct {
 	CheckpointOptions
 }
 
-// Checkpointer takes a checkpoint of the project in s, either by scanning it
+// Checkpointer takes a checkpoint of the project in projectStore, either by scanning it
 // with Take or through the background watcher.
-type Checkpointer func(s *Store, options CheckpointOptions) (Checkpoint, error)
+type Checkpointer func(projectStore *Store, options CheckpointOptions) (Checkpoint, error)
 
 // Manifest is what a layer recorded: the state of every path that changed
 // since the previous checkpoint and the paths that were deleted. Unstable
@@ -99,7 +99,7 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 		return Checkpoint{}, err
 	}
 
-	current, skipped, err := tree.ScanWithSkipped(s.root, matcher)
+	current, skipped, err := tree.Scan(s.root, matcher)
 	if err != nil {
 		return Checkpoint{}, err
 	}
@@ -193,7 +193,7 @@ func toCloneError(err error) error {
 // matches that listing, so the first checkpoint records it again. Excluded
 // and unreadable paths are never read.
 func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
-	before, skipped, err := tree.ScanWithSkipped(s.root, matcher)
+	before, skipped, err := tree.Scan(s.root, matcher)
 	if err != nil {
 		return nil, err
 	}

@@ -214,7 +214,7 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		}
 	}
 	if shouldRescan {
-		current, skipped, err := tree.ScanWithSkipped(t.root, t.matcher.Load())
+		current, skipped, err := tree.Scan(t.root, t.matcher.Load())
 		if err != nil {
 			return store.Checkpoint{}, err
 		}
@@ -326,11 +326,11 @@ func (t *Tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		if treeEntry, ok := info.Sys().(*syscall.Stat_t); ok && treeEntry.Nlink > 1 {
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
 			if inodes == nil {
 				inodes = map[uint64]bool{}
 			}
-			inodes[treeEntry.Ino] = true
+			inodes[stat.Ino] = true
 		}
 	}
 	if inodes == nil {
