@@ -917,3 +917,21 @@ func TestRepeatedRestoreWritesOnlyWhatChangedSince(t *testing.T) {
 		}
 	}
 }
+
+func TestUndoRestoreOfDeletedProject(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	apply(t, projectStore, 1)
+	safety, _, err := projectStore.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	apply(t, projectStore, safety.ID)
+	if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
+		t.Fatalf("project = %v, %v, want an empty folder, as it was missing at the checkpoint", entries, err)
+	}
+}

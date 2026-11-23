@@ -204,6 +204,9 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	written = slices.DeleteFunc(written, isInsideAny(kept))
 	written = slices.DeleteFunc(written, isUnchanged)
 	removed = slices.DeleteFunc(removed, isInsideAny(kept))
+	// A checkpoint of a project that was missing has no root, but removing
+	// the project folder itself would act outside it, so it stays, empty.
+	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
 	slices.Sort(kept)
 	plan.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable, Lost: lost}
 	return plan, nil
