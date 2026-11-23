@@ -131,11 +131,7 @@ func (a Agent) Handle(in io.Reader, storeHome string, checkpoint store.Checkpoin
 // handle takes the checkpoint and returns the project's store, if it got as
 // far as opening one.
 func (a Agent) handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) (*store.Store, error) {
-	parseEvent := a.parseEvent
-	if parseEvent == nil {
-		parseEvent = parseCodexEvent
-	}
-	event, err := parseEvent(in)
+	event, err := a.parseEvent(in)
 	if err != nil {
 		return nil, err
 	}

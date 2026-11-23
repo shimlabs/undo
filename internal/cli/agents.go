@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/shimlabs/undo/internal/hook"
+	"github.com/shimlabs/undo/internal/store"
 )
 
 func installCommand(args []string, env Env) error {
@@ -47,14 +48,18 @@ func agentArg(command string, args []string) (hook.Agent, error) {
 }
 
 // hookCommand handles one event from an agent. It never fails and never
-// prints, because some agents block the tool when a hook fails or prints. An
-// unknown agent name is read in the most common event format, and Handle logs
-// its failures.
+// prints, because some agents block the tool when a hook fails or prints.
+// Failures go to the error log instead.
 func hookCommand(args []string, env Env) {
 	defer func() { _ = recover() }()
-	var agent hook.Agent
+	name := ""
 	if len(args) > 0 {
-		agent, _ = hook.FindAgent(args[0])
+		name = args[0]
+	}
+	agent, ok := hook.FindAgent(name)
+	if !ok {
+		store.LogHomeError(env.StoreHome, fmt.Errorf("hook for unknown agent %q", name))
+		return
 	}
 	_ = agent.Handle(env.Stdin, env.StoreHome, env.checkpointer())
 }

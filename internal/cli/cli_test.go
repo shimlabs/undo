@@ -210,6 +210,22 @@ func TestHookNeverBlocksTheAgent(t *testing.T) {
 	}
 }
 
+func TestHookForUnknownAgentLogsAndTakesNoCheckpoint(t *testing.T) {
+	root := newProject(t)
+	storeHome := defaultStoreHome(t)
+	event := `{"cwd":` + strconv.Quote(root) + `,"tool_name":"Bash","tool_input":{"command":"ls"}}`
+	if code, out := run(t, root, event, "hook", "no-such-agent"); code != 0 || out != "" {
+		t.Fatalf("exit %d, output %q", code, out)
+	}
+	if _, err := store.Open(storeHome, root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("hook for an unknown agent opened a store: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(storeHome, "errors.log"))
+	if !strings.Contains(string(data), "no-such-agent") {
+		t.Fatalf("errors.log = %q, want the unknown agent named", data)
+	}
+}
+
 func TestInstallUnknownAgent(t *testing.T) {
 	root := newProject(t)
 	if code, _ := run(t, root, "", "install", "notepad"); code != 2 {
