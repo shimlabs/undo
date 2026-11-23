@@ -360,6 +360,16 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		return Manifest{}, err
 	}
 	defer layer.Close()
+	// Many changed files share a directory, so each one is created once.
+	dirs := map[string]bool{}
+	for _, rel := range files {
+		if dir := path.Dir(rel); !dirs[dir] {
+			dirs[dir] = true
+			if err := layer.MkdirAll(dir, 0o700); err != nil {
+				return Manifest{}, err
+			}
+		}
+	}
 	err = parallel.For(len(files), func(i int) error {
 		entry, isStable, err := s.cloneStable(layer, id, files[i], changes.Listing[files[i]])
 		clonedFiles[i] = clonedFile{entry, isStable, err}
@@ -441,14 +451,12 @@ func (s *Store) openLayer(id int) (*os.Root, error) {
 	return os.OpenRoot(s.layerFile(id, "."))
 }
 
-// cloneStable clones rel into the layer and checks that the source did not
-// change during the clone. If it did, it tries again a few times.
+// cloneStable clones rel into the layer, whose directory for rel must exist,
+// and checks that the source did not change during the clone. If it did, it
+// tries again a few times.
 func (s *Store) cloneStable(layer *os.Root, id int, rel string, entry tree.Entry) (tree.Entry, bool, error) {
 	src := filepath.Join(s.root, filepath.FromSlash(rel))
 	dst := s.layerFile(id, rel)
-	if err := layer.MkdirAll(path.Dir(rel), 0o700); err != nil {
-		return entry, false, err
-	}
 	for attempt := 1; ; attempt++ {
 		if err := layer.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return entry, false, err
