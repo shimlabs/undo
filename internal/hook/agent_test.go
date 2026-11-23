@@ -26,18 +26,22 @@ func readJSONFile(t *testing.T, path string) map[string]any {
 	return settings
 }
 
-// settingsCases are the agents configured through a JSON settings file, each
-// with a file that already holds a setting and a hook of the user's own.
-var settingsCases = []struct {
+// settingsCase is an agent configured through a JSON settings file, with a
+// file that already holds a setting and a hook of the user's own.
+type settingsCase struct {
 	agent    Agent
 	file     string
 	existing string
 	keep     string
-}{
-	{claude, ".claude/settings.json", `{"model": "opus", "hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "audit"}]}]}}`, "model"},
-	{codex, ".codex/hooks.json", `{"description": "team hooks", "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "audit"}]}]}}`, "description"},
-	{cursor, ".cursor/hooks.json", `{"version": 1, "hooks": {"preToolUse": [{"command": "audit", "matcher": "Read"}], "afterFileEdit": [{"command": "format"}]}}`, "version"},
-	{gemini, ".gemini/settings.json", `{"theme": "dark", "hooks": {"BeforeTool": [{"matcher": "read_file", "hooks": [{"type": "command", "command": "audit"}]}]}}`, "theme"},
+}
+
+func settingsCases() []settingsCase {
+	return []settingsCase{
+		{claude(), ".claude/settings.json", `{"model": "opus", "hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "audit"}]}]}}`, "model"},
+		{codex(), ".codex/hooks.json", `{"description": "team hooks", "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "audit"}]}]}}`, "description"},
+		{cursor(), ".cursor/hooks.json", `{"version": 1, "hooks": {"preToolUse": [{"command": "audit", "matcher": "Read"}], "afterFileEdit": [{"command": "format"}]}}`, "version"},
+		{gemini(), ".gemini/settings.json", `{"theme": "dark", "hooks": {"BeforeTool": [{"matcher": "read_file", "hooks": [{"type": "command", "command": "audit"}]}]}}`, "theme"},
+	}
 }
 
 // settingsEvent returns the settings key an agent's hooks go under.
@@ -67,7 +71,7 @@ func undoEntries(t *testing.T, agent Agent, settings map[string]any) (all []any,
 }
 
 func TestInstallKeepsOtherSettings(t *testing.T) {
-	for _, tc := range settingsCases {
+	for _, tc := range settingsCases() {
 		t.Run(tc.agent.Name, func(t *testing.T) {
 			home := testutil.AgentHome(t)
 			path := filepath.Join(home, tc.file)
@@ -96,7 +100,7 @@ func TestInstallKeepsOtherSettings(t *testing.T) {
 }
 
 func TestReinstallUpdatesInPlace(t *testing.T) {
-	for _, tc := range settingsCases {
+	for _, tc := range settingsCases() {
 		t.Run(tc.agent.Name, func(t *testing.T) {
 			home := testutil.AgentHome(t)
 			path := filepath.Join(home, tc.file)
@@ -128,7 +132,7 @@ func TestReinstallUpdatesInPlace(t *testing.T) {
 }
 
 func TestUninstallRemovesOnlyOurs(t *testing.T) {
-	for _, tc := range settingsCases {
+	for _, tc := range settingsCases() {
 		t.Run(tc.agent.Name, func(t *testing.T) {
 			home := testutil.AgentHome(t)
 			path := filepath.Join(home, tc.file)
@@ -159,7 +163,7 @@ func TestUninstallRemovesOnlyOurs(t *testing.T) {
 func TestInstallCursorCreatesVersion(t *testing.T) {
 	home := testutil.AgentHome(t)
 
-	if _, err := cursor.Install(testutil.PrivateBinary(t, "bin")); err != nil {
+	if _, err := cursor().Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,7 +178,7 @@ func TestInstallRefusesInvalidJSON(t *testing.T) {
 	path := filepath.Join(home, ".cursor", "hooks.json")
 	testutil.WriteFile(t, path, "{\n  // a comment\n  \"version\": 1\n}")
 
-	if _, err := cursor.Install(testutil.PrivateBinary(t, "bin")); err == nil {
+	if _, err := cursor().Install(testutil.PrivateBinary(t, "bin")); err == nil {
 		t.Fatal("Install rewrote a file it could not parse")
 	}
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "// a comment") {
@@ -187,7 +191,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	path := filepath.Join(home, ".config", "opencode", "plugins", "undo.js")
 
 	binary := testutil.PrivateBinary(t, "my tools")
-	got, err := openCode.Install(binary)
+	got, err := openCode().Install(binary)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,11 +205,11 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 	if !strings.Contains(string(data), strconv.Quote(binary)) {
 		t.Fatalf("plugin does not run the given binary:\n%s", data)
 	}
-	if !openCode.IsInstalled() {
+	if !openCode().IsInstalled() {
 		t.Fatal("IsInstalled = false after Install")
 	}
 
-	if _, err := openCode.Uninstall(); err != nil {
+	if _, err := openCode().Uninstall(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
@@ -218,10 +222,10 @@ func TestUninstallOpenCodeKeepsForeignPlugin(t *testing.T) {
 	path := filepath.Join(home, ".config", "opencode", "plugins", "undo.js")
 	testutil.WriteFile(t, path, "export const Mine = async () => ({})\n")
 
-	if _, err := openCode.Uninstall(); err == nil {
+	if _, err := openCode().Uninstall(); err == nil {
 		t.Fatal("Uninstall removed a plugin undo did not write")
 	}
-	if _, err := openCode.Install(testutil.PrivateBinary(t, "bin")); err == nil {
+	if _, err := openCode().Install(testutil.PrivateBinary(t, "bin")); err == nil {
 		t.Fatal("Install overwrote a plugin undo did not write")
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -252,7 +256,7 @@ func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 	]}}`)
 
 	binary := testutil.PrivateBinary(t, "bin")
-	if _, err := claude.Install(binary); err != nil {
+	if _, err := claude().Install(binary); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -265,7 +269,7 @@ func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 		}
 	}
 
-	if _, err := claude.Uninstall(); err != nil {
+	if _, err := claude().Uninstall(); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(path)
@@ -282,10 +286,10 @@ func TestInstallKeepsOtherProgramsNamedLikeHooks(t *testing.T) {
 	path := filepath.Join(home, ".claude", "settings.json")
 	testutil.WriteFile(t, path, `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh hook claude"}]}]}}`)
 
-	if _, err := claude.Install(testutil.PrivateBinary(t, "bin")); err != nil {
+	if _, err := claude().Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := claude.Uninstall(); err != nil {
+	if _, err := claude().Uninstall(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,7 +301,7 @@ func TestInstallKeepsOtherProgramsNamedLikeHooks(t *testing.T) {
 func TestInstallQuotesBinaryPath(t *testing.T) {
 	home := testutil.AgentHome(t)
 	binary := testutil.PrivateBinary(t, "R&D tools")
-	if _, err := claude.Install(binary); err != nil {
+	if _, err := claude().Install(binary); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
@@ -312,7 +316,7 @@ func TestInstallQuotesBinaryPath(t *testing.T) {
 func TestInstallRefusesTemporaryBinary(t *testing.T) {
 	testutil.AgentHome(t)
 	for _, binary := range []string{filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "undo"), "/tmp/undo", "/var/tmp/undo"} {
-		if _, err := claude.Install(binary); !errors.Is(err, ErrUnsafeBinary) {
+		if _, err := claude().Install(binary); !errors.Is(err, ErrUnsafeBinary) {
 			t.Errorf("Install(%s) = %v, want ErrUnsafeBinary", binary, err)
 		}
 	}
@@ -330,7 +334,7 @@ func TestInstallKeepsSymlinkedSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := claude.Install(testutil.PrivateBinary(t, "bin")); err != nil {
+	if _, err := claude().Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {

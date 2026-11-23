@@ -40,9 +40,12 @@ type Agent struct {
 // seconds.
 const hookTimeout = 30 * time.Second
 
+// timeoutField is where agents read a hook's time limit.
+const timeoutField = "timeout"
+
 // Agents returns every agent undo supports.
 func Agents() []Agent {
-	return []Agent{claude, codex, cursor, gemini, openCode}
+	return []Agent{claude(), codex(), cursor(), gemini(), openCode()}
 }
 
 // AgentNames returns the command-line names of every agent.

@@ -9,19 +9,21 @@ import (
 	"path/filepath"
 )
 
-var openCode = Agent{
-	Name:  "opencode",
-	Title: "OpenCode",
-	Note: "OpenCode now takes a checkpoint before every shell command and file edit.\n" +
-		"Restart OpenCode to load the plugin.",
-	parseEvent: parseOpenCodeEvent,
-	configPath: func() (string, error) {
-		if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-			return filepath.Join(dir, "opencode", "plugins", "undo.js"), nil
-		}
-		return homePath(".config", "opencode", "plugins", "undo.js")
-	},
-	installer: pluginFile{content: openCodePlugin},
+func openCode() Agent {
+	return Agent{
+		Name:  "opencode",
+		Title: "OpenCode",
+		Note: "OpenCode now takes a checkpoint before every shell command and file edit.\n" +
+			"Restart OpenCode to load the plugin.",
+		parseEvent: parseOpenCodeEvent,
+		configPath: func() (string, error) {
+			if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+				return filepath.Join(dir, "opencode", "plugins", "undo.js"), nil
+			}
+			return homePath(".config", "opencode", "plugins", "undo.js")
+		},
+		installer: pluginFile{content: openCodePlugin},
+	}
 }
 
 // pluginHeader starts every plugin file undo writes, so undo can tell its own

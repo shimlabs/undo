@@ -38,11 +38,11 @@ console.log("done")
 // temporary directories, where the test keeps its fake undo.
 func installPlugin(t *testing.T, binary string) string {
 	t.Helper()
-	path, err := openCode.configPath()
+	path, err := openCode().configPath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := openCode.installer.install(path, binary, openCode.Name); err != nil {
+	if err := openCode().installer.install(path, binary, openCode().Name); err != nil {
 		t.Fatal(err)
 	}
 	return path

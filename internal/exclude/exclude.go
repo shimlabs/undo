@@ -12,12 +12,14 @@ import (
 	"strings"
 )
 
-// defaults lists directories undo skips unless .undoignore brings one back
-// with a "!" line: directories that tools rebuild on their own, and the
+// defaultPatterns lists directories undo skips unless .undoignore brings one
+// back with a "!" line: directories that tools rebuild on their own, and the
 // stores undo keeps next to projects on other volumes.
-var defaults = []string{
-	"node_modules/", ".venv/", "venv/", "__pycache__/", "target/", ".next/", ".turbo/", ".gradle/", ".cache/",
-	".undo-*/",
+func defaultPatterns() []string {
+	return []string{
+		"node_modules/", ".venv/", "venv/", "__pycache__/", "target/", ".next/", ".turbo/", ".gradle/", ".cache/",
+		".undo-*/",
+	}
 }
 
 // Matcher checks project paths against the exclude patterns.
@@ -32,7 +34,7 @@ const IgnoreFile = ".undoignore"
 // New returns a Matcher with the defaults plus the patterns in the project's
 // .undoignore file.
 func New(root string) (*Matcher, error) {
-	patterns := slices.Clone(defaults)
+	patterns := defaultPatterns()
 	file, err := os.Open(filepath.Join(root, IgnoreFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Matcher{patterns: patterns}, nil

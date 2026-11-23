@@ -17,7 +17,7 @@ import (
 )
 
 // Version is set when the binary is built.
-var Version = "dev"
+var Version = "dev" //nolint:gochecknoglobals // the linker sets it with -X
 
 func (env Env) stdout() *terminal.Writer {
 	return terminal.NewWriter(env.Stdout)

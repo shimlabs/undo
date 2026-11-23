@@ -7,28 +7,30 @@ import (
 	"path/filepath"
 )
 
-var claude = Agent{
-	Name:       "claude",
-	Title:      "Claude Code",
-	Note:       "Claude Code now takes a checkpoint before every Bash, Edit and Write call.",
-	parseEvent: parseClaudeEvent,
-	configPath: func() (string, error) {
-		if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-			return filepath.Join(dir, "settings.json"), nil
-		}
-		return homePath(".claude", "settings.json")
-	},
-	installer: hookGroups{
-		event:   "PreToolUse",
-		matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit",
-		handler: map[string]any{"type": "command", "timeout": hookTimeout.Seconds()},
-	},
-	// Cursor also runs Claude Code's hooks. When undo's Cursor hook is
-	// installed, it covers the event, and a second checkpoint would only
-	// repeat the first.
-	isHandledElsewhere: func(event hookEvent) bool {
-		return event.IsFromCursor && cursor.IsInstalled()
-	},
+func claude() Agent {
+	return Agent{
+		Name:       "claude",
+		Title:      "Claude Code",
+		Note:       "Claude Code now takes a checkpoint before every Bash, Edit and Write call.",
+		parseEvent: parseClaudeEvent,
+		configPath: func() (string, error) {
+			if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+				return filepath.Join(dir, "settings.json"), nil
+			}
+			return homePath(".claude", "settings.json")
+		},
+		installer: hookGroups{
+			event:   "PreToolUse",
+			matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit",
+			handler: map[string]any{"type": "command", timeoutField: hookTimeout.Seconds()},
+		},
+		// Cursor also runs Claude Code's hooks. When undo's Cursor hook is
+		// installed, it covers the event, and a second checkpoint would only
+		// repeat the first.
+		isHandledElsewhere: func(event hookEvent) bool {
+			return event.IsFromCursor && cursor().IsInstalled()
+		},
+	}
 }
 
 // parseClaudeEvent reads a Claude Code event. Claude Code passes the folder

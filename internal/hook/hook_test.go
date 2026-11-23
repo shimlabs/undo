@@ -41,17 +41,17 @@ func TestHandleLabelsEachAgentsEvents(t *testing.T) {
 		event string
 		label string
 	}{
-		{"claude shell", claude, `{"cwd":"ROOT","tool_name":"Bash","tool_input":{"command":"rm -rf src"}}`, "rm -rf src"},
-		{"claude edit", claude, `{"cwd":"ROOT","tool_name":"Edit","tool_input":{"file_path":"ROOT/main.go"}}`, "Edit main.go"},
-		{"codex shell", codex, `{"cwd":"ROOT","tool_name":"Bash","tool_input":{"command":"make clean"}}`, "make clean"},
-		{"codex patch", codex, `{"cwd":"ROOT","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: src/main.go\n*** Add File: notes.md\n*** Delete File: old.txt\n*** End Patch\n"}}`, "apply_patch src/main.go, notes.md, old.txt"},
-		{"cursor shell", cursor, `{"cwd":"ROOT","tool_name":"Shell","tool_input":{"command":"npm test","cwd":"ROOT"},"workspace_roots":["ROOT"],"cursor_version":"3.17.8"}`, "npm test"},
-		{"cursor write without cwd", cursor, `{"tool_name":"Write","tool_input":{"file_path":"ROOT/main.go"},"workspace_roots":["ROOT"],"cursor_version":"3.17.8"}`, "Write main.go"},
-		{"cursor delete", cursor, `{"tool_name":"Delete","tool_input":{"file_path":"ROOT/old.go"},"workspace_roots":["ROOT"]}`, "Delete old.go"},
-		{"gemini shell", gemini, `{"cwd":"ROOT","tool_name":"run_shell_command","tool_input":{"command":"go generate"}}`, "go generate"},
-		{"gemini replace", gemini, `{"cwd":"ROOT","tool_name":"replace","tool_input":{"file_path":"ROOT/a.go","old_string":"x","new_string":"y"}}`, "replace a.go"},
-		{"opencode write", openCode, `{"cwd":"ROOT","tool_name":"write","tool_input":{"file_path":"ROOT/a.go"}}`, "write a.go"},
-		{"opencode patch", openCode, `{"cwd":"ROOT","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: a.go\n*** End Patch"}}`, "apply_patch a.go"},
+		{"claude shell", claude(), `{"cwd":"ROOT","tool_name":"Bash","tool_input":{"command":"rm -rf src"}}`, "rm -rf src"},
+		{"claude edit", claude(), `{"cwd":"ROOT","tool_name":"Edit","tool_input":{"file_path":"ROOT/main.go"}}`, "Edit main.go"},
+		{"codex shell", codex(), `{"cwd":"ROOT","tool_name":"Bash","tool_input":{"command":"make clean"}}`, "make clean"},
+		{"codex patch", codex(), `{"cwd":"ROOT","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: src/main.go\n*** Add File: notes.md\n*** Delete File: old.txt\n*** End Patch\n"}}`, "apply_patch src/main.go, notes.md, old.txt"},
+		{"cursor shell", cursor(), `{"cwd":"ROOT","tool_name":"Shell","tool_input":{"command":"npm test","cwd":"ROOT"},"workspace_roots":["ROOT"],"cursor_version":"3.17.8"}`, "npm test"},
+		{"cursor write without cwd", cursor(), `{"tool_name":"Write","tool_input":{"file_path":"ROOT/main.go"},"workspace_roots":["ROOT"],"cursor_version":"3.17.8"}`, "Write main.go"},
+		{"cursor delete", cursor(), `{"tool_name":"Delete","tool_input":{"file_path":"ROOT/old.go"},"workspace_roots":["ROOT"]}`, "Delete old.go"},
+		{"gemini shell", gemini(), `{"cwd":"ROOT","tool_name":"run_shell_command","tool_input":{"command":"go generate"}}`, "go generate"},
+		{"gemini replace", gemini(), `{"cwd":"ROOT","tool_name":"replace","tool_input":{"file_path":"ROOT/a.go","old_string":"x","new_string":"y"}}`, "replace a.go"},
+		{"opencode write", openCode(), `{"cwd":"ROOT","tool_name":"write","tool_input":{"file_path":"ROOT/a.go"}}`, "write a.go"},
+		{"opencode patch", openCode(), `{"cwd":"ROOT","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: a.go\n*** End Patch"}}`, "apply_patch a.go"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testutil.AgentHome(t)
@@ -76,7 +76,7 @@ func TestHandleRecordsAgentAndSession(t *testing.T) {
 	root, storeHome := newProject(t)
 	event := `{"cwd":"` + root + `","session_id":"abc123","tool_name":"Bash","tool_input":{"command":"ls"}}`
 
-	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
+	if err := claude().Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	checkpoints := listCheckpoints(t, storeHome, root)
@@ -92,7 +92,7 @@ func TestHandleFindsProjectFromEnvironment(t *testing.T) {
 	t.Setenv("CLAUDE_PROJECT_DIR", root)
 
 	event := `{"tool_name":"Write","tool_input":{"file_path":"` + root + `/main.go"}}`
-	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
+	if err := claude().Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if checkpoints := listCheckpoints(t, storeHome, root); len(checkpoints) != 1 {
@@ -105,17 +105,17 @@ func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 	root, storeHome := newProject(t)
 	event := `{"cwd":"` + root + `","tool_name":"Shell","tool_input":{"command":"ls"},"cursor_version":"3.17.8"}`
 
-	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
+	if err := claude().Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if checkpoints := listCheckpoints(t, storeHome, root); len(checkpoints) != 1 {
 		t.Fatalf("checkpoints = %d, want 1 while the Cursor hook is not installed", len(checkpoints))
 	}
 
-	if _, err := cursor.Install(testutil.PrivateBinary(t, "bin")); err != nil {
+	if _, err := cursor().Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
-	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
+	if err := claude().Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if checkpoints := listCheckpoints(t, storeHome, root); len(checkpoints) != 1 {
@@ -133,7 +133,7 @@ func TestHandleUsesSessionProject(t *testing.T) {
 	t.Setenv("CLAUDE_PROJECT_DIR", root)
 	event := `{"cwd":"` + subdir + `","tool_name":"Bash","tool_input":{"command":"npm test"}}`
 
-	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
+	if err := claude().Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	found := listCheckpoints(t, storeHome, root)
@@ -148,7 +148,7 @@ func TestHandleUsesSessionProject(t *testing.T) {
 func TestHandleLogsFailuresWithoutStore(t *testing.T) {
 	_, storeHome := newProject(t)
 
-	if err := claude.Handle(strings.NewReader("not json"), storeHome, (*store.Store).Take); err == nil {
+	if err := claude().Handle(strings.NewReader("not json"), storeHome, (*store.Store).Take); err == nil {
 		t.Fatal("Handle accepted an event that is not JSON")
 	}
 	data, err := os.ReadFile(filepath.Join(storeHome, "errors.log"))
