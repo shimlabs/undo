@@ -306,3 +306,52 @@ func TestRestoreUndoesCaseRenameOfFolderHoldingExcludedContent(t *testing.T) {
 		}
 	}
 }
+
+// renameThenLock renames from to to, a name that differs only in case or
+// Unicode form, locks it, and checks that restoring the checkpoint from
+// before the rename still restores everything else.
+func renameThenLock(t *testing.T, from, to string) {
+	t.Helper()
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, from, "a.go"), "v1")
+	take(t, projectStore, "1")
+	if err := os.Rename(filepath.Join(root, from), filepath.Join(root, to)); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "after")
+	lockFile(t, filepath.Join(root, to), root, projectStore.Dir())
+	take(t, projectStore, "2")
+
+	apply(t, projectStore, 1)
+	if data, err := os.ReadFile(filepath.Join(root, "README.md")); err != nil || string(data) != "# demo\n" {
+		t.Fatalf("README.md = %q, %v", data, err)
+	}
+}
+
+func TestRestoreWithLockedFolderRenamedInCase(t *testing.T) {
+	renameThenLock(t, "lib", "Lib")
+}
+
+func TestRestoreWithLockedFolderRenamedInUnicodeForm(t *testing.T) {
+	renameThenLock(t, "café", "café")
+}
+
+func TestRestoreWithLockedFileRenamedInCase(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "v1")
+	take(t, projectStore, "1")
+	if err := os.Rename(filepath.Join(root, "notes.txt"), filepath.Join(root, "NOTES.txt")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
+	lockFile(t, filepath.Join(root, "NOTES.txt"), root, projectStore.Dir())
+	take(t, projectStore, "2")
+
+	changes := apply(t, projectStore, 1)
+	if !slices.Contains(changes.Kept, "notes.txt") {
+		t.Errorf("Kept = %v, want notes.txt, which is locked under another case", changes.Kept)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "src", "main.go")); err != nil || string(data) != "package main\n" {
+		t.Fatalf("src/main.go = %q, %v", data, err)
+	}
+}

@@ -298,8 +298,9 @@ func (p *restorePlan) lockedPaths(paths []string) []string {
 			isParentLocked = clone.IsLocked(p.path(dir))
 			isDirLocked[dir] = isParentLocked
 		}
-		_, isCurrent := p.current[rel]
-		if rel != "." && isParentLocked || isCurrent && clone.IsLocked(p.path(rel)) {
+		// The path may be locked under another spelling, which a filesystem
+		// that ignores case or Unicode form finds under this one.
+		if (rel != "." && isParentLocked) || clone.IsLocked(p.path(rel)) {
 			locked = append(locked, rel)
 		}
 	}
