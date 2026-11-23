@@ -66,16 +66,17 @@ func (e usageError) Error() string { return e.msg }
 // Run runs the command in args and returns the exit code for the process.
 func Run(args []string, env Env) int {
 	err := dispatch(args, env)
-	var exit *exec.ExitError
-	var usageErr usageError
-	switch {
-	case err == nil:
+	if err == nil {
 		return 0
-	case errors.As(err, &exit):
+	}
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		return exit.ExitCode()
-	case errors.As(err, &usageErr):
+	}
+	if usageErr, ok := errors.AsType[usageError](err); ok {
 		fmt.Fprintf(env.Stderr, "undo: %s\n\n%s", usageErr.msg, usage)
 		return 2
+	}
+	switch {
 	case errors.Is(err, errDeclined):
 		return 1
 	case errors.Is(err, store.ErrCloneUnsupported):

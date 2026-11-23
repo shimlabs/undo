@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"unsafe"
 
@@ -151,12 +152,7 @@ func (s *Stream) parseEvents(buf []byte) []Event {
 }
 
 func (s *Stream) isRoot(path string) bool {
-	for _, root := range s.roots {
-		if root == path {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.roots, path)
 }
 
 // watchTree adds a watch to dir and every directory below it, and returns

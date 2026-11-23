@@ -36,8 +36,8 @@ func (s *Store) LastError() string {
 	if err != nil {
 		return ""
 	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	return lines[len(lines)-1]
+	text := strings.TrimSpace(string(data))
+	return text[strings.LastIndexByte(text, '\n')+1:]
 }
 
 func (s *Store) logPath() string {

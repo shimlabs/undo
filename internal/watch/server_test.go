@@ -35,7 +35,7 @@ func serverProject(t *testing.T) (*store.Store, string) {
 // receives its result.
 func runServer(t *testing.T, s *store.Store, options Options) chan error {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	stopped := make(chan struct{})
 	go func() {
@@ -135,7 +135,7 @@ func TestServeStopsWhenIdle(t *testing.T) {
 
 func TestServeStopsWhenCanceled(t *testing.T) {
 	s, _ := serverProject(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	ready := make(chan struct{})
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, s, Options{Idle: time.Minute, Ready: func() { close(ready) }}) }()
@@ -159,7 +159,7 @@ func TestSecondServerExits(t *testing.T) {
 	s, _ := serverProject(t)
 	startServer(t, s, time.Minute)
 
-	if err := Serve(context.Background(), s, Options{Idle: time.Minute, Limits: store.DefaultLimits}); !errors.Is(err, ErrRunning) {
+	if err := Serve(t.Context(), s, Options{Idle: time.Minute, Limits: store.DefaultLimits}); !errors.Is(err, ErrRunning) {
 		t.Fatalf("second Serve = %v, want ErrRunning", err)
 	}
 }

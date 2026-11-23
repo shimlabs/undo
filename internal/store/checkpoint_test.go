@@ -134,9 +134,7 @@ func TestTakeLockedConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	ids := make([]int, 2)
 	for i := range ids {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			other, err := Open(root)
 			if err != nil {
 				t.Error(err)
@@ -148,7 +146,7 @@ func TestTakeLockedConcurrently(t *testing.T) {
 				return
 			}
 			ids[i] = cp.ID
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/shimlabs/undo/internal/store"
@@ -84,18 +85,17 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 	}
 
 	prunes := make(chan struct{}, 1)
-	pruned := make(chan struct{})
-	go func() {
-		defer close(pruned)
+	var pruning sync.WaitGroup
+	pruning.Go(func() {
 		for range prunes {
 			if _, err := s.Prune(time.Now(), options.Limits); err != nil {
 				s.LogError(fmt.Errorf("pruning failed: %w", err))
 			}
 		}
-	}()
+	})
 	defer func() {
 		close(prunes)
-		<-pruned
+		pruning.Wait()
 	}()
 	var lastPrune time.Time
 	pruneDue := false
@@ -110,8 +110,7 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 			return err
 		}
 		conn, err := listener.Accept()
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
+		if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 			if !pruneDue {
 				return nil
 			}

@@ -18,7 +18,6 @@ const Workers = 32
 // which Dirs returns.
 func Dirs[T any](root T, workers int, visit func(dir T) (subdirs []T, err error)) error {
 	w := &walker[T]{visit: visit, slots: make(chan struct{}, workers)}
-	w.pending.Add(1)
 	w.walk(root)
 	w.pending.Wait()
 	return w.err
@@ -36,7 +35,6 @@ type walker[T any] struct {
 // walk visits dir, then its subdirectories, each on a new goroutine while a
 // slot is free and on the current one otherwise.
 func (w *walker[T]) walk(dir T) {
-	defer w.pending.Done()
 	if w.failed.Load() {
 		return
 	}
@@ -49,13 +47,12 @@ func (w *walker[T]) walk(dir T) {
 		return
 	}
 	for _, subdir := range subdirs {
-		w.pending.Add(1)
 		select {
 		case w.slots <- struct{}{}:
-			go func() {
+			w.pending.Go(func() {
 				defer func() { <-w.slots }()
 				w.walk(subdir)
-			}()
+			})
 		default:
 			w.walk(subdir)
 		}
