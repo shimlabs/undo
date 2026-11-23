@@ -499,6 +499,9 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 		changes.removeTree(rel, wasDir)
 		return t.applyPath(changes, matcher, parents, filepath.Join(filepath.Dir(fullPath), storedName), isRenamed)
 	case matcher.Excludes(rel, entry.Kind == tree.Dir):
+		// What the listing held here, such as a file where an excluded
+		// directory now is, is gone from what the project tracks.
+		changes.removeTree(rel, wasDir)
 		return nil
 	}
 	// A directory renamed into place, even the one that was here before, can
