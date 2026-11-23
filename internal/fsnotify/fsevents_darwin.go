@@ -82,6 +82,13 @@ const rescanFlags = C.kFSEventStreamEventFlagMustScanSubDirs |
 	C.kFSEventStreamEventFlagRootChanged |
 	C.kFSEventStreamEventFlagEventIdsWrapped
 
+// itemKindFlags say what kind of item an event is about, not what happened.
+const itemKindFlags = C.kFSEventStreamEventFlagItemIsFile |
+	C.kFSEventStreamEventFlagItemIsDir |
+	C.kFSEventStreamEventFlagItemIsSymlink |
+	C.kFSEventStreamEventFlagItemIsHardlink |
+	C.kFSEventStreamEventFlagItemIsLastHardlink
+
 // CanResume reports whether a stream can start from an earlier EventID.
 const CanResume = true
 
@@ -151,6 +158,12 @@ func undoStreamEvents(handle C.uintptr_t, count C.size_t, paths **C.char, flags 
 	idList := unsafe.Slice(ids, count)
 	events := make([]Event, 0, count)
 	for i := range count {
+		// Cloning a file reports an event on the source, whose content and
+		// times do not change. A checkpoint clones every changed file, so
+		// these would make the next checkpoint check them all again.
+		if flagList[i]&^itemKindFlags == C.kFSEventStreamEventFlagItemCloned {
+			continue
+		}
 		if flagList[i]&C.kFSEventStreamEventFlagHistoryDone != 0 {
 			events = append(events, Event{ID: EventID(idList[i]), IsHistoryDone: true})
 			continue
