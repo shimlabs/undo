@@ -23,6 +23,7 @@ import (
 	"github.com/shimlabs/undo/internal/fsnotify"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/tree"
+	"golang.org/x/sys/unix"
 )
 
 // markerTimeout is how long a checkpoint waits for its marker event. After
@@ -107,6 +108,27 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 	return t, nil
 }
 
+// loadListing starts tracking from the stored listing at checkpoint id. The
+// directories that checkpoint could not read stay unreadable until an event
+// shows otherwise, so later checkpoints keep reporting them.
+func (t *tracker) loadListing(id int) error {
+	listing, err := t.store.ListingAt(id)
+	if err != nil {
+		return err
+	}
+	manifest, err := t.store.Manifest(id)
+	if err != nil {
+		return err
+	}
+	t.listing, t.lastID = listing, id
+	// Files that could not be cloned are listed too, but they are not in the
+	// listing, and an event brings them back once they are readable.
+	t.unreadable = slices.DeleteFunc(slices.Clone(manifest.Unreadable), func(rel string) bool {
+		return listing[rel].Kind != tree.Dir
+	})
+	return nil
+}
+
 // resume loads the listing at the latest checkpoint and returns the event to
 // start after, when the saved position allows it. It returns SinceNow when
 // the tracker has to compare the whole project instead.
@@ -131,11 +153,10 @@ func (t *tracker) resume() fsnotify.EventID {
 	if err != nil || !hasLatest || position.CheckpointID > latest.ID {
 		return fsnotify.SinceNow
 	}
-	listing, err := t.store.ListingAt(latest.ID)
-	if err != nil {
+	if err := t.loadListing(latest.ID); err != nil {
 		return fsnotify.SinceNow
 	}
-	t.listing, t.lastID, t.shouldRescan = listing, latest.ID, false
+	t.shouldRescan = false
 	t.position = position
 	return fsnotify.EventID(position.EventID)
 }
@@ -318,9 +339,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		// Take saved the listing it scanned, since there was none, and every
 		// change since then is in dirty, so the next checkpoint does not need
 		// a full scan.
-		t.listing, err = t.store.ListingAt(checkpoint.ID)
-		t.lastID = checkpoint.ID
-		return checkpoint, err
+		return checkpoint, t.loadListing(checkpoint.ID)
 	}
 	if t.listing == nil || latest.ID != t.lastID {
 		if t.listing, err = t.store.ListingAt(latest.ID); err != nil {
@@ -338,6 +357,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		} else if err != nil {
 			return store.Checkpoint{}, err
 		}
+		t.unreadable = slices.DeleteFunc(t.unreadable, t.isReadableOrGone)
 	}
 	if shouldRescan {
 		current, skipped, err := tree.Scan(t.root, t.matcher.Load())
@@ -364,6 +384,13 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 	}
 	t.lastID = checkpoint.ID
 	return checkpoint, nil
+}
+
+// isReadableOrGone reports whether the directory rel can be listed now, or
+// no longer exists.
+func (t *tracker) isReadableOrGone(rel string) bool {
+	err := unix.Access(filepath.Join(t.root, filepath.FromSlash(rel)), unix.R_OK|unix.X_OK)
+	return err == nil || errors.Is(err, fs.ErrNotExist)
 }
 
 // waitForMarker writes a file next to the store and waits for its event.

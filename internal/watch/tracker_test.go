@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -363,4 +364,40 @@ func TestTrackerResumesWhereThePreviousOneStopped(t *testing.T) {
 	}
 	checkpoint := takeCheckpoint(t, resumed, "second")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
+
+func TestTrackerKeepsUnreadableDirectoriesUntilReadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read any directory")
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	locked := filepath.Join(root, "locked")
+	testutil.WriteFile(t, filepath.Join(locked, "secret.txt"), "secret")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	takeCheckpoint(t, projectTracker, "first")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# edited")
+
+	edited := takeCheckpoint(t, projectTracker, "edited")
+	manifest, err := projectStore.Manifest(edited.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(manifest.Unreadable, "locked") {
+		t.Fatalf("checkpoint %d forgot that locked cannot be read: %v", edited.ID, manifest.Unreadable)
+	}
+
+	if err := os.Chmod(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	readable := takeCheckpoint(t, projectTracker, "readable")
+	if manifest, err = projectStore.Manifest(readable.ID); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(manifest.Unreadable, "locked") {
+		t.Fatalf("checkpoint %d still calls locked unreadable after chmod 755", readable.ID)
+	}
+	checkMatchesScan(t, projectStore, root, readable.ID)
 }
