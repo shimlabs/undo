@@ -274,17 +274,17 @@ func (p *restorePlan) dirsHoldingUntracked(paths, untracked []string) []string {
 // as Finder's Locked checkbox does, or that lie in a locked directory, to
 // which nothing can be added and from which nothing can be removed.
 func (p *restorePlan) lockedPaths(paths []string) []string {
-	isLockedDir := map[string]bool{}
+	isDirLocked := map[string]bool{}
 	var locked []string
 	for _, rel := range paths {
 		dir := path.Dir(rel)
-		isDirLocked, isKnown := isLockedDir[dir]
+		isParentLocked, isKnown := isDirLocked[dir]
 		if !isKnown {
-			isDirLocked = rel != "." && clone.IsLocked(p.path(dir))
-			isLockedDir[dir] = isDirLocked
+			isParentLocked = clone.IsLocked(p.path(dir))
+			isDirLocked[dir] = isParentLocked
 		}
 		_, isCurrent := p.current[rel]
-		if isDirLocked || isCurrent && clone.IsLocked(p.path(rel)) {
+		if rel != "." && isParentLocked || isCurrent && clone.IsLocked(p.path(rel)) {
 			locked = append(locked, rel)
 		}
 	}

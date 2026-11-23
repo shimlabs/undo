@@ -203,3 +203,21 @@ func TestRestoreKeepsFilesInFolderLockedInFinder(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreKeepsFilesInProjectLockedInFinder(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "new")
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	take(t, projectStore, "2")
+	lockFile(t, root, root, projectStore.Dir())
+
+	changes := apply(t, projectStore, 1)
+	for _, rel := range []string{"README.md", "new.txt"} {
+		if !slices.Contains(changes.Kept, rel) {
+			t.Errorf("Kept = %v, want %s, which sits in the locked project folder", changes.Kept, rel)
+		}
+	}
+}
