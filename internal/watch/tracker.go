@@ -215,8 +215,8 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 		}
 		// Creating, removing or renaming a path also changes its directory's
 		// times, but the event names only the path itself.
-		if _, isDirty := t.dirty[parent]; !isDirty && t.isInRoot(parent) {
-			t.dirty[parent] = false
+		if t.isInRoot(parent) {
+			markDirty(t.dirty, parent)
 		}
 	}
 }
@@ -302,9 +302,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 	var changed, deleted []string
 	if !shouldRescan {
 		for _, rel := range t.unsavedFiles {
-			if fullPath := filepath.Join(t.root, filepath.FromSlash(rel)); !dirty[fullPath] {
-				dirty[fullPath] = false
-			}
+			markDirty(dirty, t.path(rel))
 		}
 		changed, deleted, err = t.applyDirty(dirty)
 		if errors.Is(err, fs.ErrPermission) {
@@ -346,10 +344,22 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 	return checkpoint, nil
 }
 
+func (t *tracker) path(rel string) string {
+	return filepath.Join(t.root, filepath.FromSlash(rel))
+}
+
+// markDirty adds fullPath to dirty, keeping whether an event already
+// reported it renamed.
+func markDirty(dirty map[string]bool, fullPath string) {
+	if _, isDirty := dirty[fullPath]; !isDirty {
+		dirty[fullPath] = false
+	}
+}
+
 // isReadableOrGone reports whether the directory rel can be listed now, or
 // no longer exists.
 func (t *tracker) isReadableOrGone(rel string) bool {
-	err := unix.Access(filepath.Join(t.root, filepath.FromSlash(rel)), unix.R_OK|unix.X_OK)
+	err := unix.Access(t.path(rel), unix.R_OK|unix.X_OK)
 	return err == nil || errors.Is(err, fs.ErrNotExist)
 }
 
@@ -429,9 +439,7 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 	}
 	for rel, entry := range t.listing {
 		if entry.Kind == tree.File && inodes[entry.Inode] {
-			if fullPath := filepath.Join(t.root, filepath.FromSlash(rel)); !dirty[fullPath] {
-				dirty[fullPath] = false
-			}
+			markDirty(dirty, t.path(rel))
 		}
 	}
 	return dirty
