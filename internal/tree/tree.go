@@ -11,10 +11,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/walk"
+	"golang.org/x/sys/unix"
 )
 
 // Kind is the type of a filesystem entry.
@@ -63,7 +63,7 @@ type Skipped struct {
 // and returns the paths it skipped. Symlinks are recorded but never
 // followed, and excluded or unreadable directories are not gone into.
 func Scan(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
-	entry, err := Stat(root)
+	entry, id, err := statAt(unix.AT_FDCWD, root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Listing{}, Skipped{}, nil
 	}
@@ -75,7 +75,7 @@ func Scan(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
 		return listing, Skipped{}, nil
 	}
 	scan := scanner{matcher: matcher, listing: listing}
-	if err := walk.Dirs(directory{path: root, rel: "."}, scan.readDir); err != nil {
+	if err := walk.Dirs(directory{path: root, rel: ".", id: id}, scan.readDir); err != nil {
 		return nil, Skipped{}, err
 	}
 	slices.Sort(scan.skipped.Excluded)
@@ -93,12 +93,30 @@ type scanner struct {
 
 // readDir adds dir's children to the listing and returns its subdirectories.
 // A directory that cannot be listed, or whose children cannot be looked at,
-// is recorded as unreadable instead.
+// is recorded as unreadable instead. Each directory is opened by path, so it
+// must be the one its parent's entry describes: a directory swapped for a
+// symlink, or for another directory, since then counts as gone.
 func (s *scanner) readDir(dir directory) ([]directory, error) {
-	children, err := os.ReadDir(dir.path)
-	if errors.Is(err, fs.ErrNotExist) {
+	fd, err := unix.Open(dir.path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	switch {
+	case errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR):
+		return nil, nil
+	case errors.Is(err, unix.EACCES):
+		s.addUnreadable(dir.rel)
+		return nil, nil
+	case err != nil:
+		return nil, &fs.PathError{Op: "open", Path: dir.path, Err: err}
+	}
+	file := os.NewFile(uintptr(fd), dir.path)
+	defer file.Close()
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, &fs.PathError{Op: "fstat", Path: dir.path, Err: err}
+	}
+	if (fileID{device: toUint64(stat.Dev), inode: stat.Ino}) != dir.id {
 		return nil, nil
 	}
+	children, err := file.ReadDir(-1)
 	if errors.Is(err, fs.ErrPermission) {
 		s.addUnreadable(dir.rel)
 		return nil, nil
@@ -118,8 +136,7 @@ func (s *scanner) readDir(dir directory) ([]directory, error) {
 			excluded = append(excluded, rel)
 			continue
 		}
-		path := filepath.Join(dir.path, child.Name())
-		entry, err := Stat(path)
+		entry, id, err := statAt(fd, child.Name())
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -133,7 +150,7 @@ func (s *scanner) readDir(dir directory) ([]directory, error) {
 		}
 		found[rel] = entry
 		if entry.Kind == Dir {
-			subdirs = append(subdirs, directory{path: path, rel: rel})
+			subdirs = append(subdirs, directory{path: filepath.Join(dir.path, child.Name()), rel: rel, id: id})
 		}
 	}
 	s.mu.Lock()
@@ -152,47 +169,7 @@ func (s *scanner) addUnreadable(rel string) {
 type directory struct {
 	path string
 	rel  string
-}
-
-// Stat describes the file at path. If it is a symlink, the link itself is
-// described, not its target.
-func Stat(path string) (Entry, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return Entry{}, err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return Entry{}, &fs.PathError{Op: "stat", Path: path, Err: errors.ErrUnsupported}
-	}
-	modTime, changeTime := statTimes(stat)
-	entry := Entry{
-		Mode:       info.Mode(),
-		Size:       info.Size(),
-		ModTime:    modTime,
-		ChangeTime: changeTime,
-		Inode:      stat.Ino,
-	}
-	switch {
-	case info.Mode().IsRegular():
-		entry.Kind = File
-		// Only a count above one is recorded, so a file with a single name
-		// compares equal to listings saved before the count existed.
-		if stat.Nlink > 1 {
-			entry.LinkCount = toUint64(stat.Nlink)
-		}
-	case info.IsDir():
-		entry.Kind = Dir
-		entry.Size = 0
-	case info.Mode()&fs.ModeSymlink != 0:
-		entry.Kind = Symlink
-		if entry.Link, err = os.Readlink(path); err != nil {
-			return Entry{}, err
-		}
-	default:
-		entry.Kind = Other
-	}
-	return entry, nil
+	id   fileID
 }
 
 // Changed returns the paths in current that are new or different from old,
@@ -220,9 +197,4 @@ func Depth(rel string) int {
 		return -1
 	}
 	return strings.Count(rel, "/")
-}
-
-// toUint64 converts a link count, whose type differs between platforms.
-func toUint64[T ~uint16 | ~uint32 | ~uint64](n T) uint64 {
-	return uint64(n)
 }

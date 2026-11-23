@@ -348,7 +348,7 @@ func (p *basePlan) markAncestors(rel string) {
 // unreadable files are left out of the listing.
 func (s *Store) cloneInto(rel, dst string, plan *basePlan) error {
 	if !plan.hasSkippedDescendant[rel] {
-		err := s.cloneIntoStore(filepath.Join(s.root, filepath.FromSlash(rel)), dst)
+		err := s.cloneIntoStore(rel, dst)
 		switch {
 		case err == nil || errors.Is(err, fs.ErrNotExist):
 			return nil
@@ -433,8 +433,10 @@ func (s *Store) cloneBatch(layer *os.Root, files []string, batch []int, listing 
 	dirs := map[string]dirPair{}
 	defer func() {
 		for _, pair := range dirs {
-			pair.project.Close()
-			pair.layer.Close()
+			if pair.project != nil {
+				pair.project.Close()
+				pair.layer.Close()
+			}
 		}
 	}()
 	for _, i := range batch {
@@ -443,14 +445,21 @@ func (s *Store) cloneBatch(layer *os.Root, files []string, batch []int, listing 
 			continue
 		}
 		pair, err := s.openDirPair(layer, dir)
-		if err != nil {
+		// A directory gone since the listing was made takes its files with
+		// it, and they are recorded as deleted.
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		dirs[dir] = pair
 	}
 	return parallel.For(len(batch), func(j int) error {
 		rel := files[batch[j]]
-		entry, isStable, err := s.cloneStable(dirs[path.Dir(rel)], rel, listing[rel])
+		pair := dirs[path.Dir(rel)]
+		if pair.project == nil {
+			clonedFiles[batch[j]] = clonedFile{err: fs.ErrNotExist}
+			return nil
+		}
+		entry, isStable, err := s.cloneStable(pair, rel, listing[rel])
 		clonedFiles[batch[j]] = clonedFile{entry, isStable, err}
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			return nil
@@ -539,16 +548,16 @@ type dirPair struct {
 // openDirPair creates the directory dir in layer and opens it there and in
 // the project.
 func (s *Store) openDirPair(layer *os.Root, dir string) (dirPair, error) {
-	if err := layer.MkdirAll(dir, 0o700); err != nil {
+	projectDir, err := tree.OpenDir(s.root, dir)
+	if err != nil {
 		return dirPair{}, err
+	}
+	if err := layer.MkdirAll(dir, 0o700); err != nil {
+		return dirPair{}, errors.Join(err, projectDir.Close())
 	}
 	layerDir, err := layer.Open(dir)
 	if err != nil {
-		return dirPair{}, err
-	}
-	projectDir, err := os.Open(filepath.Join(s.root, filepath.FromSlash(dir)))
-	if err != nil {
-		return dirPair{}, errors.Join(err, layerDir.Close())
+		return dirPair{}, errors.Join(err, projectDir.Close())
 	}
 	return dirPair{project: projectDir, layer: layerDir}, nil
 }
@@ -557,7 +566,6 @@ func (s *Store) openDirPair(layer *os.Root, dir string) (dirPair, error) {
 // directory pair that holds it, and checks that the source did not change
 // during the clone. If it did, it tries again a few times.
 func (s *Store) cloneStable(dirs dirPair, rel string, entry tree.Entry) (tree.Entry, bool, error) {
-	src := filepath.Join(s.root, filepath.FromSlash(rel))
 	name := path.Base(rel)
 	for attempt := 1; ; attempt++ {
 		// The layer starts empty, so only a retry has an earlier clone to
@@ -570,7 +578,7 @@ func (s *Store) cloneStable(dirs dirPair, rel string, entry tree.Entry) (tree.En
 		if err := s.cloneAt(dirs.project, name, dirs.layer, name); err != nil {
 			return entry, false, err
 		}
-		after, err := tree.Stat(src)
+		after, err := tree.StatAt(dirs.project, name)
 		if err != nil {
 			return entry, false, err
 		}

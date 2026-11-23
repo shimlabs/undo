@@ -1,6 +1,7 @@
 package tree
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -266,5 +267,34 @@ func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
 	}
 	if !slices.Equal(skipped.Unreadable, []string{"noexec"}) {
 		t.Fatalf("unreadable = %v, want [noexec]", skipped.Unreadable)
+	}
+}
+
+func TestScanSkipsDirectoryReplacedSinceItsParentWasRead(t *testing.T) {
+	root := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(root, "keys", "id_ed25519"), "key")
+	matcher, err := exclude.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan := scanner{matcher: matcher, listing: Listing{}}
+	replaced := directory{path: filepath.Join(root, "keys"), rel: "keys", id: fileID{device: 1, inode: 1}}
+
+	subdirs, err := scan.readDir(replaced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subdirs) != 0 || len(scan.listing) != 0 {
+		t.Fatalf("readDir listed %v from a directory that is not the one its parent listed", scan.listing)
+	}
+}
+
+func TestOpenDirRefusesSymlinkedDirectory(t *testing.T) {
+	root := testutil.TempDir(t)
+	if err := os.Symlink(t.TempDir(), filepath.Join(root, "keys")); err != nil {
+		t.Fatal(err)
+	}
+	if dir, err := OpenDir(root, "keys"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("OpenDir = %v, %v, want an error matching fs.ErrNotExist", dir, err)
 	}
 }

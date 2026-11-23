@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/clone"
+	"github.com/shimlabs/undo/internal/tree"
 )
 
 // openFiles opens dir as the root every file operation of the store goes
@@ -104,24 +106,29 @@ func (s *Store) cloneAt(srcDir *os.File, srcName string, dir *os.File, name stri
 	return clone.UnlockAt(dir, name)
 }
 
-// cloneFromProject copies the project path src to name in dir.
-func (s *Store) cloneFromProject(src string, dir *os.File, name string) error {
-	srcDir, err := os.Open(filepath.Dir(src))
-	if err != nil {
-		return err
-	}
-	defer srcDir.Close()
-	return s.cloneAt(srcDir, filepath.Base(src), dir, name)
-}
-
-// cloneIntoStore copies the project path src to the store path dst.
-func (s *Store) cloneIntoStore(src, dst string) error {
+// cloneIntoStore copies the project path rel to the store path dst.
+func (s *Store) cloneIntoStore(rel, dst string) error {
 	dir, err := s.open(filepath.Dir(dst))
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	return s.cloneFromProject(src, dir, filepath.Base(dst))
+	if rel == "." {
+		// The project root is cloned by its own path, as it has no parent
+		// inside the project to open.
+		srcDir, err := os.Open(filepath.Dir(s.root))
+		if err != nil {
+			return err
+		}
+		defer srcDir.Close()
+		return s.cloneAt(srcDir, filepath.Base(s.root), dir, filepath.Base(dst))
+	}
+	srcDir, err := tree.OpenDir(s.root, path.Dir(rel))
+	if err != nil {
+		return err
+	}
+	defer srcDir.Close()
+	return s.cloneAt(srcDir, path.Base(rel), dir, filepath.Base(dst))
 }
 
 // makeWritable lets the store add and remove entries in the directory path.

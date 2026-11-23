@@ -7,11 +7,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/testutil"
+	"github.com/shimlabs/undo/internal/tree"
 	"golang.org/x/sys/unix"
 )
 
@@ -390,4 +393,41 @@ func openDescriptorCount(t *testing.T) int {
 		}
 	}
 	return count
+}
+
+func TestCheckpointNeverReadsThroughProjectDirSwappedForSymlink(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"keys/id_ed25519": "dummy", "a.txt": "a"})
+	first := take(t, projectStore, "first")
+	outside := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(outside, "id_ed25519"), "private key")
+	matcher, err := exclude.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, _, err := tree.Scan(root, matcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An agent's background process swaps the folder after the scan.
+	if err := os.RemoveAll(filepath.Join(root, "keys")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "keys")); err != nil {
+		t.Fatal(err)
+	}
+
+	checkpoint, err := projectStore.Commit(first.ID, CheckpointOptions{Label: "swapped", Dir: root}, Changes{Listing: listing, Changed: []string{"keys/id_ed25519"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(projectStore.layerFile(checkpoint.ID, "keys/id_ed25519")); err == nil {
+		t.Fatalf("checkpoint stored %q from outside the project", data)
+	}
+	manifest, err := projectStore.Manifest(checkpoint.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(manifest.Deleted, "keys/id_ed25519") {
+		t.Fatalf("Deleted = %v, want keys/id_ed25519, which is no longer in the project", manifest.Deleted)
+	}
 }
