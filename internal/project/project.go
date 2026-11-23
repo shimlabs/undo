@@ -72,6 +72,11 @@ func isOwnGitDir(path string) bool {
 	if err != nil {
 		return false
 	}
+	// A symlink named .git could point anywhere, so only a real directory,
+	// or the file git writes for worktrees and submodules, counts.
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		return false
+	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return ok && int(stat.Uid) == os.Getuid()
 }
