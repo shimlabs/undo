@@ -31,6 +31,9 @@ var (
 	ErrNotProject = errors.New("this is a home directory or the disk root, not a project folder")
 	// ErrNewerFormat means a newer version of undo wrote the store.
 	ErrNewerFormat = errors.New("this store was written by a newer version of undo")
+	// ErrUnsafeStore means a store directory exists that is not a private
+	// directory of the current user, so someone else could change it.
+	ErrUnsafeStore = errors.New("the store directory must be a directory owned by you and private to you")
 )
 
 // Store is the data undo keeps on disk for one project.
@@ -101,6 +104,9 @@ func OpenAt(dir, root string) (*Store, error) {
 // next to the project instead, as <parent>/.undo-<id>.
 func Locate(root string) (string, error) {
 	userHome, _ := os.UserHomeDir()
+	if resolved, err := filepath.EvalSymlinks(userHome); err == nil {
+		userHome = resolved
+	}
 	if root == "/" || root == userHome {
 		return "", fmt.Errorf("%s: %w", root, ErrNotProject)
 	}
@@ -111,21 +117,44 @@ func Locate(root string) (string, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
 	}
+	resolvedHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return "", err
+	}
 	id := project.ID(root)
 	inHome := filepath.Join(home, id)
-	isInside := isWithin(inHome, root)
+	isInside := isWithin(filepath.Join(resolvedHome, id), root)
 	if !isInside && isSameVolume(root, home) {
 		return inHome, nil
 	}
 	parent := filepath.Dir(root)
 	nextToProject := filepath.Join(parent, ".undo-"+id)
-	if parent != root && isSameVolume(root, parent) && os.MkdirAll(nextToProject, 0o700) == nil {
-		return nextToProject, nil
+	if parent != root && isSameVolume(root, parent) {
+		err := os.Mkdir(nextToProject, 0o700)
+		if err == nil || errors.Is(err, fs.ErrExist) {
+			// Its name is predictable, so in a shared parent another user
+			// could create it first.
+			return nextToProject, checkPrivateDir(nextToProject)
+		}
 	}
 	if isInside {
 		return "", fmt.Errorf("%s holds the undo store and has no writable parent on the same volume: %w", root, ErrNotProject)
 	}
 	return inHome, nil
+}
+
+// checkPrivateDir returns ErrUnsafeStore unless dir is a directory, not a
+// symlink, owned by the current user and writable by nobody else.
+func checkPrivateDir(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || int(stat.Uid) != os.Getuid() || info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("%s: %w", dir, ErrUnsafeStore)
+	}
+	return nil
 }
 
 func isWithin(path, dir string) bool {
