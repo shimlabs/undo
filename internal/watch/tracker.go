@@ -426,6 +426,9 @@ func (t *tracker) waitForMarker() bool {
 	defer func() { _ = t.store.RemoveMarker(markerName) }()
 
 	if err := t.store.WriteMarker(markerName); err != nil {
+		t.mu.Lock()
+		delete(t.markers, markerPath)
+		t.mu.Unlock()
 		return false
 	}
 	select {
