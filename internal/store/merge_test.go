@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -214,5 +215,28 @@ func TestMissingLayerFileDoesNotBlockStore(t *testing.T) {
 	}
 	if _, err := projectStore.State(latest.ID); err != nil {
 		t.Fatalf("prune error %v; State(latest=%d) = %v", pruneErr, latest.ID, err)
+	}
+}
+
+func TestPruneWithChangesInManyDirectories(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+	writeInDirs := func(content string) {
+		for i := range 1500 {
+			testutil.WriteFile(t, filepath.Join(root, fmt.Sprintf("dir%04d", i), "file.txt"), content)
+		}
+	}
+	writeInDirs("v1")
+	take(t, projectStore, "1")
+	writeInDirs("v2")
+	take(t, projectStore, "2")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "b")
+	latest := take(t, projectStore, "3")
+	testutil.SetOpenFileLimit(t, 1024)
+
+	if _, err := projectStore.Prune(time.Now(), Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if _, err := projectStore.State(latest.ID); err != nil {
+		t.Fatalf("State after the prune: %v", err)
 	}
 }

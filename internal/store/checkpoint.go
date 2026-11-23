@@ -422,11 +422,6 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 	return manifest, nil
 }
 
-// maxOpenDirs bounds how many directories a checkpoint holds open at once.
-// Each takes two descriptors, one in the project and one in the layer, and
-// some systems allow only a few thousand.
-const maxOpenDirs = 128
-
 // cloneBatch clones files[i] for each i in batch into clonedFiles[i]. Many
 // changed files share a directory, so each one is created and opened once,
 // in the project and in the layer.

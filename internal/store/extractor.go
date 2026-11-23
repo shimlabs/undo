@@ -38,10 +38,11 @@ func (e *Extractor) Close() error {
 // copy through the store's root, so no symlink on either side is followed.
 // It returns an error wrapping ErrStoredFileMissing if the copy is gone.
 func (e *Extractor) ExtractAt(rel string, source Source, dir *os.File, name string) error {
-	srcDir, srcName, err := e.openStored(rel, source)
+	srcDir, srcName, release, err := e.openStored(rel, source)
 	if err != nil {
 		return err
 	}
+	defer release()
 	dirFd := int(dir.Fd())
 	var stat unix.Stat_t
 	if err := unix.Fstatat(dirFd, name, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
@@ -61,33 +62,39 @@ func (e *Extractor) ExtractAt(rel string, source Source, dir *os.File, name stri
 // dir, which must not exist, in one clone. Only use it for a directory
 // UnchangedDirs returned.
 func (e *Extractor) ExtractBaseDir(rel string, dir *os.File, name string) error {
-	srcDir, srcName, err := e.openStored(rel, Source{})
+	srcDir, srcName, release, err := e.openStored(rel, Source{})
 	if err != nil {
 		return err
 	}
+	defer release()
 	return clone.FileAt(srcDir, srcName, dir, name)
 }
 
 // openStored returns the open directory that holds the copy of rel recorded
-// in source, and the copy's name in it.
-func (e *Extractor) openStored(rel string, source Source) (*os.File, string, error) {
+// in source, the copy's name in it, and a function to call once done with
+// the directory.
+func (e *Extractor) openStored(rel string, source Source) (*os.File, string, func(), error) {
 	src := e.store.basePath(rel)
 	if source.Layer > 0 {
 		src = e.store.layerFile(source.Layer, rel)
 	}
-	srcDir, err := e.storedDirs.open(filepath.Dir(src))
+	srcDir, release, err := e.storedDirs.open(filepath.Dir(src))
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
+		return nil, "", nil, fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	srcName := filepath.Base(src)
 	var stat unix.Stat_t
-	if err := unix.Fstatat(int(srcDir.Fd()), srcName, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
-		return nil, "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
-	} else if err != nil {
-		return nil, "", &os.PathError{Op: "fstatat", Path: srcName, Err: err}
+	err = unix.Fstatat(int(srcDir.Fd()), srcName, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	if errors.Is(err, unix.ENOENT) {
+		release()
+		return nil, "", nil, fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
 	}
-	return srcDir, srcName, nil
+	if err != nil {
+		release()
+		return nil, "", nil, &os.PathError{Op: "fstatat", Path: srcName, Err: err}
+	}
+	return srcDir, srcName, release, nil
 }

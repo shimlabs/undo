@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // WriteFile writes content to path, creating its parent directories.
@@ -132,4 +134,24 @@ func removeAll(tb testing.TB, path string) {
 	if err := os.RemoveAll(path); err != nil {
 		tb.Fatal(err)
 	}
+}
+
+// SetOpenFileLimit lowers the soft limit on open files for the rest of the
+// test, so code that opens a descriptor per path fails within reach.
+func SetOpenFileLimit(tb testing.TB, limit uint64) {
+	tb.Helper()
+	var saved unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
+		tb.Fatal(err)
+	}
+	lowered := saved
+	lowered.Cur = limit
+	if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &lowered); err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(func() {
+		if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
+			tb.Error(err)
+		}
+	})
 }

@@ -16,7 +16,6 @@ import (
 
 	"github.com/shimlabs/undo/internal/testutil"
 	"github.com/shimlabs/undo/internal/tree"
-	"golang.org/x/sys/unix"
 )
 
 func take(t *testing.T, projectStore *Store, label string) Checkpoint {
@@ -528,7 +527,7 @@ func TestUsageEstimateAddsLaterCheckpoints(t *testing.T) {
 }
 
 func TestTakeWithChangesInManyDirectories(t *testing.T) {
-	setOpenFileLimit(t, 512)
+	testutil.SetOpenFileLimit(t, 512)
 	projectStore, _ := newProject(t, map[string]string{"a.txt": "a"})
 	take(t, projectStore, "first")
 	for i := range 600 {
@@ -548,24 +547,4 @@ func TestTakeWithChangesInManyDirectories(t *testing.T) {
 			t.Fatalf("checkpoint is missing %s", rel)
 		}
 	}
-}
-
-// setOpenFileLimit lowers the soft limit on open files for the rest of the
-// test, so code that opens a descriptor per path fails within reach.
-func setOpenFileLimit(t *testing.T, limit uint64) {
-	t.Helper()
-	var saved unix.Rlimit
-	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
-		t.Fatal(err)
-	}
-	lowered := saved
-	lowered.Cur = limit
-	if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &lowered); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := unix.Setrlimit(unix.RLIMIT_NOFILE, &saved); err != nil {
-			t.Error(err)
-		}
-	})
 }

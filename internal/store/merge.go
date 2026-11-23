@@ -233,20 +233,25 @@ func (m *layerMerge) mergeFile(rel string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	dir, err := m.baseDirs.open(filepath.Dir(dst))
+	dir, release, err := m.baseDirs.open(filepath.Dir(dst))
 	if err != nil {
 		return 0, err
 	}
+	defer func() { release() }()
 	name := filepath.Base(dst)
 	var stat unix.Stat_t
 	err = unix.Fstatat(int(dir.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
 	switch {
 	case err == nil && stat.Mode&unix.S_IFMT == unix.S_IFDIR:
+		// The directory is removed, so the cache must not hold it open.
+		release()
+		release = func() {}
 		if err := m.removeAll(dst); err != nil {
 			return 0, err
 		}
 		m.parents.Forget(rel)
-		if dir, err = m.baseDirs.open(filepath.Dir(dst)); err != nil {
+		if dir, release, err = m.baseDirs.open(filepath.Dir(dst)); err != nil {
+			release = func() {}
 			return 0, err
 		}
 	case err == nil:

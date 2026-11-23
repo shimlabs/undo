@@ -935,3 +935,23 @@ func TestUndoRestoreOfDeletedProject(t *testing.T) {
 		t.Fatalf("project = %v, %v, want an empty folder, as it was missing at the checkpoint", entries, err)
 	}
 }
+
+func TestApplyWithChangesInManyDirectories(t *testing.T) {
+	projectStore, root := newProject(t)
+	writeInDirs := func(content string) {
+		for i := range 1500 {
+			testutil.WriteFile(t, filepath.Join(root, fmt.Sprintf("dir%04d", i), "file.txt"), content)
+		}
+	}
+	writeInDirs("v1")
+	first := take(t, projectStore, "1")
+	writeInDirs("v2")
+	take(t, projectStore, "2")
+	writeInDirs("v3")
+	testutil.SetOpenFileLimit(t, 1024)
+
+	apply(t, projectStore, first.ID)
+	if data, err := os.ReadFile(filepath.Join(root, "dir0042", "file.txt")); err != nil || string(data) != "v1" {
+		t.Fatalf("dir0042/file.txt = %q, %v", data, err)
+	}
+}
