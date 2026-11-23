@@ -126,16 +126,14 @@ func (t *tracker) saveListing() {
 // shouldSkip reports whether dir is excluded, so the stream does not need to
 // watch it.
 func (t *tracker) shouldSkip(dir string) bool {
-	rel, err := filepath.Rel(t.root, dir)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return false
-	}
-	return t.matcher.Load().Excludes(filepath.ToSlash(rel), true)
+	return t.isExcluded(t.matcher.Load(), dir)
 }
 
 func (t *tracker) handleEvents(events []fsnotify.Event) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	matcher := t.matcher.Load()
+	isExcludedDir := map[string]bool{}
 	for _, event := range events {
 		if done, ok := t.markers[event.Path]; ok {
 			close(done)
@@ -148,15 +146,36 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 		if event.Path == filepath.Join(t.root, ".undoignore") {
 			t.hasRulesChange = true
 		}
+		// Installs and builds write many files into excluded directories,
+		// and none of them needs a stat.
+		parent := filepath.Dir(event.Path)
+		isExcluded, isKnown := isExcludedDir[parent]
+		if !isKnown {
+			isExcluded = t.isExcluded(matcher, parent)
+			isExcludedDir[parent] = isExcluded
+		}
+		if isExcluded {
+			continue
+		}
 		if t.isInRoot(event.Path) {
 			t.dirty[event.Path] = true
 		}
 		// Creating, removing or renaming a path also changes its directory's
 		// times, but the event names only the path itself.
-		if parent := filepath.Dir(event.Path); t.isInRoot(parent) {
+		if t.isInRoot(parent) {
 			t.dirty[parent] = true
 		}
 	}
+}
+
+// isExcluded reports whether matcher excludes the directory dir or one of its
+// parents.
+func (t *tracker) isExcluded(matcher *exclude.Matcher, dir string) bool {
+	rel, err := filepath.Rel(t.root, dir)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	return matcher.Excludes(filepath.ToSlash(rel), true)
 }
 
 func (t *tracker) isInRoot(path string) bool {
