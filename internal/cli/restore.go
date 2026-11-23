@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,6 +20,10 @@ func undoCommand(args []string, env Env) error {
 		return err
 	}
 	projectStore, err := openStore(env, parsed)
+	if isMissingProject(err) {
+		printNoCheckpoints(env, parsed)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -29,7 +32,7 @@ func undoCommand(args []string, env Env) error {
 		return err
 	}
 	if !hasLatest {
-		printNoCheckpoints(env, projectStore)
+		printNoCheckpoints(env, parsed)
 		return nil
 	}
 	return restoreTo(projectStore, latest, parsed.isConfirmed, env)
@@ -43,11 +46,11 @@ func toCommand(args []string, env Env) error {
 	if len(parsed.args) != 1 {
 		return usageError{"to needs a checkpoint id"}
 	}
-	projectStore, cp, err := findCheckpoint(parsed, env)
+	projectStore, checkpoint, err := findCheckpoint(parsed, env)
 	if err != nil {
 		return err
 	}
-	return restoreTo(projectStore, cp, parsed.isConfirmed, env)
+	return restoreTo(projectStore, checkpoint, parsed.isConfirmed, env)
 }
 
 func diffCommand(args []string, env Env) error {
@@ -58,11 +61,11 @@ func diffCommand(args []string, env Env) error {
 	if len(parsed.args) != 1 {
 		return usageError{"diff needs a checkpoint id"}
 	}
-	projectStore, cp, err := findCheckpoint(parsed, env)
+	projectStore, checkpoint, err := findCheckpoint(parsed, env)
 	if err != nil {
 		return err
 	}
-	changes, err := restore.Plan(projectStore, cp.ID)
+	changes, err := restore.Plan(projectStore, checkpoint.ID)
 	if err != nil {
 		return err
 	}
@@ -80,6 +83,10 @@ func listCommand(args []string, env Env) error {
 		return err
 	}
 	projectStore, err := openStore(env, parsed)
+	if isMissingProject(err) {
+		printNoCheckpoints(env, parsed)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -88,33 +95,41 @@ func listCommand(args []string, env Env) error {
 		return err
 	}
 	if len(checkpoints) == 0 {
-		printNoCheckpoints(env, projectStore)
+		printNoCheckpoints(env, parsed)
 		return nil
 	}
-	for _, cp := range checkpoints {
-		label := printable(cp.Label)
-		if cp.Dir != "" && cp.Dir != projectStore.Root() {
-			label += "  (in " + printable(cp.Dir) + ")"
+	for _, checkpoint := range checkpoints {
+		label := printable(checkpoint.Label)
+		if checkpoint.Dir != "" && checkpoint.Dir != projectStore.Root() {
+			label += "  (in " + printable(checkpoint.Dir) + ")"
 		}
-		fmt.Fprintf(env.Stdout, "%5d  %-9s  %s\n", cp.ID, timeAgo(cp.Time), label)
+		fmt.Fprintf(env.Stdout, "%5d  %-9s  %s\n", checkpoint.ID, timeAgo(checkpoint.Time), label)
 	}
 	return nil
 }
 
-// printNoCheckpoints says the project has no checkpoints, and points to any
-// deleted project inside it that does, since running undo in the parent of a
-// deleted folder is how people look for it.
-func printNoCheckpoints(env Env, projectStore *store.Store) {
-	fmt.Fprintf(env.Stdout, "No checkpoints yet for %s\n", printable(projectStore.Root()))
-	stores, err := store.Stores()
+// isMissingProject reports whether err means there is nothing to restore
+// here: no store yet, or a folder such as the home directory that is not a
+// project but may hold deleted ones.
+func isMissingProject(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, store.ErrNotProject)
+}
+
+// printNoCheckpoints says there are no checkpoints for the project, and points
+// to any deleted project directly inside the folder that has some, since
+// running undo in the parent of a deleted folder is how people look for it.
+func printNoCheckpoints(env Env, parsed flags) {
+	dir := env.Dir
+	if root, err := projectRoot(env, parsed); err == nil {
+		dir = root
+	}
+	fmt.Fprintf(env.Stdout, "No checkpoints yet for %s\n", printable(dir))
+	stores, err := store.StoresUnder(env.StoreHome, env.Dir)
 	if err != nil {
 		return
 	}
 	for _, other := range stores {
 		root := other.Root()
-		if filepath.Dir(root) != projectStore.Root() {
-			continue
-		}
 		if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -134,20 +149,20 @@ func findCheckpoint(parsed flags, env Env) (*store.Store, store.Checkpoint, erro
 	if err != nil {
 		return nil, store.Checkpoint{}, err
 	}
-	cp, err := projectStore.Checkpoint(id)
+	checkpoint, err := projectStore.Checkpoint(id)
 	if err != nil {
 		return nil, store.Checkpoint{}, fmt.Errorf("%w (see undo list)", err)
 	}
-	return projectStore, cp, nil
+	return projectStore, checkpoint, nil
 }
 
-// restoreTo restores cp. Without isConfirmed, it shows the changes and asks
-// first. With it, it skips that preview, which costs a scan of the project,
-// and shows the changes it made instead.
-func restoreTo(projectStore *store.Store, cp store.Checkpoint, isConfirmed bool, env Env) error {
-	fmt.Fprintf(env.Stdout, "Checkpoint %d, %s, before: %s\n", cp.ID, timeAgo(cp.Time), printable(cp.Label))
+// restoreTo restores checkpoint. Without isConfirmed, it shows the changes
+// and asks first. With it, it skips that preview, which costs a scan of the
+// project, and shows the changes it made instead.
+func restoreTo(projectStore *store.Store, checkpoint store.Checkpoint, isConfirmed bool, env Env) error {
+	fmt.Fprintf(env.Stdout, "Checkpoint %d, %s, before: %s\n", checkpoint.ID, timeAgo(checkpoint.Time), printable(checkpoint.Label))
 	if !isConfirmed {
-		changes, err := restore.Plan(projectStore, cp.ID)
+		changes, err := restore.Plan(projectStore, checkpoint.ID)
 		if err != nil {
 			return err
 		}
@@ -160,7 +175,7 @@ func restoreTo(projectStore *store.Store, cp store.Checkpoint, isConfirmed bool,
 			return errDeclined
 		}
 	}
-	applied, err := restore.Apply(projectStore, cp.ID, env.checkpointer())
+	applied, err := restore.Apply(projectStore, checkpoint.ID, env.checkpointer())
 	if err != nil {
 		return err
 	}

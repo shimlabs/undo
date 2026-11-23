@@ -16,7 +16,6 @@ import (
 
 func newProject(t *testing.T, files map[string]string) (*Store, string) {
 	t.Helper()
-	t.Setenv("UNDO_HOME", t.TempDir())
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +23,7 @@ func newProject(t *testing.T, files map[string]string) (*Store, string) {
 	for path, content := range files {
 		writeFile(t, filepath.Join(root, path), content)
 	}
-	s, err := Open(root)
+	s, err := Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +139,7 @@ func TestTakeLockedConcurrently(t *testing.T) {
 	ids := make([]int, 2)
 	for i := range ids {
 		wg.Go(func() {
-			other, err := Open(root)
+			other, err := Open(filepath.Dir(s.Dir()), root)
 			if err != nil {
 				t.Error(err)
 				return

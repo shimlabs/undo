@@ -38,10 +38,32 @@ func privateBinary(t *testing.T) string {
 	return filepath.Join(parent, "bin", "undo")
 }
 
+// run runs undo with args in dir, with the store home and socket directory
+// taken from the environment, as the binary does.
+func storeHomeFor(t *testing.T) string {
+	t.Helper()
+	storeHome, err := store.DefaultHome()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return storeHome
+}
+
 func run(t *testing.T, dir string, stdin string, args ...string) (int, string) {
 	t.Helper()
+	storeHome, err := store.DefaultHome()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
-	code := Run(args, Env{Dir: dir, Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &out, Executable: privateBinary(t)})
+	code := Run(args, Env{
+		Dir:        dir,
+		Stdin:      strings.NewReader(stdin),
+		Stdout:     &out,
+		Stderr:     &out,
+		StoreHome:  storeHome,
+		Executable: privateBinary(t),
+	})
 	return code, out.String()
 }
 
@@ -244,7 +266,7 @@ func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
 func TestStatusShowsLastError(t *testing.T) {
 	root := newProject(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
-	s, err := store.Open(root)
+	s, err := store.Create(storeHomeFor(t), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +274,7 @@ func TestStatusShowsLastError(t *testing.T) {
 	s.LogError(errors.New("disk full"))
 
 	_, out := run(t, root, "", "status")
-	if !strings.Contains(out, "Last error   ") || !strings.HasSuffix(strings.TrimSpace(out), " disk full") {
+	if !strings.Contains(out, "Last error   ") || !strings.Contains(out, " disk full\n") {
 		t.Fatalf("status does not show the last hook error:\n%s", out)
 	}
 }
@@ -381,8 +403,27 @@ func TestStatusShowsUnreadableDirectories(t *testing.T) {
 
 func TestErrorsAreEscaped(t *testing.T) {
 	root := newProject(t)
-	code, out := run(t, root, "", "list", "--project", filepath.Join(root, "a\x1b]0;pwned\x07", "b"))
+	code, out := run(t, root, "", "to", "1", "--project", filepath.Join(root, "a\x1b]0;pwned\x07"))
 	if code == 0 || strings.ContainsRune(out, '\x1b') {
 		t.Fatalf("exit %d, output %q", code, out)
+	}
+}
+
+func TestListInHomeFindsDeletedProject(t *testing.T) {
+	home, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("HOME", home)
+	t.Setenv("UNDO_HOME", t.TempDir())
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+	root := filepath.Join(home, "app")
+	os.MkdirAll(root, 0o755)
+	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
+	if code, out := run(t, root, "", "checkpoint"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	os.RemoveAll(root)
+
+	code, out := run(t, home, "", "list")
+	if code != 0 || !strings.Contains(out, "was deleted. Bring it back with: undo to 1 --project") {
+		t.Fatalf("exit %d, list in the home directory:\n%s", code, out)
 	}
 }

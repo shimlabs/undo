@@ -16,14 +16,39 @@ func statusCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	projectStore, err := openStore(env, parsed)
+	root, err := projectRoot(env, parsed)
 	if err != nil {
 		return err
 	}
-	matcher, err := exclude.New(projectStore.Root())
+	matcher, err := exclude.New(root)
 	if err != nil {
 		return err
 	}
+	out := env.Stdout
+	fmt.Fprintf(out, "Project      %s\n", printable(root))
+	projectStore, err := store.Open(env.StoreHome, root)
+	switch {
+	case isMissingProject(err):
+		fmt.Fprintln(out, "Checkpoints  none yet; the first agent command or undo checkpoint takes one")
+	case err != nil:
+		return err
+	default:
+		if err := printStore(out, env, projectStore); err != nil {
+			return err
+		}
+	}
+	if agents := installedAgentTitles(); len(agents) > 0 {
+		fmt.Fprintf(out, "Hooks        %s\n", strings.Join(agents, ", "))
+	} else {
+		fmt.Fprintln(out, "Hooks        none yet, run: undo install <agent>")
+	}
+	fmt.Fprintf(out, "Excluded     %s\n", strings.Join(matcher.Patterns(), ", "))
+	fmt.Fprintln(out, "Not covered  anything outside this folder: databases, git push, API calls")
+	return nil
+}
+
+// printStore prints what the project's store holds and how it is kept.
+func printStore(out io.Writer, env Env, projectStore *store.Store) error {
 	diskUsage, err := projectStore.Usage()
 	if err != nil {
 		return err
@@ -32,8 +57,6 @@ func statusCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	out := env.Stdout
-	fmt.Fprintf(out, "Project      %s\n", printable(projectStore.Root()))
 	fmt.Fprintf(out, "Store        %s\n", printable(projectStore.Dir()))
 	if err := printCheckpoints(out, projectStore); err != nil {
 		return err
@@ -49,13 +72,6 @@ func statusCommand(args []string, env Env) error {
 	} else {
 		fmt.Fprintln(out, "Watcher      not running, so checkpoints scan the project")
 	}
-	if agents := installedAgents(); len(agents) > 0 {
-		fmt.Fprintf(out, "Hooks        %s\n", strings.Join(agents, ", "))
-	} else {
-		fmt.Fprintln(out, "Hooks        none yet, run: undo install <agent>")
-	}
-	fmt.Fprintf(out, "Excluded     %s\n", strings.Join(matcher.Patterns(), ", "))
-	fmt.Fprintln(out, "Not covered  anything outside this folder: databases, git push, API calls")
 	if line := projectStore.LastError(); line != "" {
 		fmt.Fprintf(out, "Last error   %s\n", printable(line))
 	}

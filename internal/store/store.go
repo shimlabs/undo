@@ -49,36 +49,57 @@ type config struct {
 	IsCopyMode bool   `json:"copy"`
 }
 
-// Home returns the directory that holds the stores of all projects.
-func Home() (string, error) {
+// DefaultHome returns the directory that holds the stores of all projects:
+// $UNDO_HOME if it is set, and otherwise the system's place for application
+// state.
+func DefaultHome() (string, error) {
 	if dir := os.Getenv("UNDO_HOME"); dir != "" {
 		return dir, nil
 	}
-	home, err := os.UserHomeDir()
+	userHome, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	if runtime.GOOS == "darwin" {
-		return filepath.Join(home, "Library", "Application Support", "undo"), nil
+		return filepath.Join(userHome, "Library", "Application Support", "undo"), nil
 	}
 	if state := os.Getenv("XDG_STATE_HOME"); state != "" {
 		return filepath.Join(state, "undo"), nil
 	}
-	return filepath.Join(home, ".local", "state", "undo"), nil
+	return filepath.Join(userHome, ".local", "state", "undo"), nil
 }
 
-// Open returns the store for the project at root and creates it if needed.
-func Open(root string) (*Store, error) {
-	dir, err := Locate(root)
+// Open returns the existing store of the project at root, whether it lives
+// under home or next to the project. It returns an error matching
+// fs.ErrNotExist if the project has no store yet, and never creates one.
+func Open(home, root string) (*Store, error) {
+	for _, dir := range []string{filepath.Join(home, project.ID(root)), nextToProject(root)} {
+		if _, err := os.Stat(filepath.Join(dir, "config.json")); err != nil {
+			continue
+		}
+		if err := checkPrivateDir(dir); err != nil {
+			return nil, err
+		}
+		return openAt(dir, root)
+	}
+	return nil, fmt.Errorf("no store for %s: %w", root, fs.ErrNotExist)
+}
+
+// Create returns the store of the project at root, creating it if needed.
+func Create(home, root string) (*Store, error) {
+	if existing, err := Open(home, root); !errors.Is(err, fs.ErrNotExist) {
+		return existing, err
+	}
+	dir, err := locate(home, root)
 	if err != nil {
 		return nil, err
 	}
-	return OpenAt(dir, root)
+	return openAt(dir, root)
 }
 
-// OpenAt returns the store in dir for the project at root and creates it if
-// needed.
-func OpenAt(dir, root string) (*Store, error) {
+// openAt opens the store in dir for the project at root, writing its
+// settings if the store is new.
+func openAt(dir, root string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "layers"), 0o700); err != nil {
 		return nil, err
 	}
@@ -98,21 +119,17 @@ func OpenAt(dir, root string) (*Store, error) {
 	return s, nil
 }
 
-// Locate returns the directory of the store for the project at root. Stores
-// live under Home. Clones only work within one volume, so when the project
-// is on another volume, or when Home is inside the project, the store goes
-// next to the project instead, as <parent>/.undo-<id>.
-func Locate(root string) (string, error) {
+// locate returns the directory for a new store of the project at root.
+// Stores live under home. Clones only work within one volume, so when the
+// project is on another volume, or when home is inside the project, the store
+// goes next to the project instead.
+func locate(home, root string) (string, error) {
 	userHome, _ := os.UserHomeDir()
 	if resolved, err := filepath.EvalSymlinks(userHome); err == nil {
 		userHome = resolved
 	}
 	if root == "/" || root == userHome {
 		return "", fmt.Errorf("%s: %w", root, ErrNotProject)
-	}
-	home, err := Home()
-	if err != nil {
-		return "", err
 	}
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
@@ -122,25 +139,29 @@ func Locate(root string) (string, error) {
 		return "", err
 	}
 	id := project.ID(root)
-	inHome := filepath.Join(home, id)
 	isInside := isWithin(filepath.Join(resolvedHome, id), root)
 	if !isInside && isSameVolume(root, home) {
-		return inHome, nil
+		return filepath.Join(home, id), nil
 	}
-	parent := filepath.Dir(root)
-	nextToProject := filepath.Join(parent, ".undo-"+id)
-	if parent != root && isSameVolume(root, parent) {
-		err := os.Mkdir(nextToProject, 0o700)
+	dir := nextToProject(root)
+	if parent := filepath.Dir(root); parent != root && isSameVolume(root, parent) {
+		err := os.Mkdir(dir, 0o700)
 		if err == nil || errors.Is(err, fs.ErrExist) {
 			// Its name is predictable, so in a shared parent another user
 			// could create it first.
-			return nextToProject, checkPrivateDir(nextToProject)
+			return dir, checkPrivateDir(dir)
 		}
 	}
 	if isInside {
 		return "", fmt.Errorf("%s holds the undo store and has no writable parent on the same volume: %w", root, ErrNotProject)
 	}
-	return inHome, nil
+	return filepath.Join(home, id), nil
+}
+
+// nextToProject returns where the store of the project at root lives when it
+// cannot live under home.
+func nextToProject(root string) string {
+	return filepath.Join(filepath.Dir(root), ".undo-"+project.ID(root))
 }
 
 // checkPrivateDir returns ErrUnsafeStore unless dir is a directory, not a
@@ -211,24 +232,29 @@ func (s *Store) configPath() string {
 	return filepath.Join(s.dir, "config.json")
 }
 
-// Stores returns every store under Home with the project it protects, so a
-// project whose folder was deleted can still be found and restored.
-func Stores() ([]*Store, error) {
-	home, err := Home()
-	if err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(home)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
+// StoresUnder returns the stores of projects whose folders are directly
+// inside dir, including projects that were deleted, so they can still be
+// found and restored. It looks under home and next to the projects in dir.
+func StoresUnder(home, dir string) ([]*Store, error) {
+	var candidates []string
+	for _, parent := range []string{home, dir} {
+		entries, err := os.ReadDir(parent)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && (parent == home || strings.HasPrefix(entry.Name(), ".undo-")) {
+				candidates = append(candidates, filepath.Join(parent, entry.Name()))
+			}
+		}
 	}
 	var stores []*Store
-	for _, entry := range entries {
-		s := &Store{dir: filepath.Join(home, entry.Name())}
-		if !entry.IsDir() || s.loadConfig() != nil || s.config.Root == "" {
+	for _, storeDir := range candidates {
+		s := &Store{dir: storeDir}
+		if s.loadConfig() != nil || s.config.Root == "" || filepath.Dir(s.config.Root) != dir || checkPrivateDir(storeDir) != nil {
 			continue
 		}
 		s.root = s.config.Root

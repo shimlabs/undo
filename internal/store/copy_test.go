@@ -29,7 +29,7 @@ func TestCopyModeRestoresExactly(t *testing.T) {
 	if got := fingerprint(root); !maps.Equal(got, want) {
 		t.Fatalf("after restore:\n got %v\nwant %v", got, want)
 	}
-	reopened, err := store.Open(root)
+	reopened, err := store.Open(filepath.Dir(s.Dir()), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,14 +46,13 @@ func plainProject(t *testing.T) (*store.Store, string) {
 	if plain == "" {
 		t.Skip("UNDO_TEST_PLAIN_DIR is not set")
 	}
-	t.Setenv("UNDO_HOME", t.TempDir())
 	root, err := os.MkdirTemp(plain, "project-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
 	writeFile(t, filepath.Join(root, "main.go"), []byte("package main"))
-	s, err := store.Open(root)
+	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

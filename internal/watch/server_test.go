@@ -15,7 +15,6 @@ import (
 
 func newServerProject(t *testing.T) (*store.Store, string) {
 	t.Helper()
-	t.Setenv("UNDO_HOME", t.TempDir())
 	socketDir, err := os.MkdirTemp("/tmp", "undo-test-")
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +23,7 @@ func newServerProject(t *testing.T) (*store.Store, string) {
 	t.Setenv("UNDO_SOCKET_DIR", socketDir)
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	writeFile(t, filepath.Join(root, "main.go"), "package main")
-	s, err := store.Open(root)
+	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

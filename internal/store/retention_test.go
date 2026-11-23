@@ -17,9 +17,8 @@ import (
 
 func newProject(t *testing.T) (*store.Store, string) {
 	t.Helper()
-	t.Setenv("UNDO_HOME", t.TempDir())
 	root, _ := filepath.EvalSymlinks(t.TempDir())
-	s, err := store.Open(root)
+	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

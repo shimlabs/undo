@@ -17,7 +17,6 @@ import (
 
 func newProject(t *testing.T) (*store.Store, string) {
 	t.Helper()
-	t.Setenv("UNDO_HOME", t.TempDir())
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +37,7 @@ func newProject(t *testing.T) (*store.Store, string) {
 	if err := os.Symlink("src/main.go", filepath.Join(root, "entry")); err != nil {
 		t.Fatal(err)
 	}
-	s, err := store.Open(root)
+	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

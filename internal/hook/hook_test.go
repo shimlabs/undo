@@ -1,6 +1,8 @@
 package hook
 
 import (
+	"errors"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,27 +10,30 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-func newProject(t *testing.T) string {
+// newProject returns a project folder and a store home for its checkpoints.
+func newProject(t *testing.T) (root, storeHome string) {
 	t.Helper()
-	t.Setenv("UNDO_HOME", t.TempDir())
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return root
+	return root, t.TempDir()
 }
 
-func checkpoints(t *testing.T, root string) []store.Checkpoint {
+func checkpoints(t *testing.T, storeHome, root string) []store.Checkpoint {
 	t.Helper()
-	s, err := store.Open(root)
+	projectStore, err := store.Open(storeHome, root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.List()
+	checkpoints, err := projectStore.List()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return list
+	return checkpoints
 }
 
 func TestHandleLabelsEachAgentsEvents(t *testing.T) {
@@ -52,15 +57,15 @@ func TestHandleLabelsEachAgentsEvents(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			agentHome(t)
-			root := newProject(t)
+			root, storeHome := newProject(t)
 			t.Chdir(t.TempDir())
 
 			event := strings.ReplaceAll(tc.event, "ROOT", root)
-			if err := tc.agent.Handle(strings.NewReader(event), (*store.Store).Take); err != nil {
+			if err := tc.agent.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 				t.Fatal(err)
 			}
 
-			list := checkpoints(t, root)
+			list := checkpoints(t, storeHome, root)
 			if len(list) != 1 || list[0].Label != tc.label {
 				t.Fatalf("checkpoints = %+v, want one labeled %q", list, tc.label)
 			}
@@ -70,13 +75,13 @@ func TestHandleLabelsEachAgentsEvents(t *testing.T) {
 
 func TestHandleRecordsAgentAndSession(t *testing.T) {
 	agentHome(t)
-	root := newProject(t)
+	root, storeHome := newProject(t)
 	event := `{"cwd":"` + root + `","session_id":"abc123","tool_name":"Bash","tool_input":{"command":"ls"}}`
 
-	if err := claude.Handle(strings.NewReader(event), (*store.Store).Take); err != nil {
+	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	list := checkpoints(t, root)
+	list := checkpoints(t, storeHome, root)
 	if len(list) != 1 || list[0].Agent != "claude" || list[0].Session != "abc123" {
 		t.Fatalf("checkpoints = %+v", list)
 	}
@@ -84,38 +89,38 @@ func TestHandleRecordsAgentAndSession(t *testing.T) {
 
 func TestHandleFindsProjectFromEnvironment(t *testing.T) {
 	agentHome(t)
-	root := newProject(t)
+	root, storeHome := newProject(t)
 	t.Chdir(t.TempDir())
 	t.Setenv("CLAUDE_PROJECT_DIR", root)
 
 	event := `{"tool_name":"Write","tool_input":{"file_path":"` + root + `/main.go"}}`
-	if err := claude.Handle(strings.NewReader(event), (*store.Store).Take); err != nil {
+	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if list := checkpoints(t, root); len(list) != 1 {
+	if list := checkpoints(t, storeHome, root); len(list) != 1 {
 		t.Fatalf("checkpoints = %+v, want one in the project from CLAUDE_PROJECT_DIR", list)
 	}
 }
 
 func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 	agentHome(t)
-	root := newProject(t)
+	root, storeHome := newProject(t)
 	event := `{"cwd":"` + root + `","tool_name":"Shell","tool_input":{"command":"ls"},"cursor_version":"3.17.8"}`
 
-	if err := claude.Handle(strings.NewReader(event), (*store.Store).Take); err != nil {
+	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if list := checkpoints(t, root); len(list) != 1 {
+	if list := checkpoints(t, storeHome, root); len(list) != 1 {
 		t.Fatalf("checkpoints = %d, want 1 while the Cursor hook is not installed", len(list))
 	}
 
 	if _, err := cursor.Install(privateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
-	if err := claude.Handle(strings.NewReader(event), (*store.Store).Take); err != nil {
+	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if list := checkpoints(t, root); len(list) != 1 {
+	if list := checkpoints(t, storeHome, root); len(list) != 1 {
 		t.Fatalf("checkpoints = %d, want the Claude hook to leave Cursor events to the Cursor hook", len(list))
 	}
 }

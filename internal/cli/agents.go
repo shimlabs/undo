@@ -46,8 +46,22 @@ func agentArg(command string, args []string) (hook.Agent, error) {
 	return hook.Agent{}, usageError{fmt.Sprintf("%s supports: %s", command, strings.Join(names, ", "))}
 }
 
-// installedAgents returns the names of the agents that have undo's hook.
-func installedAgents() []string {
+// hookCommand handles one event from an agent. It never fails and never
+// prints, because some agents block the tool when a hook fails or prints. An
+// unknown agent name is read in the most common event format, and Handle logs
+// its failures.
+func hookCommand(args []string, env Env) {
+	defer func() { _ = recover() }()
+	var agent hook.Agent
+	if len(args) > 0 {
+		agent, _ = hook.FindAgent(args[0])
+	}
+	_ = agent.Handle(env.Stdin, env.StoreHome, env.checkpointer())
+}
+
+// installedAgentTitles returns the product names of the agents that have
+// undo's hook.
+func installedAgentTitles() []string {
 	var titles []string
 	for _, agent := range hook.Agents() {
 		if agent.IsInstalled() {

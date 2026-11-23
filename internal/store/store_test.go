@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,12 +10,11 @@ import (
 	"github.com/shimlabs/undo/internal/project"
 )
 
-func TestOpenCreatesStoreUnderHome(t *testing.T) {
+func TestCreateMakesStoreUnderHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("UNDO_HOME", home)
 	root := t.TempDir()
 
-	s, err := Open(root)
+	s, err := Create(home, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,70 +32,105 @@ func TestOpenCreatesStoreUnderHome(t *testing.T) {
 	}
 }
 
-func TestLocatePutsStoreNextToProjectWhenHomeIsInside(t *testing.T) {
-	root, _ := filepath.EvalSymlinks(t.TempDir())
-	t.Setenv("UNDO_HOME", filepath.Join(root, "Library", "undo"))
+func TestOpenNeverCreates(t *testing.T) {
+	home := t.TempDir()
 
-	dir, err := Locate(root)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Open(home, t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Open = %v, want an error matching fs.ErrNotExist", err)
 	}
-	if want := filepath.Join(filepath.Dir(root), ".undo-"+project.ID(root)); dir != want {
-		t.Fatalf("Locate = %s, want %s", dir, want)
+	if entries, _ := os.ReadDir(home); len(entries) != 0 {
+		t.Fatalf("Open created %v", entries)
 	}
 }
 
-func TestLocateRefusesHomeAndDiskRoot(t *testing.T) {
+func TestCreatePutsStoreNextToProjectWhenHomeIsInside(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+
+	s, err := Create(filepath.Join(root, "Library", "undo"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(filepath.Dir(root), ".undo-"+project.ID(root)); s.Dir() != want {
+		t.Fatalf("store = %s, want %s", s.Dir(), want)
+	}
+}
+
+func TestOpenFindsStoreNextToDeletedProject(t *testing.T) {
+	parent, _ := filepath.EvalSymlinks(t.TempDir())
+	root := filepath.Join(parent, "app")
+	os.Mkdir(root, 0o755)
+	home := filepath.Join(root, "Library", "undo")
+	created, err := Create(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(root)
+
+	opened, err := Open(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Dir() != created.Dir() {
+		t.Fatalf("Open found %s, want the store next to the project at %s", opened.Dir(), created.Dir())
+	}
+	stores, err := StoresUnder(home, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stores) != 1 || stores[0].Root() != root {
+		t.Fatalf("StoresUnder = %v, want the store of %s", stores, root)
+	}
+}
+
+func TestCreateRefusesHomeAndDiskRoot(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, root := range []string{home, "/"} {
-		if _, err := Locate(root); !errors.Is(err, ErrNotProject) {
-			t.Errorf("Locate(%s) = %v, want ErrNotProject", root, err)
+		if _, err := Create(t.TempDir(), root); !errors.Is(err, ErrNotProject) {
+			t.Errorf("Create(%s) = %v, want ErrNotProject", root, err)
 		}
 	}
 }
 
 func TestOpenRefusesNewerFormat(t *testing.T) {
-	t.Setenv("UNDO_HOME", t.TempDir())
-	root := t.TempDir()
-	s, err := Open(root)
+	home, root := t.TempDir(), t.TempDir()
+	s, err := Create(home, root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeJSON(s.configPath(), config{Format: format + 1, Root: root})
 
-	if _, err := Open(root); !errors.Is(err, ErrNewerFormat) {
+	if _, err := Open(home, root); !errors.Is(err, ErrNewerFormat) {
 		t.Fatalf("Open = %v, want ErrNewerFormat", err)
 	}
 }
 
-func TestStoresFindsDeletedProjects(t *testing.T) {
-	t.Setenv("UNDO_HOME", t.TempDir())
-	root := filepath.Join(t.TempDir(), "app")
+func TestStoresUnderFindsDeletedProjects(t *testing.T) {
+	home, parent := t.TempDir(), t.TempDir()
+	root := filepath.Join(parent, "app")
 	os.Mkdir(root, 0o755)
-	if _, err := Open(root); err != nil {
+	if _, err := Create(home, root); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(root)
 
-	stores, err := Stores()
+	stores, err := StoresUnder(home, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(stores) != 1 || stores[0].Root() != root {
-		t.Fatalf("Stores = %v, want the store of %s", stores, root)
+		t.Fatalf("StoresUnder = %v, want the store of %s", stores, root)
 	}
 }
 
-func TestLocateRefusesPlantedStoreNextToProject(t *testing.T) {
+func TestCreateRefusesPlantedStoreNextToProject(t *testing.T) {
 	for _, plant := range []string{"symlink", "shared directory"} {
 		t.Run(plant, func(t *testing.T) {
 			parent, _ := filepath.EvalSymlinks(t.TempDir())
 			root := filepath.Join(parent, "proj")
 			os.Mkdir(root, 0o755)
-			t.Setenv("UNDO_HOME", filepath.Join(root, "Library", "undo"))
 			planted := filepath.Join(parent, ".undo-"+project.ID(root))
 			if plant == "symlink" {
 				os.Symlink(t.TempDir(), planted)
@@ -104,25 +139,23 @@ func TestLocateRefusesPlantedStoreNextToProject(t *testing.T) {
 				os.Chmod(planted, 0o777)
 			}
 
-			if dir, err := Locate(root); err == nil {
-				t.Fatalf("Locate adopted a %s at %s", plant, dir)
+			if s, err := Create(filepath.Join(root, "Library", "undo"), root); err == nil {
+				t.Fatalf("Create adopted a %s at %s", plant, s.Dir())
 			}
 		})
 	}
 }
 
-func TestLocateRefusesSymlinkedHome(t *testing.T) {
+func TestCreateRefusesSymlinkedHome(t *testing.T) {
 	realHome, _ := filepath.EvalSymlinks(t.TempDir())
 	link := filepath.Join(t.TempDir(), "home")
 	if err := os.Symlink(realHome, link); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", link)
-	t.Setenv("UNDO_HOME", "")
-	t.Setenv("XDG_STATE_HOME", "")
 
-	if _, err := Locate(realHome); !errors.Is(err, ErrNotProject) {
-		t.Fatalf("Locate(home through a symlink) = %v, want ErrNotProject", err)
+	if _, err := Create(t.TempDir(), realHome); !errors.Is(err, ErrNotProject) {
+		t.Fatalf("Create(home through a symlink) = %v, want ErrNotProject", err)
 	}
 }
 

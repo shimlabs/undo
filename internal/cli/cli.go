@@ -43,12 +43,14 @@ Flags:
   --project <path>         use the project at <path>, even one that was deleted
 `
 
-// Env holds the directory and streams a command works with.
+// Env holds the directories, streams and settings a command works with.
 type Env struct {
 	Dir    string
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// StoreHome holds the stores of all projects.
+	StoreHome string
 	// Executable is the path of the undo binary, which installed hooks run.
 	Executable string
 	// StartWatcher starts a background watcher for the project at root and
@@ -182,21 +184,32 @@ func parseFlags(args []string) (flags, error) {
 	return parsed, nil
 }
 
-// openStore opens the store of the project in env.Dir, or of the project
-// that --project names.
-func openStore(env Env, parsed flags) (*store.Store, error) {
+// projectRoot returns the root of the project in env.Dir, or of the project
+// that --project names, which may have been deleted.
+func projectRoot(env Env, parsed flags) (string, error) {
 	if parsed.project == "" {
-		root, err := project.Root(env.Dir)
-		if err != nil {
-			return nil, err
-		}
-		return store.Open(root)
+		return project.Root(env.Dir)
 	}
-	root, err := deletedOrExistingRoot(parsed.project, env.Dir)
+	return deletedOrExistingRoot(parsed.project, env.Dir)
+}
+
+// openStore opens the existing store of the project. It returns an error
+// matching fs.ErrNotExist if the project has no checkpoints yet.
+func openStore(env Env, parsed flags) (*store.Store, error) {
+	root, err := projectRoot(env, parsed)
 	if err != nil {
 		return nil, err
 	}
-	return store.Open(root)
+	return store.Open(env.StoreHome, root)
+}
+
+// createStore opens the store of the project, creating it if needed.
+func createStore(env Env, parsed flags) (*store.Store, error) {
+	root, err := projectRoot(env, parsed)
+	if err != nil {
+		return nil, err
+	}
+	return store.Create(env.StoreHome, root)
 }
 
 // deletedOrExistingRoot returns the project root for path. A deleted project

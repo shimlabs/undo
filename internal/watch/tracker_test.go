@@ -19,7 +19,6 @@ import (
 
 func newTracker(t *testing.T) (*Tracker, *store.Store, string) {
 	t.Helper()
-	t.Setenv("UNDO_HOME", t.TempDir())
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +36,7 @@ func newTracker(t *testing.T) (*Tracker, *store.Store, string) {
 
 func startTracker(t *testing.T, root string) (*Tracker, *store.Store, string) {
 	t.Helper()
-	s, err := store.Open(root)
+	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +245,6 @@ func TestTrackerAppliesDirectoryPatterns(t *testing.T) {
 }
 
 func TestTrackerWithRootTypedInOtherCase(t *testing.T) {
-	t.Setenv("UNDO_HOME", t.TempDir())
 	parent, _ := filepath.EvalSymlinks(t.TempDir())
 	stored := filepath.Join(parent, "MyProj")
 	writeFile(t, filepath.Join(stored, "a.txt"), "v1")

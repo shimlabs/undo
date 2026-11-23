@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/shimlabs/undo/internal/cli"
+	"github.com/shimlabs/undo/internal/store"
 )
 
 func main() {
@@ -26,11 +27,17 @@ func main() {
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
+	storeHome, err := store.DefaultHome()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "undo:", err)
+		os.Exit(1)
+	}
 	os.Exit(cli.Run(os.Args[1:], cli.Env{
 		Dir:          dir,
 		Stdin:        os.Stdin,
 		Stdout:       os.Stdout,
 		Stderr:       os.Stderr,
+		StoreHome:    storeHome,
 		Executable:   executable,
 		StartWatcher: startWatcher,
 	}))

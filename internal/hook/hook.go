@@ -124,7 +124,7 @@ type preToolUseInput struct {
 // Handle reads one hook event from in and takes a checkpoint of the project
 // the tool works in. Errors are logged in the store when there is one, and the
 // agent is never blocked.
-func (a Agent) Handle(in io.Reader, checkpoint store.Checkpointer) error {
+func (a Agent) Handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) error {
 	var event preToolUseInput
 	if err := json.NewDecoder(in).Decode(&event); err != nil {
 		return err
@@ -140,7 +140,7 @@ func (a Agent) Handle(in io.Reader, checkpoint store.Checkpointer) error {
 	if err != nil {
 		return err
 	}
-	projectStore, err := store.Open(root)
+	projectStore, err := store.Create(storeHome, root)
 	if err != nil {
 		return err
 	}

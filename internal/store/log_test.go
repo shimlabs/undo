@@ -9,8 +9,7 @@ import (
 )
 
 func TestLogErrorStaysSmall(t *testing.T) {
-	t.Setenv("UNDO_HOME", t.TempDir())
-	s, err := Open(t.TempDir())
+	s, err := Create(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
