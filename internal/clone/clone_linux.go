@@ -18,13 +18,7 @@ const CanCloneDirs = false
 // followed. It fails if dst already exists, and returns an error matching
 // errors.ErrUnsupported when the filesystem cannot clone.
 func File(src, dst string) error {
-	err := copyTree(src, dst, func(in, out *os.File) error {
-		err := unix.IoctlFileClone(int(out.Fd()), int(in.Fd()))
-		if err != nil {
-			return &os.LinkError{Op: "ficlone", Old: in.Name(), New: out.Name(), Err: markUnsupported(err)}
-		}
-		return nil
-	})
+	err := copyTree(src, dst, cloneContent)
 	if err != nil && errors.Is(err, errors.ErrUnsupported) {
 		os.RemoveAll(dst)
 	}
@@ -35,13 +29,7 @@ func File(src, dst string) error {
 // relative to dir, so it never follows a symlink that replaced a directory
 // above dir.
 func FileAt(src string, dir *os.File, name string) error {
-	return copyAt(src, dir, name, func(in, out *os.File) error {
-		err := unix.IoctlFileClone(int(out.Fd()), int(in.Fd()))
-		if err != nil {
-			return &os.LinkError{Op: "ficlone", Old: in.Name(), New: out.Name(), Err: markUnsupported(err)}
-		}
-		return nil
-	})
+	return copyAt(src, dir, name, cloneContent)
 }
 
 // markUnsupported marks the errors FICLONE returns on filesystems without
@@ -60,6 +48,14 @@ func markUnsupported(err error) error {
 func MkfifoAt(dir *os.File, name string, perm fs.FileMode) error {
 	if err := unix.Mkfifoat(int(dir.Fd()), name, uint32(perm.Perm())); err != nil {
 		return &os.PathError{Op: "mkfifoat", Path: name, Err: err}
+	}
+	return nil
+}
+
+// cloneContent makes out share the data of in with FICLONE.
+func cloneContent(in, out *os.File) error {
+	if err := unix.IoctlFileClone(int(out.Fd()), int(in.Fd())); err != nil {
+		return &os.LinkError{Op: "ficlone", Old: in.Name(), New: out.Name(), Err: markUnsupported(err)}
 	}
 	return nil
 }

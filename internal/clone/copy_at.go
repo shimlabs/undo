@@ -4,7 +4,6 @@ package clone
 
 import (
 	"errors"
-	"io"
 	"io/fs"
 	"os"
 
@@ -15,10 +14,7 @@ import (
 // modification time. It works relative to dir, so it never follows a symlink
 // that replaced a directory above dir. It fails if name already exists.
 func CopyAt(src string, dir *os.File, name string) error {
-	return copyAt(src, dir, name, func(in, out *os.File) error {
-		_, err := io.Copy(out, in)
-		return err
-	})
+	return copyAt(src, dir, name, copyContent)
 }
 
 // copyAt recreates the file or symlink src as name in dir and fills a regular

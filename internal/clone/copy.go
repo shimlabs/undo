@@ -16,10 +16,13 @@ import (
 // modification times. A symlink is copied as a link, not followed. It fails if
 // dst already exists. It is for filesystems that cannot clone.
 func Copy(src, dst string) error {
-	return copyTree(src, dst, func(in, out *os.File) error {
-		_, err := io.Copy(out, in)
-		return err
-	})
+	return copyTree(src, dst, copyContent)
+}
+
+// copyContent copies the bytes of in to out.
+func copyContent(in, out *os.File) error {
+	_, err := io.Copy(out, in)
+	return err
 }
 
 // copyTree recreates src at dst and fills each regular file with copyData.
