@@ -357,7 +357,7 @@ func TestStatusShowsInstalledHooks(t *testing.T) {
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
 
 	_, out := run(t, root, "", "status")
-	if !strings.Contains(out, "Hooks        none yet, run: undo install <agent>") {
+	if !strings.Contains(out, "Hooks        none yet; run undo install <agent> to add one") {
 		t.Fatalf("status without hooks:\n%s", out)
 	}
 
@@ -388,7 +388,7 @@ func TestUndoFindsDeletedProject(t *testing.T) {
 	}
 
 	_, out := run(t, parent, "", "list")
-	if !strings.Contains(out, "was deleted. Bring it back with:\n  undo to 1 --project") {
+	if !strings.Contains(out, "Bring it back with:\n  undo to 1 --project") {
 		t.Fatalf("list in the parent does not point to the deleted project:\n%s", out)
 	}
 	if code, out := run(t, parent, "", "to", "1", "--yes", "--project", root); code != 0 {
@@ -494,7 +494,7 @@ func TestListInHomeFindsDeletedProject(t *testing.T) {
 	}
 
 	code, out := run(t, home, "", "list")
-	if code != 0 || !strings.Contains(out, "was deleted. Bring it back with:\n  undo to 1 --project") {
+	if code != 0 || !strings.Contains(out, "Bring it back with:\n  undo to 1 --project") {
 		t.Fatalf("exit %d, list in the home directory:\n%s", code, out)
 	}
 }
@@ -516,7 +516,7 @@ func TestUndoFindsDeletedProjectThroughSymlinkedFolder(t *testing.T) {
 	}
 
 	_, out := run(t, link, "", "list")
-	if !strings.Contains(out, "was deleted. Bring it back with:") {
+	if !strings.Contains(out, "was deleted") {
 		t.Fatalf("list in a symlinked parent does not point to the deleted project:\n%s", out)
 	}
 }

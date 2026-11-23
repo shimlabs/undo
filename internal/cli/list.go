@@ -114,16 +114,35 @@ func isMissingProject(err error) bool {
 	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, project.ErrNotProject)
 }
 
-// printNoCheckpoints says there are no checkpoints for the project, and points
-// to any deleted project directly inside the folder that has some, since
-// running undo in the parent of a deleted folder is how people look for it.
+// printNoCheckpoints says there are no checkpoints for the project and how
+// to take one. When a deleted project directly inside the folder has some,
+// it says how to bring that back instead, since running undo in the parent
+// of a deleted folder is how people look for it.
 func printNoCheckpoints(env Env, parsed flags) {
-	dir := env.Dir
-	if root, err := projectRoot(env, parsed); err == nil {
-		dir = root
-	}
 	out := env.stdout()
-	out.Printf("No checkpoints yet in %s. The next agent command, or %s, takes one.\n", displayPath(dir), out.Bold("undo checkpoint"))
+	if printDeletedProjects(env) {
+		return
+	}
+	root, err := projectRoot(env, parsed)
+	if errors.Is(err, project.ErrNotProject) {
+		out.Println(sentence(notProjectError(env.Dir).Error()))
+		out.Printf("Run %s inside a project folder.\n", out.Bold("undo"))
+		return
+	}
+	if err != nil {
+		root = env.Dir
+	}
+	out.Printf("No checkpoints yet in %s.\n", displayPath(root))
+	if len(installedAgentTitles()) == 0 {
+		out.Printf("Run %s to take one before every agent command, or %s to take one now.\n", out.Bold("undo install <agent>"), out.Bold("undo checkpoint"))
+		return
+	}
+	out.Printf("The next agent command takes one, or run %s to take one now.\n", out.Bold("undo checkpoint"))
+}
+
+// printDeletedProjects says how to bring back each deleted project directly
+// inside the folder, and reports whether there was any.
+func printDeletedProjects(env Env) bool {
 	// Stores record resolved roots, so a folder reached through a symlink,
 	// such as /tmp on macOS, is matched by its real path.
 	parent := env.Dir
@@ -132,31 +151,46 @@ func printNoCheckpoints(env Env, parsed flags) {
 	}
 	stores, err := store.StoresUnder(env.StoreHome, parent)
 	if err != nil {
-		return
+		return false
 	}
+	isAny := false
 	for _, other := range stores {
-		printDeletedProject(out, other)
+		if printDeletedProject(env.stdout(), other) {
+			isAny = true
+		}
 		other.Close()
 	}
+	return isAny
 }
 
 // printDeletedProject says how to bring back the project of projectStore if
-// its folder was deleted.
-func printDeletedProject(out *terminal.Writer, projectStore *store.Store) {
+// its folder was deleted, and reports whether it was.
+func printDeletedProject(out *terminal.Writer, projectStore *store.Store) bool {
 	root := projectStore.Root()
 	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
-		return
+		return false
 	}
 	latest, hasLatest, err := projectStore.Latest()
 	if err != nil || !hasLatest {
-		return
+		return false
 	}
 	if shown := terminal.Printable(root); shown != root {
 		// A path with control characters cannot be shown both readably
 		// and safe to paste, so the command is described instead.
 		out.Warningf("%s was deleted. Bring it back with undo to %d and --project set to that path.", shown, latest.ID)
-		return
+		return true
 	}
-	out.Warningf("%s was deleted. Bring it back with:", displayPath(root))
-	out.Printf("  %s\n", out.Bold(fmt.Sprintf("undo to %d --project %s", latest.ID, shell.Quote(root))))
+	out.Headingf("%s was deleted", displayPath(root))
+	out.Printf("Its newest checkpoint is %d, taken %s. Bring it back with:\n", latest.ID, timeAgo(latest.Time))
+	out.Printf("  %s\n", out.Bold(fmt.Sprintf("undo to %d --project %s", latest.ID, shellPath(root))))
+	return true
+}
+
+// shellPath returns path as a shell word, in its short ~ form when that needs
+// no quoting.
+func shellPath(path string) string {
+	if shown := displayPath(path); strings.HasPrefix(shown, "~/") && shell.Join([]string{shown[2:]}) == shown[2:] {
+		return shown
+	}
+	return shell.Join([]string{path})
 }

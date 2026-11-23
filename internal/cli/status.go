@@ -24,7 +24,7 @@ func statusCommand(parsed flags, env Env) error {
 	projectStore, err := store.Open(env.StoreHome, root)
 	switch {
 	case isMissingProject(err):
-		printField(out, "Checkpoints", "none yet; the next agent command, or "+out.Bold("undo checkpoint")+", takes one")
+		printField(out, "Checkpoints", "none yet; run "+out.Bold("undo checkpoint")+" to take one")
 	case err != nil:
 		return err
 	default:
@@ -36,7 +36,7 @@ func statusCommand(parsed flags, env Env) error {
 	if agents := installedAgentTitles(); len(agents) > 0 {
 		printField(out, "Hooks", strings.Join(agents, ", "))
 	} else {
-		printField(out, "Hooks", out.Yellow("none yet")+", run: "+out.Bold("undo install <agent>"))
+		printField(out, "Hooks", "none yet; run "+out.Bold("undo install <agent>")+" to add one")
 	}
 	printField(out, "Excluded", terminal.Printable(strings.Join(matcher.Patterns(), ", ")))
 	printField(out, "Not covered", "anything outside this folder: databases, git push, API calls")
