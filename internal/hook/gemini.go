@@ -16,18 +16,15 @@ var gemini = Agent{
 		}
 		return homePath(".gemini", "settings.json")
 	},
-	event: "BeforeTool",
-	entry: func(command string) map[string]any {
-		return map[string]any{
-			// Gemini CLI matches with an unanchored regex.
-			"matcher": "^(run_shell_command|write_file|replace)$",
-			"hooks": []any{map[string]any{
-				"name":    "undo",
-				"type":    "command",
-				"command": command,
-				// Gemini CLI counts hook timeouts in milliseconds.
-				"timeout": 30000,
-			}},
-		}
+	installer: hookGroups{
+		event: "BeforeTool",
+		// Gemini CLI matches with an unanchored regex.
+		matcher: "^(run_shell_command|write_file|replace)$",
+		handler: map[string]any{
+			"name": "undo",
+			"type": "command",
+			// Gemini CLI counts hook timeouts in milliseconds.
+			"timeout": 30000,
+		},
 	},
 }

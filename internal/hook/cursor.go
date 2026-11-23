@@ -8,15 +8,14 @@ var cursor = Agent{
 	configPath: func() (string, error) {
 		return homePath(".cursor", "hooks.json")
 	},
-	event: "preToolUse",
-	entry: func(command string) map[string]any {
-		return map[string]any{
-			"command": command,
+	installer: hookList{
+		event: "preToolUse",
+		handler: map[string]any{
 			// Cursor matches with an unanchored regex, and a bare Write would
 			// also match WriteShellStdin.
 			"matcher": "^(Shell|Write|Delete)$",
 			"timeout": 30,
-		}
+		},
+		defaults: map[string]any{"version": 1},
 	},
-	defaults: map[string]any{"version": 1},
 }

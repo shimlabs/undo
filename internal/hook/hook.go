@@ -4,9 +4,7 @@ package hook
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,8 +14,7 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-// Agent is a coding agent that undo can install a hook into. Most agents keep
-// their hooks in a JSON settings file. OpenCode loads a plugin file instead.
+// Agent is a coding agent that undo can install a hook into.
 type Agent struct {
 	// Name is how the agent is named on the command line.
 	Name string
@@ -27,16 +24,10 @@ type Agent struct {
 	Note string
 
 	configPath func() (string, error)
-	// event is the settings key the hook goes under, for agents with a
-	// settings file.
-	event string
-	// entry returns the hook entry that runs command.
-	entry func(command string) map[string]any
-	// defaults are top-level settings a new settings file needs.
-	defaults map[string]any
-	// plugin returns the plugin file that runs binary, for agents that load
-	// plugins.
-	plugin func(binary string) []byte
+	installer  installer
+	// isHandledElsewhere reports whether another agent's hook already takes
+	// a checkpoint for event.
+	isHandledElsewhere func(event preToolUseInput) bool
 }
 
 // Agents lists every agent undo supports.
@@ -59,10 +50,7 @@ func (a Agent) Install(binary string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if a.plugin != nil {
-		return path, writePlugin(path, a.plugin(binary))
-	}
-	return path, installEntry(path, a.event, a.Name, a.entry(shellQuote(binary)+" hook "+a.Name), a.defaults)
+	return path, a.installer.install(path, binary, a.Name)
 }
 
 // Uninstall removes the hook added by Install and leaves everything else as
@@ -72,24 +60,13 @@ func (a Agent) Uninstall() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if a.plugin != nil {
-		return path, removePlugin(path, a.Name)
-	}
-	return path, uninstallEntry(path, a.event, a.Name)
+	return path, a.installer.uninstall(path, a.Name)
 }
 
 // IsInstalled reports whether undo's hook is in the agent's configuration.
 func (a Agent) IsInstalled() bool {
 	path, err := a.configPath()
-	if err != nil {
-		return false
-	}
-	if a.plugin != nil {
-		data, err := os.ReadFile(path)
-		return err == nil && isUndoPlugin(data, a.Name)
-	}
-	settings, err := readSettings(path)
-	return err == nil && slices.ContainsFunc(hookEntries(settings, a.event), isUndoEntry(a.Name))
+	return err == nil && a.installer.isInstalled(path, a.Name)
 }
 
 // preToolUseInput is the part of a hook event that undo reads. Claude Code,
@@ -115,10 +92,7 @@ func (a Agent) Handle(in io.Reader, checkpoint store.Checkpointer) error {
 	if err := json.NewDecoder(in).Decode(&event); err != nil {
 		return err
 	}
-	// Cursor also runs Claude Code's hooks. When undo's Cursor hook is
-	// installed, it covers the event, and a second checkpoint would only
-	// repeat the first.
-	if a.Name == claude.Name && event.CursorVersion != "" && cursor.IsInstalled() {
+	if a.isHandledElsewhere != nil && a.isHandledElsewhere(event) {
 		return nil
 	}
 	dir, err := event.dir()
@@ -191,31 +165,4 @@ func homePath(parts ...string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(append([]string{home}, parts...)...), nil
-}
-
-var errForeignPlugin = errors.New("not written by undo, left unchanged")
-
-func writePlugin(path string, content []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, content, 0o644)
-}
-
-func removePlugin(path, agent string) error {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !isUndoPlugin(data, agent) {
-		return &fs.PathError{Op: "remove", Path: path, Err: errForeignPlugin}
-	}
-	return os.Remove(path)
-}
-
-func isUndoPlugin(data []byte, agent string) bool {
-	return strings.Contains(string(data), `"hook", "`+agent+`"`)
 }

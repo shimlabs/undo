@@ -16,13 +16,11 @@ var codex = Agent{
 		}
 		return homePath(".codex", "hooks.json")
 	},
-	event: "PreToolUse",
-	entry: func(command string) map[string]any {
-		return map[string]any{
-			// Codex reports shell commands as Bash and makes file edits with
-			// apply_patch.
-			"matcher": "Bash|apply_patch",
-			"hooks":   []any{map[string]any{"type": "command", "command": command, "timeout": 30}},
-		}
+	installer: hookGroups{
+		event: "PreToolUse",
+		// Codex reports shell commands as Bash and makes file edits with
+		// apply_patch.
+		matcher: "Bash|apply_patch",
+		handler: map[string]any{"type": "command", "timeout": 30},
 	},
 }

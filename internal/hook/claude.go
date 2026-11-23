@@ -15,11 +15,15 @@ var claude = Agent{
 		}
 		return homePath(".claude", "settings.json")
 	},
-	event: "PreToolUse",
-	entry: func(command string) map[string]any {
-		return map[string]any{
-			"matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
-			"hooks":   []any{map[string]any{"type": "command", "command": command}},
-		}
+	installer: hookGroups{
+		event:   "PreToolUse",
+		matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit",
+		handler: map[string]any{"type": "command", "timeout": 30},
+	},
+	// Cursor also runs Claude Code's hooks. When undo's Cursor hook is
+	// installed, it covers the event, and a second checkpoint would only
+	// repeat the first.
+	isHandledElsewhere: func(event preToolUseInput) bool {
+		return event.CursorVersion != "" && cursor.IsInstalled()
 	},
 }

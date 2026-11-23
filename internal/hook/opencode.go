@@ -18,14 +18,18 @@ var openCode = Agent{
 		}
 		return homePath(".config", "opencode", "plugins", "undo.js")
 	},
-	plugin: openCodePlugin,
+	installer: pluginFile{content: openCodePlugin},
 }
+
+// pluginHeader starts every plugin file undo writes, so undo can tell its own
+// file from one the user wrote.
+const pluginHeader = `// Written by "undo install opencode". Remove it with "undo uninstall opencode".`
 
 // openCodePlugin returns a plugin that sends each file-changing tool call to
 // "undo hook opencode" in the shape the other agents use.
 func openCodePlugin(binary string) []byte {
 	quoted, _ := json.Marshal(binary)
-	return fmt.Appendf(nil, `// Written by "undo install opencode". Remove it with "undo uninstall opencode".
+	return fmt.Appendf(nil, `%s
 const UNDO = %s
 const FILE_TOOLS = new Set(["bash", "edit", "write", "apply_patch"])
 
@@ -53,5 +57,5 @@ export const UndoPlugin = async ({ directory }) => ({
     } catch {}
   },
 })
-`, quoted)
+`, pluginHeader, quoted)
 }

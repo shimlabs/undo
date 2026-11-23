@@ -95,7 +95,7 @@ func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 		t.Fatalf("checkpoints = %d, want 1 while the Cursor hook is not installed", len(list))
 	}
 
-	if _, err := cursor.Install("/usr/local/bin/undo"); err != nil {
+	if _, err := cursor.Install(privateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
 	if err := claude.Handle(strings.NewReader(event), (*store.Store).Take); err != nil {
