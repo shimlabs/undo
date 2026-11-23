@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 
@@ -39,7 +40,7 @@ func runCommand(parsed flags, env Env) error {
 	if _, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: strings.Join(args, " "), Dir: env.Dir}); err != nil {
 		return err
 	}
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...) //nolint:gosec // undo run runs the command the user typed
 	cmd.Dir = env.Dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = env.Stdin, env.Stdout, env.Stderr
 	return cmd.Run()

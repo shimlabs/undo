@@ -28,7 +28,7 @@ const hooks = await UndoPlugin({ directory })
 await hooks["tool.execute.before"]({ tool, sessionID: "s", callID: "c" }, { args: JSON.parse(args) })
 console.log("done")
 `
-	out, err := exec.Command(bun, "-e", script, plugin, directory, tool, args).CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), bun, "-e", script, plugin, directory, tool, args).CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "done") {
 		t.Fatalf("plugin failed: %v\n%s", err, out)
 	}

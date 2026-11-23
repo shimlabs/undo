@@ -591,7 +591,7 @@ func TestRestoreKeepsNamedPipeAfterPrune(t *testing.T) {
 // runIn runs a command in dir and fails the test if it fails.
 func runIn(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
-	command := exec.Command(name, args...)
+	command := exec.CommandContext(t.Context(), name, args...)
 	command.Dir = dir
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)

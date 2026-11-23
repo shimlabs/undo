@@ -872,7 +872,7 @@ func TestTrackerSeesFilesClonedIntoProject(t *testing.T) {
 	}
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
-	if out, err := exec.Command("cp", "-c", filepath.Join(root, "README.md"), filepath.Join(root, "copy.md")).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "cp", "-c", filepath.Join(root, "README.md"), filepath.Join(root, "copy.md")).CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
 	second := takeCheckpoint(t, projectTracker, "2")
@@ -882,7 +882,7 @@ func TestTrackerSeesFilesClonedIntoProject(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "other.md")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("cp", "-c", filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "other.md")).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "cp", "-c", filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "other.md")).CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
 	fourth := takeCheckpoint(t, projectTracker, "4")

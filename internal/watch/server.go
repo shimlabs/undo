@@ -63,7 +63,7 @@ func Serve(ctx context.Context, projectStore *store.Store, options Options) erro
 	if options.PruneQuietPeriod == 0 {
 		options.PruneQuietPeriod = defaultPruneQuietPeriod
 	}
-	listener, err := listen(options.SocketDir, projectStore)
+	listener, err := listen(ctx, options.SocketDir, projectStore)
 	if err != nil {
 		return err
 	}
@@ -92,12 +92,12 @@ func Serve(ctx context.Context, projectStore *store.Store, options Options) erro
 
 // listen opens the project's socket, unless another server already answers
 // on it.
-func listen(socketDir string, projectStore *store.Store) (*net.UnixListener, error) {
+func listen(ctx context.Context, socketDir string, projectStore *store.Store) (*net.UnixListener, error) {
 	path, err := socketPath(socketDir, projectStore)
 	if err != nil {
 		return nil, err
 	}
-	if conn, err := net.DialTimeout("unix", path, dialTimeout); err == nil {
+	if conn, err := dial(ctx, path); err == nil {
 		conn.Close()
 		return nil, ErrRunning
 	}

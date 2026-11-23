@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -75,10 +76,17 @@ var (
 	errOtherUser     = errors.New("the other end of the socket runs as user")
 )
 
+// dial connects to the socket at path, waiting at most dialTimeout.
+func dial(ctx context.Context, path string) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: dialTimeout}
+	return dialer.DialContext(ctx, "unix", path)
+}
+
 // dialServer connects to the server at path and checks that it runs as the
 // current user.
 func dialServer(path string) (net.Conn, error) {
-	conn, err := net.DialTimeout("unix", path, dialTimeout)
+	// A client has no context of its own; dialTimeout bounds the wait.
+	conn, err := dial(context.Background(), path)
 	if err != nil {
 		return nil, err
 	}

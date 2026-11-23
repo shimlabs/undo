@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +57,7 @@ func exitWithError(err error) {
 // receives the watcher's error if it exits while this process still runs,
 // so a watcher that cannot start is noticed at once.
 func startWatcher(executable, root string) (<-chan error, error) {
-	cmd := exec.Command(executable, "watch")
+	cmd := exec.CommandContext(context.Background(), executable, "watch")
 	cmd.Dir = root
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
