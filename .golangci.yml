@@ -36,8 +36,8 @@ linters:
     dupword:
       # Repeated words that are C, in cgo preambles.
       ignore:
-        - NULL
-        - NULL,
+        - "NULL"
+        - "NULL,"
         - long
     funlen:
       lines: -1
