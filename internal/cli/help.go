@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"runtime/debug"
 	"strings"
 
 	"github.com/shimlabs/undo/internal/hook"
@@ -23,8 +24,20 @@ func helpCommand(parsed flags, env Env) error {
 }
 
 func versionCommand(_ flags, env Env) error {
-	env.stdout().Printf("undo %s\n", Version)
+	env.stdout().Printf("undo %s\n", version())
 	return nil
+}
+
+// version returns the version the release build set, or the module version
+// go install recorded.
+func version() string {
+	if Version != "dev" {
+		return Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return Version
 }
 
 // printHelp writes the overview of every command.
