@@ -626,26 +626,18 @@ func isGone(err error) bool {
 // addUnder adds everything inside a new directory to the listing, in case some
 // of its files were created before their events arrived.
 func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir string) error {
+	rel, err := filepath.Rel(t.root, dir)
+	if err != nil {
+		return err
+	}
 	// A directory that cannot be read is left out, so its entries reach the
 	// listing only with the next full comparison.
-	return filepath.WalkDir(dir, func(fullPath string, dirEntry fs.DirEntry, _ error) error {
-		if fullPath == dir {
-			return nil
-		}
-		rel, err := filepath.Rel(t.root, fullPath)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if matcher.Match(rel, dirEntry.IsDir()) {
-			if dirEntry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry, err := tree.Stat(fullPath); err == nil {
-			changes.update(rel, entry)
-		}
-		return nil
-	})
+	found, _, err := tree.ScanDir(t.root, filepath.ToSlash(rel), matcher)
+	if err != nil {
+		return err
+	}
+	for rel, entry := range found {
+		changes.update(rel, entry)
+	}
+	return nil
 }

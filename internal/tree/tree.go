@@ -74,8 +74,27 @@ func Scan(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
 	if entry.Kind != Dir {
 		return listing, Skipped{}, nil
 	}
+	return scanFrom(directory{path: root, rel: ".", id: id}, matcher, listing)
+}
+
+// ScanDir lists every path inside the directory rel below root, as Scan
+// does, with paths relative to root. rel itself is left out.
+func ScanDir(root, rel string, matcher *exclude.Matcher) (Listing, Skipped, error) {
+	dirPath := filepath.Join(root, filepath.FromSlash(rel))
+	entry, id, err := statAt(unix.AT_FDCWD, dirPath)
+	if errors.Is(err, fs.ErrNotExist) || err == nil && entry.Kind != Dir {
+		return Listing{}, Skipped{}, nil
+	}
+	if err != nil {
+		return nil, Skipped{}, err
+	}
+	return scanFrom(directory{path: dirPath, rel: rel, id: id}, matcher, Listing{})
+}
+
+// scanFrom adds everything under dir to listing.
+func scanFrom(dir directory, matcher *exclude.Matcher, listing Listing) (Listing, Skipped, error) {
 	scan := scanner{matcher: matcher, listing: listing}
-	if err := walk.Dirs(directory{path: root, rel: ".", id: id}, scan.readDir); err != nil {
+	if err := walk.Dirs(dir, scan.readDir); err != nil {
 		return nil, Skipped{}, err
 	}
 	slices.Sort(scan.skipped.Excluded)

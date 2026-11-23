@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -315,5 +316,37 @@ func TestParentCheckerReportsSymlinkLoopAboveNearestParent(t *testing.T) {
 	}
 	if err := NewParentChecker(root).Check("a/b/x"); !errors.Is(err, ErrParentNotDir) {
 		t.Fatalf("Check = %v, want ErrParentNotDir", err)
+	}
+}
+
+func TestScanDirListsInsideWithPathsFromRoot(t *testing.T) {
+	root := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(root, "src", "lib", "a.go"), "a")
+	testutil.WriteFile(t, filepath.Join(root, "src", "node_modules", "x", "i.js"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "other.txt"), "o")
+	matcher, err := exclude.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, skipped, err := ScanDir(root, "src", matcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := slices.Sorted(maps.Keys(listing)), []string{"src/lib", "src/lib/a.go"}; !slices.Equal(got, want) {
+		t.Fatalf("ScanDir listed %v, want %v", got, want)
+	}
+	if !slices.Equal(skipped.Excluded, []string{"src/node_modules"}) {
+		t.Fatalf("ScanDir skipped %v, want src/node_modules", skipped.Excluded)
+	}
+}
+
+func TestScanDirOfNamedPipeListsNothing(t *testing.T) {
+	root := testutil.TempDir(t)
+	if err := syscall.Mkfifo(filepath.Join(root, "build"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	listing, _, err := ScanDir(root, "build", exclude.FromPatterns(nil))
+	if err != nil || len(listing) > 0 {
+		t.Fatalf("ScanDir of a named pipe = %v, %v; want nothing", listing, err)
 	}
 }
