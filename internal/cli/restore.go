@@ -42,7 +42,7 @@ func toCommand(args []string, env Env) error {
 		return err
 	}
 	if len(parsed.args) != 1 {
-		return usageError{"to needs a checkpoint id"}
+		return usageError{message: "undo to needs a checkpoint id; undo list shows them"}
 	}
 	projectStore, checkpoint, err := findCheckpoint(env, parsed)
 	if err != nil {
@@ -58,7 +58,7 @@ func diffCommand(args []string, env Env) error {
 		return err
 	}
 	if len(parsed.args) != 1 {
-		return usageError{"diff needs a checkpoint id"}
+		return usageError{message: "undo diff needs a checkpoint id; undo list shows them"}
 	}
 	projectStore, checkpoint, err := findCheckpoint(env, parsed)
 	if err != nil {
@@ -84,7 +84,7 @@ func diffCommand(args []string, env Env) error {
 func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, error) {
 	id, err := strconv.Atoi(parsed.args[0])
 	if err != nil {
-		return nil, store.Checkpoint{}, usageError{fmt.Sprintf("%q is not a checkpoint id", parsed.args[0])}
+		return nil, store.Checkpoint{}, usageError{message: fmt.Sprintf("%q is not a checkpoint id; undo list shows them", parsed.args[0])}
 	}
 	projectStore, err := openStore(env, parsed)
 	if err != nil {

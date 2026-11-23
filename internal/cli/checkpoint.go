@@ -35,7 +35,7 @@ func runCommand(args []string, env Env) error {
 		args = args[1:]
 	}
 	if len(args) == 0 {
-		return usageError{"run needs a command"}
+		return usageError{message: "undo run needs a command to run, after --"}
 	}
 	projectStore, err := createStore(env, flags{})
 	if err != nil {

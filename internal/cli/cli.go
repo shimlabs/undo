@@ -9,9 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
-	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
@@ -20,43 +20,6 @@ import (
 
 // Version is set when the binary is built.
 var Version = "dev"
-
-const usageFormat = `undo puts your project back the way it was before an agent's command.
-
-Usage:
-  undo                     restore the state before the last command
-  undo list                show checkpoints
-  undo diff <id>           show what restoring checkpoint <id> would change
-  undo to <id>             restore the state at checkpoint <id>
-  undo run -- <command>    take a checkpoint, then run <command>
-  undo checkpoint          take a checkpoint now
-  undo status              show what undo protects
-  undo install <agent>     checkpoint before every change the agent makes:
-                           %s
-  undo uninstall <agent>   remove that hook
-  undo version             print the version
-
-Flags:
-  --yes                    restore without asking
-  --label <text>           label for undo checkpoint
-  --copy                   keep full copies, for filesystems without clones
-  --project <path>         use the project at <path>, even one that was deleted
-`
-
-// printUsage writes the usage text with its section names in bold.
-func printUsage(out *terminal.Writer) {
-	text := usage()
-	for _, section := range []string{"Usage:", "Flags:"} {
-		text = strings.Replace(text, section, out.Bold(section), 1)
-	}
-	out.Printf("%s", text)
-}
-
-func usage() string {
-	names := hook.AgentNames()
-	last := len(names) - 1
-	return fmt.Sprintf(usageFormat, strings.Join(names[:last], ", ")+" or "+names[last])
-}
 
 func (env Env) stdout() *terminal.Writer {
 	return terminal.NewWriter(env.Stdout)
@@ -95,7 +58,12 @@ func (env Env) checkpointer() store.Checkpointer {
 	return env.watcher().Checkpoint
 }
 
-type usageError struct{ message string }
+// usageError is a mistake in how undo was called. command, when set, is the
+// command whose usage the error shows.
+type usageError struct {
+	message string
+	command *command
+}
 
 func (e usageError) Error() string { return e.message }
 
@@ -112,9 +80,7 @@ func Run(args []string, env Env) int {
 	}
 	errOut := env.stderr()
 	if usageErr, ok := errors.AsType[usageError](err); ok {
-		errOut.Error("%s", usageErr.message)
-		errOut.Println("")
-		printUsage(errOut)
+		printUsageError(errOut, usageErr)
 		return 2
 	}
 	switch {
@@ -132,42 +98,92 @@ func Run(args []string, env Env) int {
 }
 
 func dispatch(args []string, env Env) error {
-	command, rest := "", args
+	name, rest := "", args
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		command, rest = args[0], args[1:]
+		name, rest = args[0], args[1:]
 	}
-	switch command {
-	case "":
-		return undoCommand(rest, env)
-	case "list":
-		return listCommand(rest, env)
-	case "diff":
-		return diffCommand(rest, env)
-	case "to":
-		return toCommand(rest, env)
-	case "run":
-		return runCommand(rest, env)
-	case "checkpoint":
-		return checkpointCommand(rest, env)
-	case "status":
-		return statusCommand(rest, env)
-	case "install":
-		return installCommand(rest, env)
-	case "uninstall":
-		return uninstallCommand(rest, env)
-	case "hook":
-		hookCommand(rest, env)
-		return nil
-	case "watch":
-		return watchCommand(env)
-	case "version":
-		fmt.Fprintln(env.Stdout, "undo", Version)
-		return nil
-	case "help":
-		printUsage(env.stdout())
+	if name == "" && len(rest) > 0 && (rest[0] == "--version" || rest[0] == "-v") {
+		return versionCommand(nil, env)
+	}
+	cmd, ok := findCommand(name)
+	if !ok {
+		return unknownCommandError(name)
+	}
+	isHelp, err := checkArguments(cmd, rest)
+	if err != nil {
+		return err
+	}
+	if isHelp {
+		if cmd.name == "" {
+			printHelp(env.stdout())
+		} else {
+			printCommandHelp(env.stdout(), cmd)
+		}
 		return nil
 	}
-	return usageError{fmt.Sprintf("unknown command %q", command)}
+	err = cmd.run(rest, env)
+	if usageErr, ok := errors.AsType[usageError](err); ok && usageErr.command == nil {
+		usageErr.command = &cmd
+		return usageErr
+	}
+	return err
+}
+
+// checkArguments reports whether args ask for help, and refuses flags cmd
+// does not take and more arguments than it takes. Commands that run another
+// command, or that agents and the watcher run, take whatever they get.
+func checkArguments(cmd command, args []string) (isHelp bool, err error) {
+	if cmd.group == "" && cmd.name != "help" && cmd.name != "version" {
+		return false, nil
+	}
+	if cmd.maxArguments < 0 {
+		return len(args) > 0 && (args[0] == "-h" || args[0] == "--help"), nil
+	}
+	count := 0
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-h" || arg == "--help" {
+			return true, nil
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			count++
+			continue
+		}
+		name, _, hasValue := strings.Cut(arg, "=")
+		flag, isKnown := findFlag(name)
+		if !isKnown {
+			return false, usageError{message: fmt.Sprintf("unknown flag %s", name), command: &cmd}
+		}
+		if !slices.Contains(cmd.flags, flag.name) {
+			return false, usageError{message: fmt.Sprintf("%s does not take %s", cmd.listing(), flag.name), command: &cmd}
+		}
+		if flag.value != "" && !hasValue {
+			i++
+		}
+	}
+	if count > cmd.maxArguments {
+		if cmd.maxArguments == 0 {
+			return false, usageError{message: fmt.Sprintf("%s takes no arguments", cmd.listing()), command: &cmd}
+		}
+		return false, usageError{message: fmt.Sprintf("too many arguments for %s", cmd.listing()), command: &cmd}
+	}
+	return false, nil
+}
+
+// printUsageError writes err, how its command is typed, and where to read
+// more.
+func printUsageError(out *terminal.Writer, err usageError) {
+	out.Error("%s", terminal.Printable(err.message))
+	if err.command == nil {
+		out.Printf("Run %s for the list of commands.\n", out.Bold("undo help"))
+		return
+	}
+	out.Printf("%s %s\n", out.Bold("Usage:"), err.command.usageLine())
+	help := "undo help " + err.command.name
+	if err.command.name == "" {
+		help = "undo help"
+	}
+	out.Printf("Run %s for more.\n", out.Bold(strings.TrimSpace(help)))
 }
 
 // flags holds the parsed command-line flags and the remaining arguments.
@@ -192,7 +208,7 @@ func parseFlags(args []string) (flags, error) {
 		case name == "--label" || name == "--project":
 			if !hasValue {
 				if i+1 == len(args) {
-					return parsed, usageError{name + " needs a value"}
+					return parsed, usageError{message: name + " needs a value"}
 				}
 				i++
 				value = args[i]
@@ -203,7 +219,7 @@ func parseFlags(args []string) (flags, error) {
 				parsed.project = value
 			}
 		case strings.HasPrefix(arg, "-"):
-			return parsed, usageError{fmt.Sprintf("unknown flag %q", arg)}
+			return parsed, usageError{message: fmt.Sprintf("unknown flag %s", arg)}
 		default:
 			parsed.args = append(parsed.args, arg)
 		}

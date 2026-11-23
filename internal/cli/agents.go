@@ -37,12 +37,14 @@ func uninstallCommand(args []string, env Env) error {
 }
 
 func agentArg(command string, args []string) (hook.Agent, error) {
-	if len(args) == 1 {
-		if agent, ok := hook.FindAgent(args[0]); ok {
-			return agent, nil
-		}
+	agents := strings.Join(hook.AgentNames(), ", ")
+	if len(args) == 0 {
+		return hook.Agent{}, usageError{message: fmt.Sprintf("undo %s needs an agent: %s", command, agents)}
 	}
-	return hook.Agent{}, usageError{fmt.Sprintf("%s supports: %s", command, strings.Join(hook.AgentNames(), ", "))}
+	if agent, ok := hook.FindAgent(args[0]); ok {
+		return agent, nil
+	}
+	return hook.Agent{}, usageError{message: fmt.Sprintf("%q is not an agent undo supports: %s", args[0], agents)}
 }
 
 // hookCommand handles one event from an agent. It never fails and never

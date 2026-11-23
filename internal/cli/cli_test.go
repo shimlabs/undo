@@ -238,10 +238,11 @@ func TestHookForUnknownAgentLogsAndTakesNoCheckpoint(t *testing.T) {
 	}
 }
 
-func TestUsageListsEveryAgent(t *testing.T) {
+func TestHelpListsEveryAgent(t *testing.T) {
+	_, out := run(t, t.TempDir(), "", "help")
 	for _, agent := range hook.Agents() {
-		if !strings.Contains(usage(), agent.Name) {
-			t.Errorf("usage does not mention %s", agent.Name)
+		if !strings.Contains(out, agent.Name) {
+			t.Errorf("help does not mention %s", agent.Name)
 		}
 	}
 }
