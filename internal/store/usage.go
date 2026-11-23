@@ -111,6 +111,25 @@ type usageRecord struct {
 	LatestID int   `json:"latest_id"`
 }
 
+// saveUsage records usage, measured while the store held the checkpoints
+// measured, so UsageEstimate need not measure the store again. A merge since
+// the measurement makes it stale, and then nothing is recorded.
+func (s *Store) saveUsage(usage int64, measured []Checkpoint) error {
+	if len(measured) == 0 {
+		return nil
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	checkpoints, err := s.List()
+	if err != nil || len(checkpoints) == 0 || checkpoints[0].ID != measured[0].ID {
+		return err
+	}
+	return s.writeJSON(s.usagePath(), usageRecord{Bytes: usage, LatestID: measured[len(measured)-1].ID})
+}
+
 // UsageEstimate returns about the bytes the store uses that are not shared
 // with the project. It measures the store once, which is slow for a large
 // store, and then adds what each later checkpoint stored. Merging measures

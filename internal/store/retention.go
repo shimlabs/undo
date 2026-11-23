@@ -52,9 +52,16 @@ func (s *Store) Prune(now time.Time, limits Limits) (int, error) {
 	if err != nil || bound <= limits.MaxBytes {
 		return count, err
 	}
-	usage, err := s.Usage()
-	if err != nil || usage <= limits.MaxBytes {
+	measured, err := s.List()
+	if err != nil {
 		return count, err
+	}
+	usage, err := s.Usage()
+	if err != nil {
+		return count, err
+	}
+	if usage <= limits.MaxBytes {
+		return count, s.saveUsage(usage, measured)
 	}
 	bySize, err := s.mergeUntilUnder(limits.MaxBytes, usage)
 	return count + bySize, err
