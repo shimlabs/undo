@@ -3,6 +3,7 @@
 package hook
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -141,7 +142,7 @@ func (a Agent) handle(in io.Reader, storeHome string, checkpoint store.Checkpoin
 	if a.isHandledElsewhere != nil && a.isHandledElsewhere(event) {
 		return nil, nil
 	}
-	projectDir := firstOf(event.ProjectDir, event.Dir)
+	projectDir := cmp.Or(event.ProjectDir, event.Dir)
 	if projectDir == "" {
 		if projectDir, err = os.Getwd(); err != nil {
 			return nil, err
@@ -155,7 +156,7 @@ func (a Agent) handle(in io.Reader, storeHome string, checkpoint store.Checkpoin
 	if err != nil {
 		return nil, err
 	}
-	options := store.CheckpointOptions{Label: event.label(root), Dir: firstOf(event.Dir, projectDir), Agent: a.Name, Session: event.Session}
+	options := store.CheckpointOptions{Label: event.label(root), Dir: cmp.Or(event.Dir, projectDir), Agent: a.Name, Session: event.Session}
 	_, err = checkpoint(projectStore, options)
 	return projectStore, err
 }

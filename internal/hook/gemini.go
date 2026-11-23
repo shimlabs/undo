@@ -1,6 +1,8 @@
 package hook
 
 import (
+	"cmp"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -28,4 +30,16 @@ var gemini = Agent{
 			"timeout": hookTimeout.Milliseconds(),
 		},
 	},
+}
+
+// parseGeminiEvent reads a Gemini CLI event. Gemini CLI passes the project
+// folder as GEMINI_PROJECT_DIR.
+func parseGeminiEvent(in io.Reader) (hookEvent, error) {
+	fields, err := decodeEvent[eventFields](in)
+	if err != nil {
+		return hookEvent{}, err
+	}
+	event := fields.event()
+	event.ProjectDir = cmp.Or(os.Getenv("GEMINI_PROJECT_DIR"), fields.Cwd)
+	return event, nil
 }

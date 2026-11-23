@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -24,4 +25,15 @@ var codex = Agent{
 		matcher: "Bash|apply_patch",
 		handler: map[string]any{"type": "command", "timeout": hookTimeout.Seconds()},
 	},
+}
+
+// parseCodexEvent reads a Codex event, whose cwd is the session's folder.
+func parseCodexEvent(in io.Reader) (hookEvent, error) {
+	fields, err := decodeEvent[eventFields](in)
+	if err != nil {
+		return hookEvent{}, err
+	}
+	event := fields.event()
+	event.ProjectDir = fields.Cwd
+	return event, nil
 }

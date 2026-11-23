@@ -1,8 +1,10 @@
 package hook
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -61,4 +63,22 @@ export const UndoPlugin = async ({ directory }) => ({
   },
 })
 `, pluginHeader, quoted, hookTimeout.Milliseconds())
+}
+
+// openCodeFields are the fields undo's OpenCode plugin sends.
+type openCodeFields struct {
+	eventFields
+	ProjectDir string `json:"project_dir"`
+}
+
+// parseOpenCodeEvent reads an event from undo's OpenCode plugin, which sends
+// the folder OpenCode was started in as project_dir.
+func parseOpenCodeEvent(in io.Reader) (hookEvent, error) {
+	fields, err := decodeEvent[openCodeFields](in)
+	if err != nil {
+		return hookEvent{}, err
+	}
+	event := fields.event()
+	event.ProjectDir = cmp.Or(fields.ProjectDir, fields.Cwd)
+	return event, nil
 }
