@@ -92,9 +92,6 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 		return Checkpoint{}, err
 	}
 	defer unlock()
-	if err := s.loadConfig(); err != nil {
-		return Checkpoint{}, err
-	}
 
 	matcher, err := exclude.New(s.root)
 	if err != nil {
@@ -144,11 +141,6 @@ func (s *Store) Commit(after int, options CheckpointOptions, changes Changes) (C
 		return Checkpoint{}, err
 	}
 	defer unlock()
-	// Another process, such as undo checkpoint --copy, may have changed the
-	// settings since this store was opened.
-	if err := s.loadConfig(); err != nil {
-		return Checkpoint{}, err
-	}
 
 	latest, hasLatest, err := s.Latest()
 	if err != nil {
