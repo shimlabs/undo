@@ -394,6 +394,24 @@ func TestDeletedProjectHintIsQuotedForTheShell(t *testing.T) {
 	}
 }
 
+func TestDeletedProjectHintWithControlCharacterIsNoCommand(t *testing.T) {
+	t.Setenv("UNDO_HOME", t.TempDir())
+	parent := testutil.TempDir(t)
+	root := filepath.Join(parent, "x$(app)\t")
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
+	if code, out := run(t, root, "", "checkpoint"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+
+	_, out := run(t, parent, "", "list")
+	if !strings.Contains(out, "was deleted") || strings.Contains(out, "--project \"") || strings.Contains(out, "--project '") {
+		t.Fatalf("hint for a path with a control character:\n%s", out)
+	}
+}
+
 func TestStatusEscapesExcludePatterns(t *testing.T) {
 	t.Setenv("UNDO_HOME", t.TempDir())
 	root := testutil.TempDir(t)

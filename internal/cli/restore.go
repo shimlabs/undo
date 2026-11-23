@@ -12,6 +12,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/restore"
+	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
 )
 
@@ -135,8 +136,12 @@ func printNoCheckpoints(env Env, parsed flags) {
 			continue
 		}
 		if latest, hasLatest, err := other.Latest(); err == nil && hasLatest {
-			fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with: undo to %d --project %s\n",
-				printable(root), latest.ID, printable(shellQuote(root)))
+			if shown := printable(root); shown != root {
+				// No quoting both shows such a path and stays safe to paste.
+				fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with undo to %d and --project set to that path.\n", shown, latest.ID)
+			} else {
+				fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with: undo to %d --project %s\n", root, latest.ID, shell.Quote(root))
+			}
 		}
 	}
 }

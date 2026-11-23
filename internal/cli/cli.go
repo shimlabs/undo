@@ -250,9 +250,3 @@ func printable(text string) string {
 	}
 	return strconv.Quote(text)
 }
-
-// shellQuote quotes text as one word for a POSIX shell, so a suggested
-// command can be pasted as it is.
-func shellQuote(text string) string {
-	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
-}
