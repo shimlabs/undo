@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
 )
 
@@ -234,6 +235,11 @@ func (s *Store) mergeFile(id int, rel string, parents *tree.ParentChecker) (int6
 			return 0, err
 		}
 		parents.Forget(rel)
+	} else if err == nil {
+		// A whole-directory clone of the base keeps lock flags.
+		if err := clone.Unlock(dst); err != nil {
+			return 0, err
+		}
 	}
 	return size, s.Extract(rel, Source{Layer: id}, dst)
 }

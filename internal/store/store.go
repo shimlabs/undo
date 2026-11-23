@@ -255,18 +255,30 @@ func (s *Store) SetCopyMode(isEnabled bool) error {
 
 // clone copies src to dst the way the store keeps files: as a clone, or as a
 // full copy in copy mode.
+//
+// A clone keeps a locked file's lock flags, which would stop the store from
+// replacing or removing its copy, so they are cleared on the copy.
 func (s *Store) clone(src, dst string) error {
+	copyFile := clone.File
 	if s.IsCopyMode() {
-		return clone.Copy(src, dst)
+		copyFile = clone.Copy
 	}
-	return clone.File(src, dst)
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	return clone.Unlock(dst)
 }
 
+// cloneAt is clone relative to dir.
 func (s *Store) cloneAt(src string, dir *os.File, name string) error {
+	copyFile := clone.FileAt
 	if s.IsCopyMode() {
-		return clone.CopyAt(src, dir, name)
+		copyFile = clone.CopyAt
 	}
-	return clone.FileAt(src, dir, name)
+	if err := copyFile(src, dir, name); err != nil {
+		return err
+	}
+	return clone.UnlockAt(dir, name)
 }
 
 // loadConfig reads the saved settings. It runs whenever the store is locked,

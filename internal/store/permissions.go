@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/shimlabs/undo/internal/clone"
 )
 
 // makeWritable lets the store add and remove entries in dir. Directories in
@@ -19,7 +21,8 @@ func makeWritable(dir string) error {
 }
 
 // removeAll removes path and everything below it, including directories that
-// were cloned read-only.
+// were cloned read-only and files whose lock flags a whole-directory clone
+// kept.
 func removeAll(path string) error {
 	err := os.RemoveAll(path)
 	if !errors.Is(err, fs.ErrPermission) {
@@ -27,9 +30,13 @@ func removeAll(path string) error {
 	}
 	// Directories that cannot be made writable make the final RemoveAll fail,
 	// and that error is the one to report.
-	_ = filepath.WalkDir(path, func(dir string, entry fs.DirEntry, err error) error {
-		if err == nil && entry.IsDir() {
-			_ = makeWritable(dir)
+	_ = filepath.WalkDir(path, func(entryPath string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		_ = clone.Unlock(entryPath)
+		if entry.IsDir() {
+			_ = makeWritable(entryPath)
 		}
 		return nil
 	})

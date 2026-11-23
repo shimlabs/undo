@@ -200,7 +200,7 @@ func printNotRestored(out io.Writer, applied restore.Changes) {
 		fmt.Fprintf(out, "  skipped  %s  (sockets and devices cannot be restored)\n", printable(rel))
 	}
 	for _, rel := range applied.Kept {
-		fmt.Fprintf(out, "  kept     %s  (never saved: unreadable, or excluded since the checkpoint)\n", printable(rel))
+		fmt.Fprintf(out, "  kept     %s  (left as it is: unreadable, locked, or excluded since the checkpoint)\n", printable(rel))
 	}
 	for _, rel := range applied.Lost {
 		fmt.Fprintf(out, "  lost     %s  (its saved copy is gone, as after a power cut)\n", printable(rel))

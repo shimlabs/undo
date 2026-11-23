@@ -30,9 +30,9 @@ type Changes struct {
 	Removed []string
 	// Skipped are sockets and devices, which a restore cannot recreate.
 	Skipped []string
-	// Kept are paths the restore leaves as they are because they were never
-	// saved: files undo cannot read, and existing paths that the exclude
-	// rules leave out now but not at the checkpoint.
+	// Kept are paths the restore leaves as they are: files undo cannot read
+	// or that are locked, directories that hold such paths, and existing
+	// paths that the exclude rules leave out now but not at the checkpoint.
 	Kept []string
 	// Unstable are files that kept changing while the checkpoint saved them,
 	// so their restored content may be a mix of two writes.
@@ -168,12 +168,15 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	// restore must not change it either.
 	unreadable := plan.unreadableFiles(slices.Concat(written, removed))
 	plan.drop(unreadable)
+	// A locked file cannot be replaced or removed, so it is kept as it is.
+	locked := plan.lockedPaths(slices.Concat(written, removed))
+	plan.drop(locked)
 	// A directory that holds paths the restore must not touch cannot be
 	// replaced by a file either. Only now does a directory holding an
 	// unreadable file hold something the plan does not track.
 	blocked := plan.dirsHoldingUntracked(written)
 	plan.drop(blocked)
-	if left := slices.Concat(unreadable, blocked); len(left) > 0 {
+	if left := slices.Concat(unreadable, locked, blocked); len(left) > 0 {
 		kept = append(kept, left...)
 		written, removed = tree.Changed(current, plan.targetListing())
 	}
@@ -264,6 +267,18 @@ func (p *restorePlan) dirsHoldingUntracked(paths []string) []string {
 		}
 	}
 	return blocked
+}
+
+// lockedPaths returns the paths among paths that exist now and are locked,
+// as Finder's Locked checkbox does.
+func (p *restorePlan) lockedPaths(paths []string) []string {
+	var locked []string
+	for _, rel := range paths {
+		if _, isCurrent := p.current[rel]; isCurrent && clone.IsLocked(p.path(rel)) {
+			locked = append(locked, rel)
+		}
+	}
+	return locked
 }
 
 // drop removes paths from the plan, so the restore leaves them as they are.
