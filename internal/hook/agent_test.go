@@ -13,36 +13,6 @@ import (
 	"github.com/shimlabs/undo/internal/testutil"
 )
 
-// agentHome points every agent's configuration at a fresh home directory and
-// returns it.
-func agentHome(t *testing.T) string {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
-	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
-	t.Setenv("GEMINI_CLI_HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	return home
-}
-
-// privateBinary returns the path of an undo binary in a directory only the
-// test user can write to, outside the temporary directory, which Install
-// refuses. It moves TMPDIR aside so the test's own directories qualify.
-func privateBinary(t *testing.T, dirName string) string {
-	t.Helper()
-	parent := t.TempDir()
-	t.Setenv("TMPDIR", filepath.Join(parent, "tmp"))
-	if err := os.MkdirAll(filepath.Join(parent, "tmp"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(parent, dirName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(dir, "undo")
-}
-
 func readJSONFile(t *testing.T, path string) map[string]any {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -96,11 +66,11 @@ func undoEntries(t *testing.T, agent Agent, settings map[string]any) (all []any,
 func TestInstallKeepsOtherSettings(t *testing.T) {
 	for _, tc := range settingsCases {
 		t.Run(tc.agent.Name, func(t *testing.T) {
-			home := agentHome(t)
+			home := testutil.AgentHome(t)
 			path := filepath.Join(home, tc.file)
 			testutil.WriteFile(t, path, tc.existing)
 
-			got, err := tc.agent.Install(privateBinary(t, "bin"))
+			got, err := tc.agent.Install(testutil.PrivateBinary(t, "bin"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,16 +95,20 @@ func TestInstallKeepsOtherSettings(t *testing.T) {
 func TestReinstallUpdatesInPlace(t *testing.T) {
 	for _, tc := range settingsCases {
 		t.Run(tc.agent.Name, func(t *testing.T) {
-			home := agentHome(t)
+			home := testutil.AgentHome(t)
 			path := filepath.Join(home, tc.file)
 			testutil.WriteFile(t, path, tc.existing)
-			tc.agent.Install(privateBinary(t, "bin"))
+			if _, err := tc.agent.Install(testutil.PrivateBinary(t, "bin")); err != nil {
+				t.Fatal(err)
+			}
 			settings := readJSONFile(t, path)
 			setHookEntries(settings, settingsEvent(tc.agent), append(hookEntries(settings, settingsEvent(tc.agent)), map[string]any{"matcher": "later"}))
 			writeSettings(path, settings)
 
-			updated := privateBinary(t, "new-bin")
-			tc.agent.Install(updated)
+			updated := testutil.PrivateBinary(t, "new-bin")
+			if _, err := tc.agent.Install(updated); err != nil {
+				t.Fatal(err)
+			}
 
 			all, ours := undoEntries(t, tc.agent, readJSONFile(t, path))
 			data, _ := json.Marshal(all)
@@ -148,10 +122,12 @@ func TestReinstallUpdatesInPlace(t *testing.T) {
 func TestUninstallRemovesOnlyOurs(t *testing.T) {
 	for _, tc := range settingsCases {
 		t.Run(tc.agent.Name, func(t *testing.T) {
-			home := agentHome(t)
+			home := testutil.AgentHome(t)
 			path := filepath.Join(home, tc.file)
 			testutil.WriteFile(t, path, tc.existing)
-			tc.agent.Install(privateBinary(t, "bin"))
+			if _, err := tc.agent.Install(testutil.PrivateBinary(t, "bin")); err != nil {
+				t.Fatal(err)
+			}
 
 			if _, err := tc.agent.Uninstall(); err != nil {
 				t.Fatal(err)
@@ -173,9 +149,9 @@ func TestUninstallRemovesOnlyOurs(t *testing.T) {
 }
 
 func TestInstallCursorCreatesVersion(t *testing.T) {
-	home := agentHome(t)
+	home := testutil.AgentHome(t)
 
-	if _, err := cursor.Install(privateBinary(t, "bin")); err != nil {
+	if _, err := cursor.Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -186,11 +162,11 @@ func TestInstallCursorCreatesVersion(t *testing.T) {
 }
 
 func TestInstallRefusesInvalidJSON(t *testing.T) {
-	home := agentHome(t)
+	home := testutil.AgentHome(t)
 	path := filepath.Join(home, ".cursor", "hooks.json")
 	testutil.WriteFile(t, path, "{\n  // a comment\n  \"version\": 1\n}")
 
-	if _, err := cursor.Install(privateBinary(t, "bin")); err == nil {
+	if _, err := cursor.Install(testutil.PrivateBinary(t, "bin")); err == nil {
 		t.Fatal("Install rewrote a file it could not parse")
 	}
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "// a comment") {
@@ -199,10 +175,10 @@ func TestInstallRefusesInvalidJSON(t *testing.T) {
 }
 
 func TestInstallOpenCodeWritesPlugin(t *testing.T) {
-	home := agentHome(t)
+	home := testutil.AgentHome(t)
 	path := filepath.Join(home, ".config", "opencode", "plugins", "undo.js")
 
-	binary := privateBinary(t, "my tools")
+	binary := testutil.PrivateBinary(t, "my tools")
 	got, err := openCode.Install(binary)
 	if err != nil {
 		t.Fatal(err)
@@ -230,14 +206,14 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 }
 
 func TestUninstallOpenCodeKeepsForeignPlugin(t *testing.T) {
-	home := agentHome(t)
+	home := testutil.AgentHome(t)
 	path := filepath.Join(home, ".config", "opencode", "plugins", "undo.js")
 	testutil.WriteFile(t, path, "export const Mine = async () => ({})\n")
 
 	if _, err := openCode.Uninstall(); err == nil {
 		t.Fatal("Uninstall removed a plugin undo did not write")
 	}
-	if _, err := openCode.Install(privateBinary(t, "bin")); err == nil {
+	if _, err := openCode.Install(testutil.PrivateBinary(t, "bin")); err == nil {
 		t.Fatal("Install overwrote a plugin undo did not write")
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -257,7 +233,7 @@ func TestFindAgent(t *testing.T) {
 }
 
 func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
-	home := agentHome(t)
+	home := testutil.AgentHome(t)
 	path := filepath.Join(home, ".claude", "settings.json")
 	testutil.WriteFile(t, path, `{"hooks": {"PreToolUse": [
 		{"matcher": "Bash", "hooks": [
@@ -267,7 +243,7 @@ func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 		{"matcher": "Bash", "hooks": [{"type": "command", "command": "/usr/local/bin/notify hook claude-code"}]}
 	]}}`)
 
-	binary := privateBinary(t, "bin")
+	binary := testutil.PrivateBinary(t, "bin")
 	if _, err := claude.Install(binary); err != nil {
 		t.Fatal(err)
 	}
@@ -291,11 +267,13 @@ func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 }
 
 func TestInstallKeepsOtherProgramsNamedLikeHooks(t *testing.T) {
-	home := agentHome(t)
+	home := testutil.AgentHome(t)
 	path := filepath.Join(home, ".claude", "settings.json")
 	testutil.WriteFile(t, path, `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh hook claude"}]}]}}`)
 
-	claude.Install(privateBinary(t, "bin"))
+	if _, err := claude.Install(testutil.PrivateBinary(t, "bin")); err != nil {
+		t.Fatal(err)
+	}
 	claude.Uninstall()
 
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "guard.sh hook claude") {
@@ -304,8 +282,8 @@ func TestInstallKeepsOtherProgramsNamedLikeHooks(t *testing.T) {
 }
 
 func TestInstallQuotesBinaryPath(t *testing.T) {
-	home := agentHome(t)
-	binary := privateBinary(t, "R&D tools")
+	home := testutil.AgentHome(t)
+	binary := testutil.PrivateBinary(t, "R&D tools")
 	if _, err := claude.Install(binary); err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +294,7 @@ func TestInstallQuotesBinaryPath(t *testing.T) {
 }
 
 func TestInstallRefusesTemporaryBinary(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	for _, binary := range []string{filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "undo"), "/tmp/undo", "/var/tmp/undo"} {
 		if _, err := claude.Install(binary); !errors.Is(err, ErrUnsafeBinary) {
 			t.Errorf("Install(%s) = %v, want ErrUnsafeBinary", binary, err)
@@ -325,7 +303,7 @@ func TestInstallRefusesTemporaryBinary(t *testing.T) {
 }
 
 func TestInstallKeepsSymlinkedSettings(t *testing.T) {
-	home := agentHome(t)
+	home := testutil.AgentHome(t)
 	dotfiles := filepath.Join(t.TempDir(), "settings.json")
 	testutil.WriteFile(t, dotfiles, `{"model": "opus"}`)
 	link := filepath.Join(home, ".claude", "settings.json")
@@ -334,7 +312,7 @@ func TestInstallKeepsSymlinkedSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := claude.Install(privateBinary(t, "bin")); err != nil {
+	if _, err := claude.Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {

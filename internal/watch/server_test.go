@@ -25,7 +25,7 @@ func newServerProject(t *testing.T) (*store.Store, string, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(socketDir) })
-	root, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
 	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	projectStore, err := store.Create(t.TempDir(), root)
 	if err != nil {

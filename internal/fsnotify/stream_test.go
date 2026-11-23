@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 type collector struct {
@@ -62,7 +64,7 @@ func startCollecting(t *testing.T, root string) *collector {
 }
 
 func TestStreamDeliversWritesBeforeLaterMarker(t *testing.T) {
-	root, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
 	collected := startCollecting(t, root)
 
 	path := filepath.Join(root, "a.txt")
@@ -76,7 +78,7 @@ func TestStreamDeliversWritesBeforeLaterMarker(t *testing.T) {
 }
 
 func TestStreamDeliversDeletesBeforeLaterMarker(t *testing.T) {
-	root, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
 	nested := filepath.Join(root, "src", "lib", "x.go")
 	os.MkdirAll(filepath.Dir(nested), 0o755)
 	os.WriteFile(nested, []byte("x"), 0o644)
@@ -92,7 +94,7 @@ func TestStreamDeliversDeletesBeforeLaterMarker(t *testing.T) {
 }
 
 func TestStreamCloseWhileEventsArrive(t *testing.T) {
-	root, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
 	for round := range 50 {
 		stream, err := NewStream([]string{root}, SinceNow, nil, func([]Event) {})
 		if err != nil {
@@ -109,7 +111,7 @@ func TestStreamCloseWhileEventsArrive(t *testing.T) {
 }
 
 func TestStreamSeesFilesInNewDirectories(t *testing.T) {
-	root, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
 	collected := startCollecting(t, root)
 
 	nested := filepath.Join(root, "a", "b", "c", "f.txt")
@@ -124,8 +126,8 @@ func TestStreamSeesFilesInNewDirectories(t *testing.T) {
 }
 
 func TestStreamWatchesRecreatedRoot(t *testing.T) {
-	root, _ := filepath.EvalSymlinks(t.TempDir())
-	markers, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
+	markers := testutil.TempDir(t)
 	var collected collector
 	stream, err := NewStream([]string{root, markers}, SinceNow, nil, collected.add)
 	if err != nil {

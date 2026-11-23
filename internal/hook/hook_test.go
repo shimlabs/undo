@@ -8,17 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shimlabs/undo/internal/testutil"
+
 	"github.com/shimlabs/undo/internal/store"
 )
 
 // newProject returns a project folder and a store home for its checkpoints.
 func newProject(t *testing.T) (root, storeHome string) {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root, t.TempDir()
+	return testutil.TempDir(t), t.TempDir()
 }
 
 func listCheckpoints(t *testing.T, storeHome, root string) []store.Checkpoint {
@@ -57,7 +55,7 @@ func TestHandleLabelsEachAgentsEvents(t *testing.T) {
 		{"opencode patch", openCode, `{"cwd":"ROOT","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: a.go\n*** End Patch"}}`, "apply_patch a.go"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			agentHome(t)
+			testutil.AgentHome(t)
 			root, storeHome := newProject(t)
 			t.Chdir(t.TempDir())
 
@@ -75,7 +73,7 @@ func TestHandleLabelsEachAgentsEvents(t *testing.T) {
 }
 
 func TestHandleRecordsAgentAndSession(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	root, storeHome := newProject(t)
 	event := `{"cwd":"` + root + `","session_id":"abc123","tool_name":"Bash","tool_input":{"command":"ls"}}`
 
@@ -89,7 +87,7 @@ func TestHandleRecordsAgentAndSession(t *testing.T) {
 }
 
 func TestHandleFindsProjectFromEnvironment(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	root, storeHome := newProject(t)
 	t.Chdir(t.TempDir())
 	t.Setenv("CLAUDE_PROJECT_DIR", root)
@@ -104,7 +102,7 @@ func TestHandleFindsProjectFromEnvironment(t *testing.T) {
 }
 
 func TestClaudeHookStepsAsideForCursor(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	root, storeHome := newProject(t)
 	event := `{"cwd":"` + root + `","tool_name":"Shell","tool_input":{"command":"ls"},"cursor_version":"3.17.8"}`
 
@@ -115,7 +113,7 @@ func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 		t.Fatalf("checkpoints = %d, want 1 while the Cursor hook is not installed", len(checkpoints))
 	}
 
-	if _, err := cursor.Install(privateBinary(t, "bin")); err != nil {
+	if _, err := cursor.Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
 	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
@@ -127,7 +125,7 @@ func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 }
 
 func TestHandleUsesSessionProject(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	root, storeHome := newProject(t)
 	subdir := filepath.Join(root, "web")
 	os.Mkdir(subdir, 0o755)

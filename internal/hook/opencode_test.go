@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 // runPlugin loads the installed OpenCode plugin with Bun, the runtime
@@ -47,7 +49,7 @@ func installPlugin(t *testing.T, binary string) string {
 }
 
 func TestOpenCodePluginSendsEvent(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	received := filepath.Join(t.TempDir(), "event.json")
 	fake := filepath.Join(t.TempDir(), "undo")
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncat > '"+received+"'\n"), 0o755); err != nil {
@@ -72,7 +74,7 @@ func TestOpenCodePluginSendsEvent(t *testing.T) {
 }
 
 func TestOpenCodePluginIgnoresReadOnlyTools(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	received := filepath.Join(t.TempDir(), "event.json")
 	fake := filepath.Join(t.TempDir(), "undo")
 	os.WriteFile(fake, []byte("#!/bin/sh\ncat > '"+received+"'\n"), 0o755)
@@ -86,7 +88,7 @@ func TestOpenCodePluginIgnoresReadOnlyTools(t *testing.T) {
 }
 
 func TestOpenCodePluginNeverBlocks(t *testing.T) {
-	agentHome(t)
+	testutil.AgentHome(t)
 	plugin := installPlugin(t, filepath.Join(t.TempDir(), "missing-undo"))
 
 	runPlugin(t, plugin, t.TempDir(), "bash", `{"command":"rm -rf build"}`)

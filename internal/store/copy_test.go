@@ -14,7 +14,7 @@ import (
 )
 
 func TestCopyModeRestoresExactly(t *testing.T) {
-	projectStore, root := newProject(t)
+	projectStore, root := newEmptyProject(t)
 	if err := projectStore.SetCopyMode(true); err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +68,8 @@ func TestTakeRefusesWithoutClones(t *testing.T) {
 	if !errors.Is(err, store.ErrCloneUnsupported) {
 		t.Fatalf("Take = %v, want ErrCloneUnsupported", err)
 	}
-	if list, _ := projectStore.List(); len(list) != 0 {
-		t.Fatalf("checkpoints = %v after refusing", list)
+	if checkpoints, _ := projectStore.List(); len(checkpoints) != 0 {
+		t.Fatalf("checkpoints = %v after refusing", checkpoints)
 	}
 }
 

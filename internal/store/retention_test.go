@@ -15,9 +15,9 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-func newProject(t *testing.T) (*store.Store, string) {
+func newEmptyProject(t *testing.T) (*store.Store, string) {
 	t.Helper()
-	root, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
 	projectStore, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func history(t *testing.T, projectStore *store.Store, root string) []map[string]
 }
 
 func TestPruneMergesOldestIntoBase(t *testing.T) {
-	projectStore, root := newProject(t)
+	projectStore, root := newEmptyProject(t)
 	states := history(t, projectStore, root)
 
 	merged, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40})
@@ -60,9 +60,9 @@ func TestPruneMergesOldestIntoBase(t *testing.T) {
 	if merged != 2 {
 		t.Fatalf("merged %d checkpoints, want 2", merged)
 	}
-	list, _ := projectStore.List()
-	if len(list) != 2 || list[0].ID != 3 || list[1].ID != 4 {
-		t.Fatalf("remaining checkpoints = %+v", list)
+	checkpoints, _ := projectStore.List()
+	if len(checkpoints) != 2 || checkpoints[0].ID != 3 || checkpoints[1].ID != 4 {
+		t.Fatalf("remaining checkpoints = %+v", checkpoints)
 	}
 	for _, id := range []int{3, 4} {
 		if _, err := restore.Apply(projectStore, id, (*store.Store).Take); err != nil {
@@ -75,20 +75,20 @@ func TestPruneMergesOldestIntoBase(t *testing.T) {
 }
 
 func TestPruneByAgeKeepsLatest(t *testing.T) {
-	projectStore, root := newProject(t)
+	projectStore, root := newEmptyProject(t)
 	history(t, projectStore, root)
 
 	if _, err := projectStore.Prune(time.Now().Add(8*24*time.Hour), store.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
-	list, _ := projectStore.List()
-	if len(list) != 1 || list[0].ID != 4 {
-		t.Fatalf("remaining checkpoints = %+v, want only 4", list)
+	checkpoints, _ := projectStore.List()
+	if len(checkpoints) != 1 || checkpoints[0].ID != 4 {
+		t.Fatalf("remaining checkpoints = %+v, want only 4", checkpoints)
 	}
 }
 
 func TestUsageCountsOnlyUnsharedData(t *testing.T) {
-	projectStore, root := newProject(t)
+	projectStore, root := newEmptyProject(t)
 	data := strings.Repeat("x", 4<<20)
 	testutil.WriteFile(t, filepath.Join(root, "big.bin"), data)
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
@@ -114,7 +114,7 @@ func TestUsageCountsOnlyUnsharedData(t *testing.T) {
 }
 
 func TestPruneBySizeMergesUntilUnder(t *testing.T) {
-	projectStore, root := newProject(t)
+	projectStore, root := newEmptyProject(t)
 	for _, fill := range []string{"a", "b", "c"} {
 		testutil.WriteFile(t, filepath.Join(root, "big.bin"), strings.Repeat(fill, 2<<20))
 		if _, err := projectStore.Take(store.CheckpointOptions{Label: "write " + fill, Dir: root}); err != nil {
@@ -139,9 +139,9 @@ func TestPruneBySizeMergesUntilUnder(t *testing.T) {
 	if merged == 0 || after > 3<<20 {
 		t.Fatalf("merged %d, usage %d after pruning, want at most 3 MiB", merged, after)
 	}
-	list, _ := projectStore.List()
-	if list[len(list)-1].ID != 4 {
-		t.Fatalf("latest checkpoint is %d, want 4", list[len(list)-1].ID)
+	checkpoints, _ := projectStore.List()
+	if checkpoints[len(checkpoints)-1].ID != 4 {
+		t.Fatalf("latest checkpoint is %d, want 4", checkpoints[len(checkpoints)-1].ID)
 	}
 	if _, err := restore.Apply(projectStore, 4, (*store.Store).Take); err != nil {
 		t.Fatal(err)

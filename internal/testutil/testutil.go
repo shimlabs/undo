@@ -59,3 +59,34 @@ func TempDir(t testing.TB) string {
 	}
 	return dir
 }
+
+// AgentHome points every agent's configuration at a fresh home directory and
+// returns it.
+func AgentHome(t testing.TB) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("GEMINI_CLI_HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	return home
+}
+
+// PrivateBinary returns the path of an undo binary in dirName, a directory
+// only the test user can write to and outside the temporary directory, both
+// of which installing a hook requires. It moves TMPDIR aside so the test's
+// own directories qualify.
+func PrivateBinary(t testing.TB, dirName string) string {
+	t.Helper()
+	parent := t.TempDir()
+	t.Setenv("TMPDIR", filepath.Join(parent, "tmp"))
+	if err := os.MkdirAll(filepath.Join(parent, "tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(parent, dirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "undo")
+}

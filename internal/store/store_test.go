@@ -46,7 +46,7 @@ func TestOpenNeverCreates(t *testing.T) {
 }
 
 func TestCreatePutsStoreNextToProjectWhenHomeIsInside(t *testing.T) {
-	root, _ := filepath.EvalSymlinks(t.TempDir())
+	root := testutil.TempDir(t)
 
 	projectStore, err := Create(filepath.Join(root, "Library", "undo"), root)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestCreatePutsStoreNextToProjectWhenHomeIsInside(t *testing.T) {
 }
 
 func TestOpenFindsStoreNextToDeletedProject(t *testing.T) {
-	parent, _ := filepath.EvalSymlinks(t.TempDir())
+	parent := testutil.TempDir(t)
 	root := filepath.Join(parent, "app")
 	os.Mkdir(root, 0o755)
 	home := filepath.Join(root, "Library", "undo")
@@ -130,7 +130,7 @@ func TestStoresUnderFindsDeletedProjects(t *testing.T) {
 func TestCreateRefusesPlantedStoreNextToProject(t *testing.T) {
 	for _, plant := range []string{"symlink", "shared directory"} {
 		t.Run(plant, func(t *testing.T) {
-			parent, _ := filepath.EvalSymlinks(t.TempDir())
+			parent := testutil.TempDir(t)
 			root := filepath.Join(parent, "proj")
 			os.Mkdir(root, 0o755)
 			planted := filepath.Join(parent, ".undo-"+project.ID(root))
@@ -149,7 +149,7 @@ func TestCreateRefusesPlantedStoreNextToProject(t *testing.T) {
 }
 
 func TestCreateRefusesSymlinkedHome(t *testing.T) {
-	realHome, _ := filepath.EvalSymlinks(t.TempDir())
+	realHome := testutil.TempDir(t)
 	link := filepath.Join(t.TempDir(), "home")
 	if err := os.Symlink(realHome, link); err != nil {
 		t.Fatal(err)
@@ -162,10 +162,10 @@ func TestCreateRefusesSymlinkedHome(t *testing.T) {
 }
 
 func TestStoredPathsCannotLeaveProject(t *testing.T) {
-	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
-	outside, _ := filepath.EvalSymlinks(t.TempDir())
+	projectStore, _ := newProject(t, map[string]string{"a.txt": "a"})
+	outside := testutil.TempDir(t)
 	testutil.WriteFile(t, filepath.Join(outside, "precious"), "data")
-	projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
+	take(t, projectStore, "first")
 	escape, _ := filepath.Rel(projectStore.baseDir(), outside)
 	writeJSON(filepath.Join(projectStore.layerDir(1), "manifest.json"), Manifest{Deleted: []string{escape}})
 
@@ -173,7 +173,7 @@ func TestStoredPathsCannotLeaveProject(t *testing.T) {
 		t.Fatal("State accepted a stored path outside the project")
 	}
 	writeJSON(projectStore.mergePath(), pendingMerge{Through: 1})
-	projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
+	take(t, projectStore, "second")
 	if _, err := os.Stat(filepath.Join(outside, "precious")); err != nil {
 		t.Fatalf("a planted merge deleted a file outside the store: %v", err)
 	}

@@ -19,26 +19,11 @@ import (
 func newProject(t *testing.T) string {
 	t.Helper()
 	t.Setenv("UNDO_HOME", t.TempDir())
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := testutil.TempDir(t)
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("keep me"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root
-}
-
-// privateBinary returns the path of an undo binary in a directory only the
-// test user can write to, outside the temporary directory, which install
-// refuses.
-func privateBinary(t *testing.T) string {
-	t.Helper()
-	parent := t.TempDir()
-	t.Setenv("TMPDIR", filepath.Join(parent, "tmp"))
-	os.MkdirAll(filepath.Join(parent, "tmp"), 0o700)
-	os.MkdirAll(filepath.Join(parent, "bin"), 0o755)
-	return filepath.Join(parent, "bin", "undo")
 }
 
 func defaultStoreHome(t *testing.T) string {
@@ -62,7 +47,7 @@ func run(t *testing.T, dir string, stdin string, args ...string) (int, string) {
 		Stderr:     &out,
 		StoreHome:  defaultStoreHome(t),
 		SocketDir:  watch.DefaultSocketDir(),
-		Executable: privateBinary(t),
+		Executable: testutil.PrivateBinary(t, "bin"),
 	})
 	return code, out.String()
 }
@@ -350,12 +335,7 @@ func TestRefusalExplainsCopyMode(t *testing.T) {
 
 func TestStatusShowsInstalledHooks(t *testing.T) {
 	root := newProject(t)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
-	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
-	t.Setenv("GEMINI_CLI_HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	testutil.AgentHome(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
 
 	_, out := run(t, root, "", "status")
@@ -376,7 +356,7 @@ func TestStatusShowsInstalledHooks(t *testing.T) {
 
 func TestUndoFindsDeletedProject(t *testing.T) {
 	t.Setenv("UNDO_HOME", t.TempDir())
-	parent, _ := filepath.EvalSymlinks(t.TempDir())
+	parent := testutil.TempDir(t)
 	root := filepath.Join(parent, "app")
 	os.MkdirAll(root, 0o755)
 	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
@@ -462,7 +442,7 @@ func TestErrorsAreEscaped(t *testing.T) {
 }
 
 func TestListInHomeFindsDeletedProject(t *testing.T) {
-	home, _ := filepath.EvalSymlinks(t.TempDir())
+	home := testutil.TempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("UNDO_HOME", t.TempDir())
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())

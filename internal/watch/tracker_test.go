@@ -20,10 +20,7 @@ import (
 
 func newTrackerWithFiles(t *testing.T) (*tracker, *store.Store, string) {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := testutil.TempDir(t)
 	for path, content := range map[string]string{
 		"README.md":       "# demo",
 		"src/main.go":     "package main",
@@ -221,7 +218,7 @@ func TestTrackerAppliesDirectoryPatterns(t *testing.T) {
 }
 
 func TestTrackerWithRootTypedInOtherCase(t *testing.T) {
-	parent, _ := filepath.EvalSymlinks(t.TempDir())
+	parent := testutil.TempDir(t)
 	stored := filepath.Join(parent, "MyProj")
 	testutil.WriteFile(t, filepath.Join(stored, "a.txt"), "v1")
 	typed := filepath.Join(parent, strings.ToLower("MyProj"))

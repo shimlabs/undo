@@ -18,12 +18,18 @@ import (
 	"github.com/shimlabs/undo/internal/tree"
 )
 
-func newProject(t *testing.T, files map[string]string) (*Store, string) {
+func take(t *testing.T, projectStore *Store, label string) Checkpoint {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
+	checkpoint, err := projectStore.Take(CheckpointOptions{Label: label, Dir: projectStore.Root()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return checkpoint
+}
+
+func newProject(t *testing.T, files map[string]string) (*Store, string) {
+	t.Helper()
+	root := testutil.TempDir(t)
 	for path, content := range files {
 		testutil.WriteFile(t, filepath.Join(root, path), content)
 	}
@@ -57,12 +63,12 @@ func TestFirstTakeClonesBase(t *testing.T) {
 	if got := readFile(t, filepath.Join(projectStore.Dir(), "base", "a.txt")); got != "alpha" {
 		t.Fatalf("base a.txt = %q", got)
 	}
-	list, err := projectStore.List()
+	checkpoints, err := projectStore.List()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].Label != "first" || list[0].Dir != root {
-		t.Fatalf("List() = %+v", list)
+	if len(checkpoints) != 1 || checkpoints[0].Label != "first" || checkpoints[0].Dir != root {
+		t.Fatalf("List() = %+v", checkpoints)
 	}
 }
 
@@ -173,7 +179,7 @@ func TestFirstTakeNeverReadsExcluded(t *testing.T) {
 
 func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
-	projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
+	take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
 	os.Remove(filepath.Join(root, "b.txt"))
 	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
@@ -205,7 +211,7 @@ func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
 
 func TestCommitRecordsGivenChanges(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
-	first, _ := projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
+	first := take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
 	os.Remove(filepath.Join(root, "b.txt"))
 
@@ -232,8 +238,8 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 
 func TestCommitRefusesStaleChanges(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha"})
-	first, _ := projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
-	projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
+	first := take(t, projectStore, "first")
+	take(t, projectStore, "second")
 	current, _ := projectStore.ListingAt(first.ID)
 
 	if _, err := projectStore.Commit(first.ID, CheckpointOptions{Label: "stale", Dir: root}, Changes{Listing: current}); !errors.Is(err, ErrStale) {
@@ -290,7 +296,7 @@ func TestTakeShortensLongLabels(t *testing.T) {
 
 func TestTakeClearsLeftoverLayer(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
-	projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
+	take(t, projectStore, "first")
 	testutil.WriteFile(t, projectStore.layerFile(2, "stale.txt"), "left by a crash")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
 
@@ -305,7 +311,7 @@ func TestTakeClearsLeftoverLayer(t *testing.T) {
 
 func TestLatestIgnoresLineCutOffByCrash(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
-	first, _ := projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
+	first := take(t, projectStore, "first")
 	file, _ := os.OpenFile(projectStore.indexPath(), os.O_APPEND|os.O_WRONLY, 0)
 	file.WriteString(`{"id":2,"time":"2026-`)
 	file.Close()
@@ -351,7 +357,7 @@ func TestMergeIntoReadOnlyDirectory(t *testing.T) {
 
 func TestFailedMergeKeepsCheckpointsWorking(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
-	projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
+	take(t, projectStore, "first")
 	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +379,7 @@ func TestPruneIfDueRunsHourly(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
 	for i := range 3 {
 		testutil.WriteFile(t, filepath.Join(root, "a.txt"), strings.Repeat("a", i+2))
-		projectStore.Take(CheckpointOptions{Label: "edit", Dir: root})
+		take(t, projectStore, "edit")
 	}
 	keepOne := Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
 	now := time.Now()

@@ -68,9 +68,9 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	if _, err := projectStore.Prune(time.Now(), unlimited); err != nil {
 		t.Fatal(err)
 	}
-	list, _ := projectStore.List()
-	if len(list) != 2 || list[0].ID != 3 {
-		t.Fatalf("checkpoints = %+v, want 3 and 4", list)
+	checkpoints, _ := projectStore.List()
+	if len(checkpoints) != 2 || checkpoints[0].ID != 3 {
+		t.Fatalf("checkpoints = %+v, want 3 and 4", checkpoints)
 	}
 	for id, want := range map[int]map[string][32]byte{3: wantAtThird, 4: wantAtFourth} {
 		got := stateHashes(t, projectStore, id)
