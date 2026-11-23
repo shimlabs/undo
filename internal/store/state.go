@@ -37,7 +37,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 		if cp.ID > id {
 			break
 		}
-		manifest, err := s.Layer(cp.ID)
+		manifest, err := s.Manifest(cp.ID)
 		if err != nil {
 			return nil, err
 		}

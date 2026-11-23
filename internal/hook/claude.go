@@ -54,10 +54,10 @@ func UninstallClaude() (string, error) {
 // checkpoint with checkpoint. Errors are logged in the store, and the agent is
 // never blocked.
 func HandleClaude(in io.Reader, checkpoint store.Checkpointer) error {
-	return handle(in, checkpoint, claudeLabel)
+	return handlePreToolUse(in, checkpoint, claudeLabel)
 }
 
-func claudeLabel(event input, root string) string {
+func claudeLabel(event preToolUseInput, root string) string {
 	if event.ToolInput.Command != "" {
 		return event.ToolInput.Command
 	}

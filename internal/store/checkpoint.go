@@ -43,9 +43,9 @@ func (s *Store) Take(label, dir string) (Checkpoint, error) {
 	} else {
 		if previous, err = s.cloneBase(ex); err != nil {
 			os.RemoveAll(s.BaseDir())
-			return Checkpoint{}, cloneError(err)
+			return Checkpoint{}, toCloneError(err)
 		}
-		if err := s.saveGob("base.gob", previous); err != nil {
+		if err := s.writeListing("base.gob", previous); err != nil {
 			return Checkpoint{}, err
 		}
 	}
@@ -95,7 +95,7 @@ func (s *Store) commit(list []Checkpoint, label, dir string, current tree.Listin
 	manifest, err := s.cloneChanged(id, changed, current)
 	if err != nil {
 		os.RemoveAll(s.layerDir(id))
-		return Checkpoint{}, cloneError(err)
+		return Checkpoint{}, toCloneError(err)
 	}
 	manifest.Deleted = append(manifest.Deleted, deleted...)
 
@@ -112,7 +112,7 @@ func (s *Store) commit(list []Checkpoint, label, dir string, current tree.Listin
 	return cp, nil
 }
 
-func cloneError(err error) error {
+func toCloneError(err error) error {
 	if errors.Is(err, errors.ErrUnsupported) {
 		return ErrCloneUnsupported
 	}
@@ -124,7 +124,7 @@ func cloneError(err error) error {
 // matches that listing, so the first checkpoint records it again. Excluded
 // paths are never read.
 func (s *Store) cloneBase(ex *exclude.Matcher) (tree.Listing, error) {
-	before, excluded, err := tree.ScanAll(s.root, ex)
+	before, excluded, err := tree.ScanWithExcluded(s.root, ex)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +232,7 @@ func (s *Store) cloneStable(id int, rel string, entry tree.Entry) (tree.Entry, b
 // BaseListing returns the listing of the project at the moment the base was
 // cloned.
 func (s *Store) BaseListing() (tree.Listing, error) {
-	return s.loadGob("base.gob")
+	return s.readListing("base.gob")
 }
 
 type savedListing struct {
@@ -244,7 +244,7 @@ type savedListing struct {
 // copy when that matches, and otherwise rebuilds the listing from the base and
 // the layers.
 func (s *Store) ListingAt(id int) (tree.Listing, error) {
-	data, err := os.ReadFile(filepath.Join(s.dir, "tree.gob"))
+	data, err := os.ReadFile(filepath.Join(s.dir, "listing.gob"))
 	if err == nil {
 		var saved savedListing
 		if gob.NewDecoder(bytes.NewReader(data)).Decode(&saved) == nil && saved.ID == id {
@@ -267,10 +267,10 @@ func (s *Store) saveListing(id int, listing tree.Listing) error {
 	if err := gob.NewEncoder(&buf).Encode(savedListing{ID: id, Listing: listing}); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(s.dir, "tree.gob"), buf.Bytes())
+	return writeFileAtomic(filepath.Join(s.dir, "listing.gob"), buf.Bytes())
 }
 
-func (s *Store) loadGob(name string) (tree.Listing, error) {
+func (s *Store) readListing(name string) (tree.Listing, error) {
 	data, err := os.ReadFile(filepath.Join(s.dir, name))
 	if err != nil {
 		return nil, err
@@ -280,10 +280,10 @@ func (s *Store) loadGob(name string) (tree.Listing, error) {
 	return listing, err
 }
 
-func (s *Store) saveGob(name string, listing tree.Listing) error {
+func (s *Store) writeListing(name string, listing tree.Listing) error {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(listing); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(s.dir, name), buf.Bytes())
+	return writeFileAtomic(filepath.Join(s.dir, name), buf.Bytes())
 }

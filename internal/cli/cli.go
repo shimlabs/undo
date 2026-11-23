@@ -97,26 +97,26 @@ func dispatch(args []string, env Env) error {
 	}
 	switch command {
 	case "":
-		return undoLast(rest, env)
+		return undoCommand(rest, env)
 	case "list":
-		return list(env)
+		return listCommand(env)
 	case "diff":
-		return diff(rest, env)
+		return diffCommand(rest, env)
 	case "to":
-		return to(rest, env)
+		return toCommand(rest, env)
 	case "run":
 		return runCommand(rest, env)
 	case "checkpoint":
-		return checkpoint(rest, env)
+		return checkpointCommand(rest, env)
 	case "status":
-		return status(env)
+		return statusCommand(env)
 	case "install":
-		return install(rest, env)
+		return installCommand(rest, env)
 	case "uninstall":
-		return uninstall(rest, env)
+		return uninstallCommand(rest, env)
 	case "hook":
 		checkpoint := func(s *store.Store, label, dir string) (store.Checkpoint, error) {
-			return take(s, label, dir, env)
+			return takeCheckpoint(s, label, dir, env)
 		}
 		// The handlers log their failures in the store. Returning them would
 		// make the agent see a failed hook.
@@ -127,7 +127,7 @@ func dispatch(args []string, env Env) error {
 		}
 		return nil
 	case "watch":
-		return serve(env)
+		return watchCommand(env)
 	case "version":
 		fmt.Fprintln(env.Stdout, "undo", Version)
 		return nil
@@ -138,7 +138,7 @@ func dispatch(args []string, env Env) error {
 	return usageError{fmt.Sprintf("unknown command %q", command)}
 }
 
-func open(env Env) (*store.Store, error) {
+func openStore(env Env) (*store.Store, error) {
 	root, err := project.Root(env.Dir)
 	if err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ type flags struct {
 	args  []string
 }
 
-func parse(args []string) (flags, error) {
+func parseFlags(args []string) (flags, error) {
 	var f flags
 	for i := 0; i < len(args); i++ {
 		switch arg := args[i]; {
@@ -179,12 +179,12 @@ func parse(args []string) (flags, error) {
 	return f, nil
 }
 
-func undoLast(args []string, env Env) error {
-	f, err := parse(args)
+func undoCommand(args []string, env Env) error {
+	f, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
-	s, err := open(env)
+	s, err := openStore(env)
 	if err != nil {
 		return err
 	}
@@ -198,27 +198,27 @@ func undoLast(args []string, env Env) error {
 	return restoreTo(s, cps[len(cps)-1], f.yes, env)
 }
 
-func to(args []string, env Env) error {
-	f, err := parse(args)
+func toCommand(args []string, env Env) error {
+	f, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
 	if len(f.args) != 1 {
 		return usageError{"to needs a checkpoint id"}
 	}
-	s, cp, err := find(f.args[0], env)
+	s, cp, err := findCheckpoint(f.args[0], env)
 	if err != nil {
 		return err
 	}
 	return restoreTo(s, cp, f.yes, env)
 }
 
-func find(arg string, env Env) (*store.Store, store.Checkpoint, error) {
+func findCheckpoint(arg string, env Env) (*store.Store, store.Checkpoint, error) {
 	id, err := strconv.Atoi(arg)
 	if err != nil {
 		return nil, store.Checkpoint{}, usageError{fmt.Sprintf("%q is not a checkpoint id", arg)}
 	}
-	s, err := open(env)
+	s, err := openStore(env)
 	if err != nil {
 		return nil, store.Checkpoint{}, err
 	}
@@ -238,7 +238,7 @@ func find(arg string, env Env) (*store.Store, store.Checkpoint, error) {
 // With yes, it skips that preview, which costs a scan of the project, and shows
 // the changes it made instead.
 func restoreTo(s *store.Store, cp store.Checkpoint, yes bool, env Env) error {
-	fmt.Fprintf(env.Stdout, "Checkpoint %d, %s, before: %s\n", cp.ID, ago(cp.Time), cp.Label)
+	fmt.Fprintf(env.Stdout, "Checkpoint %d, %s, before: %s\n", cp.ID, timeAgo(cp.Time), cp.Label)
 	if !yes {
 		changes, err := restore.Plan(s, cp.ID)
 		if err != nil {
@@ -254,7 +254,7 @@ func restoreTo(s *store.Store, cp store.Checkpoint, yes bool, env Env) error {
 		}
 	}
 	applied, err := restore.Apply(s, cp.ID, func(s *store.Store, label, dir string) (store.Checkpoint, error) {
-		return take(s, label, dir, env)
+		return takeCheckpoint(s, label, dir, env)
 	})
 	if err != nil {
 		return err
@@ -303,15 +303,15 @@ func confirm(env Env, prompt string) bool {
 	return answer == "y" || answer == "yes"
 }
 
-func diff(args []string, env Env) error {
-	f, err := parse(args)
+func diffCommand(args []string, env Env) error {
+	f, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
 	if len(f.args) != 1 {
 		return usageError{"diff needs a checkpoint id"}
 	}
-	s, cp, err := find(f.args[0], env)
+	s, cp, err := findCheckpoint(f.args[0], env)
 	if err != nil {
 		return err
 	}
@@ -327,8 +327,8 @@ func diff(args []string, env Env) error {
 	return nil
 }
 
-func list(env Env) error {
-	s, err := open(env)
+func listCommand(env Env) error {
+	s, err := openStore(env)
 	if err != nil {
 		return err
 	}
@@ -345,17 +345,17 @@ func list(env Env) error {
 		if cp.Dir != "" && cp.Dir != s.Root() {
 			label += "  (in " + cp.Dir + ")"
 		}
-		fmt.Fprintf(env.Stdout, "%5d  %-9s  %s\n", cp.ID, ago(cp.Time), label)
+		fmt.Fprintf(env.Stdout, "%5d  %-9s  %s\n", cp.ID, timeAgo(cp.Time), label)
 	}
 	return nil
 }
 
-func checkpoint(args []string, env Env) error {
-	f, err := parse(args)
+func checkpointCommand(args []string, env Env) error {
+	f, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
-	s, err := open(env)
+	s, err := openStore(env)
 	if err != nil {
 		return err
 	}
@@ -364,7 +364,7 @@ func checkpoint(args []string, env Env) error {
 			return err
 		}
 	}
-	cp, err := take(s, f.label, env.Dir, env)
+	cp, err := takeCheckpoint(s, f.label, env.Dir, env)
 	if err != nil {
 		return err
 	}
@@ -379,11 +379,11 @@ func runCommand(args []string, env Env) error {
 	if len(args) == 0 {
 		return usageError{"run needs a command"}
 	}
-	s, err := open(env)
+	s, err := openStore(env)
 	if err != nil {
 		return err
 	}
-	if _, err := take(s, strings.Join(args, " "), env.Dir, env); err != nil {
+	if _, err := takeCheckpoint(s, strings.Join(args, " "), env.Dir, env); err != nil {
 		return err
 	}
 	cmd := exec.Command(args[0], args[1:]...)
@@ -392,8 +392,8 @@ func runCommand(args []string, env Env) error {
 	return cmd.Run()
 }
 
-func status(env Env) error {
-	s, err := open(env)
+func statusCommand(env Env) error {
+	s, err := openStore(env)
 	if err != nil {
 		return err
 	}
@@ -418,7 +418,7 @@ func status(env Env) error {
 	if len(cps) == 0 {
 		fmt.Fprintln(env.Stdout, "Checkpoints  0")
 	} else {
-		fmt.Fprintf(env.Stdout, "Checkpoints  %d (oldest %s)\n", len(cps), ago(cps[0].Time))
+		fmt.Fprintf(env.Stdout, "Checkpoints  %d (oldest %s)\n", len(cps), timeAgo(cps[0].Time))
 	}
 	if s.CopyMode() {
 		fmt.Fprintln(env.Stdout, "Storage      full copies, because copy mode is on")
@@ -453,7 +453,7 @@ func formatBytes(size int64) string {
 	return fmt.Sprintf("%.1f %s", value, unit)
 }
 
-func ago(t time.Time) string {
+func timeAgo(t time.Time) string {
 	d := time.Since(t).Round(time.Second)
 	switch {
 	case d < time.Minute:
@@ -467,7 +467,7 @@ func ago(t time.Time) string {
 	}
 }
 
-func install(args []string, env Env) error {
+func installCommand(args []string, env Env) error {
 	if len(args) != 1 || (args[0] != "claude" && args[0] != "codex") {
 		return usageError{"install supports: claude, codex"}
 	}
@@ -496,7 +496,7 @@ func install(args []string, env Env) error {
 	return nil
 }
 
-func uninstall(args []string, env Env) error {
+func uninstallCommand(args []string, env Env) error {
 	var path string
 	var err error
 	switch {
@@ -514,17 +514,17 @@ func uninstall(args []string, env Env) error {
 	return nil
 }
 
-// take checkpoints through the project's watcher when one can be started,
+// takeCheckpoint checkpoints through the project's watcher when one can be started,
 // and by scanning the project otherwise.
-func take(s *store.Store, label, dir string, env Env) (store.Checkpoint, error) {
+func takeCheckpoint(s *store.Store, label, dir string, env Env) (store.Checkpoint, error) {
 	if env.StartWatcher == nil {
 		return s.Take(label, dir)
 	}
 	return watch.Checkpoint(s, label, dir, func() error { return env.StartWatcher(s.Root()) })
 }
 
-func serve(env Env) error {
-	s, err := open(env)
+func watchCommand(env Env) error {
+	s, err := openStore(env)
 	if err != nil {
 		return err
 	}

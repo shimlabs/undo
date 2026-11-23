@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// tree is a directory tree given as children per directory.
-func tree(depth, width int) map[string][]string {
+// buildTree is a directory buildTree given as children per directory.
+func buildTree(depth, width int) map[string][]string {
 	children := map[string][]string{}
 	var build func(dir string, level int)
 	build = func(dir string, level int) {
@@ -27,7 +27,7 @@ func tree(depth, width int) map[string][]string {
 }
 
 func TestDirsVisitsEveryDirectoryOnce(t *testing.T) {
-	children := tree(4, 5)
+	children := buildTree(4, 5)
 	var mu sync.Mutex
 	var visited []string
 
@@ -53,7 +53,7 @@ func TestDirsVisitsEveryDirectoryOnce(t *testing.T) {
 }
 
 func TestDirsReturnsFirstError(t *testing.T) {
-	children := tree(3, 4)
+	children := buildTree(3, 4)
 	failure := errors.New("unreadable")
 
 	err := Dirs("", 4, func(dir string) ([]string, error) {

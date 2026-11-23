@@ -46,13 +46,13 @@ type Listing map[string]Entry
 // Scan lists every path under root that ex does not exclude. Symlinks are
 // recorded but never followed.
 func Scan(root string, ex *exclude.Matcher) (Listing, error) {
-	listing, _, err := ScanAll(root, ex)
+	listing, _, err := ScanWithExcluded(root, ex)
 	return listing, err
 }
 
-// ScanAll works like Scan and also returns the excluded paths it skipped. It
-// does not go into excluded directories.
-func ScanAll(root string, ex *exclude.Matcher) (Listing, []string, error) {
+// ScanWithExcluded works like Scan and also returns the excluded paths it
+// skipped. It does not go into excluded directories.
+func ScanWithExcluded(root string, ex *exclude.Matcher) (Listing, []string, error) {
 	entry, err := Stat(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Listing{}, nil, nil
@@ -127,7 +127,7 @@ func Stat(path string) (Entry, error) {
 	if !ok {
 		return Entry{}, &fs.PathError{Op: "stat", Path: path, Err: errors.ErrUnsupported}
 	}
-	modTime, changeTime := times(st)
+	modTime, changeTime := statTimes(st)
 	entry := Entry{
 		Mode:       info.Mode(),
 		Size:       info.Size(),

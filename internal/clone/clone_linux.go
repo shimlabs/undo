@@ -16,7 +16,7 @@ func File(src, dst string) error {
 	err := copyTree(src, dst, func(src, dst *os.File) error {
 		err := unix.IoctlFileClone(int(dst.Fd()), int(src.Fd()))
 		if err != nil {
-			return &os.LinkError{Op: "ficlone", Old: src.Name(), New: dst.Name(), Err: unsupported(err)}
+			return &os.LinkError{Op: "ficlone", Old: src.Name(), New: dst.Name(), Err: markUnsupported(err)}
 		}
 		return nil
 	})
@@ -26,9 +26,9 @@ func File(src, dst string) error {
 	return err
 }
 
-// unsupported marks the errors FICLONE returns on filesystems without clones,
+// markUnsupported marks the errors FICLONE returns on filesystems without clones,
 // or across filesystems, as errors.ErrUnsupported.
-func unsupported(err error) error {
+func markUnsupported(err error) error {
 	for _, errno := range []error{unix.EXDEV, unix.EINVAL, unix.ENOTTY, unix.EOPNOTSUPP, unix.ENOSYS} {
 		if errors.Is(err, errno) {
 			return errors.Join(errors.ErrUnsupported, err)

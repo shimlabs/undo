@@ -47,7 +47,7 @@ func countUndoEntries(entries []any) int {
 	return n
 }
 
-const existing = `{
+const existingSettings = `{
   "model": "opus",
   "hooks": {
     "PreToolUse": [
@@ -57,7 +57,7 @@ const existing = `{
 }`
 
 func TestInstallPreservesSettings(t *testing.T) {
-	path := claudeConfig(t, existing)
+	path := claudeConfig(t, existingSettings)
 
 	if _, err := InstallClaude("/usr/local/bin/undo"); err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestInstallPreservesSettings(t *testing.T) {
 	if settings["model"] != "opus" {
 		t.Fatalf("model setting lost: %v", settings)
 	}
-	entries := preToolUse(settings)
+	entries := preToolUseEntries(settings)
 	if len(entries) != 2 || countUndoEntries(entries) != 1 {
 		t.Fatalf("PreToolUse = %v", entries)
 	}
@@ -79,18 +79,18 @@ func TestInstallCreatesSettings(t *testing.T) {
 	if _, err := InstallClaude("/usr/local/bin/undo"); err != nil {
 		t.Fatal(err)
 	}
-	if countUndoEntries(preToolUse(readSettingsFile(t, path))) != 1 {
+	if countUndoEntries(preToolUseEntries(readSettingsFile(t, path))) != 1 {
 		t.Fatal("hook not installed")
 	}
 }
 
 func TestInstallIdempotent(t *testing.T) {
-	path := claudeConfig(t, existing)
+	path := claudeConfig(t, existingSettings)
 
 	InstallClaude("/usr/local/bin/undo")
 	InstallClaude("/opt/bin/undo")
 
-	entries := preToolUse(readSettingsFile(t, path))
+	entries := preToolUseEntries(readSettingsFile(t, path))
 	if countUndoEntries(entries) != 1 {
 		t.Fatalf("PreToolUse = %v", entries)
 	}
@@ -101,14 +101,14 @@ func TestInstallIdempotent(t *testing.T) {
 }
 
 func TestUninstallRemovesOnlyOurs(t *testing.T) {
-	path := claudeConfig(t, existing)
+	path := claudeConfig(t, existingSettings)
 	InstallClaude("/usr/local/bin/undo")
 
 	if _, err := UninstallClaude(); err != nil {
 		t.Fatal(err)
 	}
 
-	entries := preToolUse(readSettingsFile(t, path))
+	entries := preToolUseEntries(readSettingsFile(t, path))
 	if len(entries) != 1 || countUndoEntries(entries) != 0 {
 		t.Fatalf("PreToolUse = %v", entries)
 	}

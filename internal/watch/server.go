@@ -130,14 +130,14 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 			return err
 		}
 		before := lastID
-		lastID = serveOne(conn, tracker, lastID)
+		lastID = handleConn(conn, tracker, lastID)
 		if lastID != before && time.Since(lastPrune) >= pruneInterval {
 			pruneDue = true
 		}
 	}
 }
 
-func serveOne(conn net.Conn, tracker *Tracker, lastID int) int {
+func handleConn(conn net.Conn, tracker *Tracker, lastID int) int {
 	defer conn.Close()
 	if err := conn.SetDeadline(time.Now().Add(requestTimeout)); err != nil {
 		return lastID

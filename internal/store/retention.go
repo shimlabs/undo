@@ -93,10 +93,10 @@ func (s *Store) mergeUntilUnder(maxBytes, usage int64) (int, error) {
 // Usage returns the bytes the store uses that are not shared with the
 // project.
 func (s *Store) Usage() (int64, error) {
-	return privateSizeAll(s.dir)
+	return diskUsage(s.dir)
 }
 
-func privateSizeAll(root string) (int64, error) {
+func diskUsage(root string) (int64, error) {
 	info, err := os.Lstat(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
@@ -195,7 +195,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 		}
 		freed += layerFreed
 	}
-	if err := s.saveGob("base.gob", base); err != nil {
+	if err := s.writeListing("base.gob", base); err != nil {
 		return freed, err
 	}
 	remaining := slices.DeleteFunc(list, func(cp Checkpoint) bool { return cp.ID <= pending.Through })
@@ -219,7 +219,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 // mergeLayer applies layer id to the base directory and to base, and returns
 // the bytes of base content it removed.
 func (s *Store) mergeLayer(id int, base tree.Listing) (int64, error) {
-	manifest, err := s.Layer(id)
+	manifest, err := s.Manifest(id)
 	if err != nil {
 		return 0, err
 	}
@@ -276,7 +276,7 @@ func (s *Store) mergeLayer(id int, base tree.Listing) (int64, error) {
 
 func (s *Store) removeFromBase(rel string) (int64, error) {
 	path := s.basePath(rel)
-	size, err := privateSizeAll(path)
+	size, err := diskUsage(path)
 	if err != nil {
 		return 0, err
 	}

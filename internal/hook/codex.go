@@ -57,12 +57,12 @@ func UninstallCodex() (string, error) {
 // with checkpoint. Errors are logged in the store, and the agent is never
 // blocked.
 func HandleCodex(in io.Reader, checkpoint store.Checkpointer) error {
-	return handle(in, checkpoint, codexLabel)
+	return handlePreToolUse(in, checkpoint, codexLabel)
 }
 
 // codexLabel uses the shell command, or for apply_patch, whose command is the
 // whole patch, the files the patch touches.
-func codexLabel(event input, _ string) string {
+func codexLabel(event preToolUseInput, _ string) string {
 	if event.ToolName != "apply_patch" {
 		return event.ToolInput.Command
 	}

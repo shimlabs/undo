@@ -22,41 +22,42 @@ var ErrWatchLimit = errors.New("inotify watch limit reached; raise it with: sudo
 
 // Stream delivers inotify events for a set of directory trees.
 type Stream struct {
-	file     *os.File
-	fd       int
-	roots    []string
-	skip     func(dir string) bool
-	onEvents func([]Event)
-	done     chan struct{}
+	file       *os.File
+	fd         int
+	roots      []string
+	shouldSkip func(dir string) bool
+	onEvents   func([]Event)
+	done       chan struct{}
 
-	mu      sync.Mutex
-	paths   map[int]string
-	missing map[string]bool
-	full    bool
+	mu           sync.Mutex
+	dirsByWatch  map[int]string
+	missingRoots map[string]bool
+	overflowed   bool
 }
 
 // Start watches the directories in paths and everything below them, except
-// directories for which skip returns true, and calls onEvents on a background
-// goroutine with each batch of changes. inotify needs a watch per directory,
-// so new directories are watched as they appear, and the paths already inside
-// them are reported, since they may have been created before the watch.
-func Start(paths []string, skip func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
+// directories for which shouldSkip returns true, and calls onEvents on a
+// background goroutine with each batch of changes. inotify needs a watch per
+// directory, so new directories are watched as they appear, and the paths
+// already inside them are reported, since they may have been created before
+// the watch.
+func Start(paths []string, shouldSkip func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		return nil, err
 	}
-	if skip == nil {
-		skip = func(string) bool { return false }
+	if shouldSkip == nil {
+		shouldSkip = func(string) bool { return false }
 	}
 	s := &Stream{
-		file:     os.NewFile(uintptr(fd), "inotify"),
-		fd:       fd,
-		roots:    paths,
-		skip:     skip,
-		onEvents: onEvents,
-		done:     make(chan struct{}),
-		paths:    map[int]string{},
-		missing:  map[string]bool{},
+		file:         os.NewFile(uintptr(fd), "inotify"),
+		fd:           fd,
+		roots:        paths,
+		shouldSkip:   shouldSkip,
+		onEvents:     onEvents,
+		done:         make(chan struct{}),
+		dirsByWatch:  map[int]string{},
+		missingRoots: map[string]bool{},
 	}
 	for _, root := range paths {
 		if _, err := s.watchTree(root); err != nil {
@@ -64,7 +65,7 @@ func Start(paths []string, skip func(dir string) bool, onEvents func([]Event)) (
 			return nil, err
 		}
 	}
-	go s.read()
+	go s.readEvents()
 	return s, nil
 }
 
@@ -74,7 +75,7 @@ func (s *Stream) Close() {
 	<-s.done
 }
 
-func (s *Stream) read() {
+func (s *Stream) readEvents() {
 	defer close(s.done)
 	buf := make([]byte, 64*1024)
 	for {
@@ -82,13 +83,13 @@ func (s *Stream) read() {
 		if err != nil {
 			return
 		}
-		if events := s.parse(buf[:n]); len(events) > 0 {
+		if events := s.parseEvents(buf[:n]); len(events) > 0 {
 			s.onEvents(events)
 		}
 	}
 }
 
-func (s *Stream) parse(buf []byte) []Event {
+func (s *Stream) parseEvents(buf []byte) []Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var events []Event
@@ -99,17 +100,17 @@ func (s *Stream) parse(buf []byte) []Event {
 		buf = buf[end:]
 
 		if raw.Mask&unix.IN_Q_OVERFLOW != 0 {
-			s.full = true
+			s.overflowed = true
 			continue
 		}
-		dir, ok := s.paths[int(raw.Wd)]
+		dir, ok := s.dirsByWatch[int(raw.Wd)]
 		if !ok {
 			continue
 		}
 		if raw.Mask&unix.IN_IGNORED != 0 {
-			delete(s.paths, int(raw.Wd))
+			delete(s.dirsByWatch, int(raw.Wd))
 			if s.isRoot(dir) {
-				s.missing[dir] = true
+				s.missingRoots[dir] = true
 			}
 			continue
 		}
@@ -128,20 +129,20 @@ func (s *Stream) parse(buf []byte) []Event {
 		if raw.Mask&unix.IN_ISDIR != 0 && raw.Mask&(unix.IN_CREATE|unix.IN_MOVED_TO) != 0 {
 			found, err := s.watchTree(path)
 			if err != nil {
-				s.full = true
+				s.overflowed = true
 			}
 			for _, inside := range found {
 				events = append(events, Event{Path: inside})
 			}
 		}
 	}
-	for root := range s.missing {
+	for root := range s.missingRoots {
 		if _, err := s.watchTree(root); err == nil {
-			delete(s.missing, root)
+			delete(s.missingRoots, root)
 		}
 		events = append(events, Event{Path: root, Rescan: true})
 	}
-	if s.full {
+	if s.overflowed {
 		for _, root := range s.roots {
 			events = append(events, Event{Path: root, Rescan: true})
 		}
@@ -176,7 +177,7 @@ func (s *Stream) watchTree(dir string) ([]string, error) {
 		if !d.IsDir() {
 			return nil
 		}
-		if path != dir && s.skip(path) {
+		if path != dir && s.shouldSkip(path) {
 			return filepath.SkipDir
 		}
 		wd, err := unix.InotifyAddWatch(s.fd, path, watchMask)
@@ -189,7 +190,7 @@ func (s *Stream) watchTree(dir string) ([]string, error) {
 			}
 			return nil
 		}
-		s.paths[wd] = path
+		s.dirsByWatch[wd] = path
 		return nil
 	})
 	return found, err

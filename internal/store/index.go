@@ -45,8 +45,8 @@ func (s *Store) List() ([]Checkpoint, error) {
 	return list, err
 }
 
-// Layer returns the manifest of checkpoint id.
-func (s *Store) Layer(id int) (Manifest, error) {
+// Manifest returns the manifest of checkpoint id.
+func (s *Store) Manifest(id int) (Manifest, error) {
 	var m Manifest
 	err := readJSON(filepath.Join(s.layerDir(id), "manifest.json"), &m)
 	return m, err
@@ -115,10 +115,10 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, data)
+	return writeFileAtomic(path, data)
 }
 
-func writeAtomic(path string, data []byte) error {
+func writeFileAtomic(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err

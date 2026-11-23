@@ -10,9 +10,9 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-// input is the part of a PreToolUse event that undo reads. Claude Code and
+// preToolUseInput is the part of a PreToolUse event that undo reads. Claude Code and
 // Codex send the same fields.
-type input struct {
+type preToolUseInput struct {
 	Cwd       string `json:"cwd"`
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
@@ -21,10 +21,10 @@ type input struct {
 	} `json:"tool_input"`
 }
 
-// handle reads one PreToolUse event from in and takes a checkpoint labeled by
+// handlePreToolUse reads one PreToolUse event from in and takes a checkpoint labeled by
 // label. Errors are logged in the store, and the agent is never blocked.
-func handle(in io.Reader, checkpoint store.Checkpointer, label func(event input, root string) string) error {
-	var event input
+func handlePreToolUse(in io.Reader, checkpoint store.Checkpointer, label func(event preToolUseInput, root string) string) error {
+	var event preToolUseInput
 	if err := json.NewDecoder(in).Decode(&event); err != nil {
 		return err
 	}

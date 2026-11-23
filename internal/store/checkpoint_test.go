@@ -84,7 +84,7 @@ func TestTakeRecordsChangedAndDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := s.Layer(cp.ID)
+	m, err := s.Manifest(cp.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestTakeIgnoresExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := s.Layer(cp.ID)
+	m, err := s.Manifest(cp.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.Remove(filepath.Join(s.Dir(), "tree.gob")); err != nil {
+	if err := os.Remove(filepath.Join(s.Dir(), "listing.gob")); err != nil {
 		t.Fatal(err)
 	}
 	rebuilt, err := s.ListingAt(cp.ID)
@@ -225,7 +225,7 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, _ := s.Layer(cp.ID)
+	m, _ := s.Manifest(cp.ID)
 	if _, ok := m.Changed["a.txt"]; !ok || !slices.Equal(m.Deleted, []string{"b.txt"}) {
 		t.Fatalf("manifest = %+v", m)
 	}

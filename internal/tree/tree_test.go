@@ -91,7 +91,7 @@ func TestChangedDetectsCpPreservedTimes(t *testing.T) {
 	after := scan(t, root)
 
 	changed, _ := Changed(before, after)
-	if !contains(changed, "a.txt") {
+	if !slices.Contains(changed, "a.txt") {
 		t.Fatalf("changed = %v, want a.txt", changed)
 	}
 }
@@ -108,21 +108,12 @@ func TestChangedReportsDeleted(t *testing.T) {
 	after := scan(t, root)
 
 	changed, deleted := Changed(before, after)
-	if !contains(deleted, "gone.txt") {
+	if !slices.Contains(deleted, "gone.txt") {
 		t.Fatalf("deleted = %v, want gone.txt", deleted)
 	}
-	if contains(changed, "keep.txt") {
+	if slices.Contains(changed, "keep.txt") {
 		t.Fatalf("unchanged keep.txt reported as changed")
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // buildTree creates dirs directories with files files each, some of them
@@ -179,7 +170,7 @@ func TestScanAllMatchesWalk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	listing, excluded, err := ScanAll(root, ex)
+	listing, excluded, err := ScanWithExcluded(root, ex)
 	if err != nil {
 		t.Fatal(err)
 	}

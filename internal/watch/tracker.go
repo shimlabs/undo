@@ -65,7 +65,7 @@ func NewTracker(s *store.Store) (*Tracker, error) {
 		full:      true,
 		markers:   map[string]chan struct{}{},
 	}
-	if t.stream, err = Start([]string{t.root, markerDir}, t.skip, t.handle); err != nil {
+	if t.stream, err = Start([]string{t.root, markerDir}, t.shouldSkip, t.handleEvents); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -76,9 +76,9 @@ func (t *Tracker) Close() {
 	t.stream.Close()
 }
 
-// skip reports whether dir is excluded, so the stream does not need to watch
-// it. The matcher is read once, when the tracker starts.
-func (t *Tracker) skip(dir string) bool {
+// shouldSkip reports whether dir is excluded, so the stream does not need to
+// watch it. The matcher is read once, when the tracker starts.
+func (t *Tracker) shouldSkip(dir string) bool {
 	rel, err := filepath.Rel(t.root, dir)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return false
@@ -86,7 +86,7 @@ func (t *Tracker) skip(dir string) bool {
 	return t.exclude.Match(filepath.ToSlash(rel), true)
 }
 
-func (t *Tracker) handle(events []Event) {
+func (t *Tracker) handleEvents(events []Event) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, e := range events {
@@ -169,7 +169,7 @@ func (t *Tracker) checkpoint(label, dir string, dirty map[string]bool, full bool
 		}
 		changed, deleted = tree.Changed(t.listing, current)
 		t.listing = current
-	} else if changed, deleted, err = t.apply(dirty, ex); err != nil {
+	} else if changed, deleted, err = t.applyDirty(dirty, ex); err != nil {
 		return store.Checkpoint{}, err
 	}
 
@@ -210,9 +210,9 @@ func (t *Tracker) waitForMarker() bool {
 	}
 }
 
-// apply updates the listing for every path reported since the last
+// applyDirty updates the listing for every path reported since the last
 // checkpoint and returns what changed.
-func (t *Tracker) apply(dirty map[string]bool, ex *exclude.Matcher) (changed, deleted []string, err error) {
+func (t *Tracker) applyDirty(dirty map[string]bool, ex *exclude.Matcher) (changed, deleted []string, err error) {
 	changedSet, deletedSet := map[string]bool{}, map[string]bool{}
 	remove := func(rel string) {
 		if _, ok := t.listing[rel]; ok {

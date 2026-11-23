@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -215,18 +216,9 @@ func TestPlanListsChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(changes.Write, "README.md") || !contains(changes.Remove, "new.txt") {
+	if !slices.Contains(changes.Write, "README.md") || !slices.Contains(changes.Remove, "new.txt") {
 		t.Fatalf("Plan = %+v", changes)
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 func TestRestoreDirEditedAfterBase(t *testing.T) {

@@ -19,14 +19,14 @@ func installEntry(path, agent string, entry map[string]any) error {
 	if err != nil {
 		return err
 	}
-	entries := preToolUse(settings)
+	entries := preToolUseEntries(settings)
 	if i := slices.IndexFunc(entries, isUndoEntry(agent)); i >= 0 {
 		entries[i] = entry
 		entries = slices.Concat(entries[:i+1], slices.DeleteFunc(entries[i+1:], isUndoEntry(agent)))
 	} else {
 		entries = append(entries, entry)
 	}
-	setPreToolUse(settings, entries)
+	setPreToolUseEntries(settings, entries)
 	return writeSettings(path, settings)
 }
 
@@ -35,7 +35,7 @@ func uninstallEntry(path, agent string) error {
 	if err != nil {
 		return err
 	}
-	setPreToolUse(settings, slices.DeleteFunc(preToolUse(settings), isUndoEntry(agent)))
+	setPreToolUseEntries(settings, slices.DeleteFunc(preToolUseEntries(settings), isUndoEntry(agent)))
 	return writeSettings(path, settings)
 }
 
@@ -46,13 +46,13 @@ func isUndoEntry(agent string) func(entry any) bool {
 	}
 }
 
-func preToolUse(settings map[string]any) []any {
+func preToolUseEntries(settings map[string]any) []any {
 	hooks, _ := settings["hooks"].(map[string]any)
 	entries, _ := hooks["PreToolUse"].([]any)
 	return entries
 }
 
-func setPreToolUse(settings map[string]any, entries []any) {
+func setPreToolUseEntries(settings map[string]any, entries []any) {
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
 		hooks = map[string]any{}

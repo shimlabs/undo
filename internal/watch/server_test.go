@@ -74,7 +74,7 @@ func TestCheckpointUsesRunningServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := s.Layer(cp.ID)
+	m, err := s.Manifest(cp.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

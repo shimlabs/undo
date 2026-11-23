@@ -42,7 +42,7 @@ func TestInstallCodexAppendsAfterExistingHooks(t *testing.T) {
 	if hooks["description"] != "team hooks" {
 		t.Fatalf("description lost: %v", hooks)
 	}
-	entries := preToolUse(hooks)
+	entries := preToolUseEntries(hooks)
 	if len(entries) != 2 {
 		t.Fatalf("PreToolUse = %v", entries)
 	}
@@ -58,12 +58,12 @@ func TestInstallCodexKeepsPosition(t *testing.T) {
 	path := codexHome(t, existingCodex)
 	InstallCodex("/usr/local/bin/undo")
 	hooks := readSettingsFile(t, path)
-	setPreToolUse(hooks, append(preToolUse(hooks), map[string]any{"matcher": "Read"}))
+	setPreToolUseEntries(hooks, append(preToolUseEntries(hooks), map[string]any{"matcher": "Read"}))
 	writeSettings(path, hooks)
 
 	InstallCodex("/opt/bin/undo")
 
-	entries := preToolUse(readSettingsFile(t, path))
+	entries := preToolUseEntries(readSettingsFile(t, path))
 	data, _ := json.Marshal(entries[1])
 	if len(entries) != 3 || !strings.Contains(string(data), "/opt/bin/undo hook codex") {
 		t.Fatalf("PreToolUse = %v, want the undo entry updated in place", entries)
@@ -78,7 +78,7 @@ func TestUninstallCodexRemovesOnlyOurs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries := preToolUse(readSettingsFile(t, path))
+	entries := preToolUseEntries(readSettingsFile(t, path))
 	data, _ := json.Marshal(entries)
 	if len(entries) != 1 || strings.Contains(string(data), "hook codex") {
 		t.Fatalf("PreToolUse = %s", data)

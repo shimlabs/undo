@@ -130,7 +130,7 @@ func TestTrackerSeesChangeRightBeforeCheckpoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		m, _ := s.Layer(cp.ID)
+		m, _ := s.Manifest(cp.ID)
 		if _, ok := m.Changed[name]; !ok {
 			t.Fatalf("round %d: checkpoint missed %s written just before it", i, name)
 		}
