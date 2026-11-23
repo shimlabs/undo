@@ -68,8 +68,8 @@ func printHelp(out *terminal.Writer) {
 	}
 	out.Println()
 	out.Println(out.Bold("Flags:"))
-	out.Printf("  %-*s  %s\n", width, "-h, --help", "Show help for undo or a command")
-	out.Printf("  %-*s  %s\n", width, "--version", "Print the version")
+	out.Printf("  %-*s  %s\n", width, helpFlagListing, "Show help for undo or a command")
+	out.Printf("  %-*s  %s\n", width, versionFlagListing, "Print the version")
 	printExamples(out, []example{
 		{"undo install claude", "Protect every Claude Code session"},
 		{"undo", "Undo what the agent just did"},
@@ -95,14 +95,14 @@ func printCommandHelp(out *terminal.Writer, cmd command) {
 		flag, _ := findFlag(name)
 		width = max(width, len(flagListing(flag)))
 	}
-	width = max(width, len("-h, --help"))
+	width = max(width, len(helpFlagListing))
 	out.Println()
 	out.Println(out.Bold("Flags:"))
 	for _, name := range cmd.flags {
 		flag, _ := findFlag(name)
 		out.Printf("  %-*s  %s\n", width, flagListing(flag), flag.summary)
 	}
-	out.Printf("  %-*s  %s\n", width, "-h, --help", "Show this help")
+	out.Printf("  %-*s  %s\n", width, helpFlagListing, "Show this help")
 	printExamples(out, cmd.examples, 0)
 }
 

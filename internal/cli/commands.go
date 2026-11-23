@@ -66,6 +66,11 @@ const (
 	flagCopy    = "--copy"
 	flagAll     = "--all"
 	flagHelp    = "--help"
+	flagVersion = "--version"
+	// helpFlagListing and versionFlagListing are how help lists the flags
+	// that every command, or undo itself, takes.
+	helpFlagListing    = "-h, " + flagHelp
+	versionFlagListing = "-v, " + flagVersion
 )
 
 const projectURL = "https://github.com/shimlabs/undo"
@@ -246,7 +251,7 @@ func dispatch(args []string, env Env) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		name, rest = args[0], args[1:]
 	}
-	if name == "" && len(rest) > 0 && (rest[0] == "--version" || rest[0] == "-v") {
+	if name == "" && len(rest) > 0 && (rest[0] == flagVersion || rest[0] == "-v") {
 		return versionCommand(flags{}, env)
 	}
 	cmd, ok := findCommand(name)
