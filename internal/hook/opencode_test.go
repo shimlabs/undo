@@ -1,7 +1,7 @@
 package hook
 
 import (
-	"encoding/json"
+	"bytes"
 	"errors"
 	"io/fs"
 	"os"
@@ -58,15 +58,15 @@ func TestOpenCodePluginSendsEvent(t *testing.T) {
 
 	runPlugin(t, plugin, project, "edit", `{"filePath":"`+project+`/a.go","oldString":"x","newString":"y"}`)
 
-	var event preToolUseInput
 	data, err := os.ReadFile(received)
 	if err != nil {
 		t.Fatalf("undo was not run: %v", err)
 	}
-	if err := json.Unmarshal(data, &event); err != nil {
+	event, err := parseOpenCodeEvent(bytes.NewReader(data))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if event.Cwd != project || event.SessionID != "s" || event.ToolName != "edit" || event.ToolInput.FilePath != project+"/a.go" {
+	if event.ProjectDir != project || event.Dir != project || event.Session != "s" || event.ToolName != "edit" || event.FilePath != project+"/a.go" {
 		t.Fatalf("event = %+v", event)
 	}
 }

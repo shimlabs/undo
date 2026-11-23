@@ -6,9 +6,10 @@ import (
 )
 
 var claude = Agent{
-	Name:  "claude",
-	Title: "Claude Code",
-	Note:  "Claude Code now takes a checkpoint before every Bash, Edit and Write call.",
+	Name:       "claude",
+	Title:      "Claude Code",
+	Note:       "Claude Code now takes a checkpoint before every Bash, Edit and Write call.",
+	parseEvent: parseClaudeEvent,
 	configPath: func() (string, error) {
 		if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
 			return filepath.Join(dir, "settings.json"), nil
@@ -23,7 +24,7 @@ var claude = Agent{
 	// Cursor also runs Claude Code's hooks. When undo's Cursor hook is
 	// installed, it covers the event, and a second checkpoint would only
 	// repeat the first.
-	isHandledElsewhere: func(event preToolUseInput) bool {
-		return event.CursorVersion != "" && cursor.IsInstalled()
+	isHandledElsewhere: func(event hookEvent) bool {
+		return event.IsFromCursor && cursor.IsInstalled()
 	},
 }

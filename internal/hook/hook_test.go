@@ -3,6 +3,7 @@ package hook
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -122,5 +123,37 @@ func TestClaudeHookStepsAsideForCursor(t *testing.T) {
 	}
 	if list := checkpoints(t, storeHome, root); len(list) != 1 {
 		t.Fatalf("checkpoints = %d, want the Claude hook to leave Cursor events to the Cursor hook", len(list))
+	}
+}
+
+func TestHandleUsesSessionProject(t *testing.T) {
+	agentHome(t)
+	root, storeHome := newProject(t)
+	subdir := filepath.Join(root, "web")
+	os.Mkdir(subdir, 0o755)
+	t.Setenv("CLAUDE_PROJECT_DIR", root)
+	event := `{"cwd":"` + subdir + `","tool_name":"Bash","tool_input":{"command":"npm test"}}`
+
+	if err := claude.Handle(strings.NewReader(event), storeHome, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	list := checkpoints(t, storeHome, root)
+	if len(list) != 1 || list[0].Dir != subdir {
+		t.Fatalf("checkpoints of the session project = %+v, want one that ran in %s", list, subdir)
+	}
+	if other := checkpoints(t, storeHome, subdir); len(other) != 0 {
+		t.Fatalf("a command in a subfolder started a store of its own: %+v", other)
+	}
+}
+
+func TestHandleLogsFailuresWithoutStore(t *testing.T) {
+	_, storeHome := newProject(t)
+
+	if err := claude.Handle(strings.NewReader("not json"), storeHome, (*store.Store).Take); err == nil {
+		t.Fatal("Handle accepted an event that is not JSON")
+	}
+	data, err := os.ReadFile(filepath.Join(storeHome, "errors.log"))
+	if err != nil || !strings.Contains(string(data), "claude hook") {
+		t.Fatalf("the failure was not logged under the store home: %q, %v", data, err)
 	}
 }

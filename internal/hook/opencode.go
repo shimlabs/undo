@@ -12,6 +12,7 @@ var openCode = Agent{
 	Title: "OpenCode",
 	Note: "OpenCode now takes a checkpoint before every shell command and file edit.\n" +
 		"Restart OpenCode to load the plugin.",
+	parseEvent: parseOpenCodeEvent,
 	configPath: func() (string, error) {
 		if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
 			return filepath.Join(dir, "opencode", "plugins", "undo.js"), nil
@@ -38,6 +39,7 @@ export const UndoPlugin = async ({ directory }) => ({
     if (!FILE_TOOLS.has(input.tool)) return
     const args = output.args ?? {}
     const event = {
+      project_dir: directory,
       cwd: args.workdir ?? directory,
       session_id: input.sessionID,
       tool_name: input.tool,

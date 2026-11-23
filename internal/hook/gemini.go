@@ -10,6 +10,7 @@ var gemini = Agent{
 	Title: "Gemini CLI",
 	Note: "Gemini CLI now takes a checkpoint before every shell command and file edit.\n" +
 		"It runs hooks only in folders you trust.",
+	parseEvent: parseGeminiEvent,
 	configPath: func() (string, error) {
 		if dir := os.Getenv("GEMINI_CLI_HOME"); dir != "" {
 			return filepath.Join(dir, ".gemini", "settings.json"), nil

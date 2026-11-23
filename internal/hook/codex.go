@@ -10,6 +10,7 @@ var codex = Agent{
 	Title: "Codex",
 	Note: "Codex runs new hooks only after you trust them: open Codex, run /hooks and trust the undo hook.\n" +
 		"Then Codex takes a checkpoint before every shell command and patch.",
+	parseEvent: parseCodexEvent,
 	configPath: func() (string, error) {
 		if dir := os.Getenv("CODEX_HOME"); dir != "" {
 			return filepath.Join(dir, "hooks.json"), nil

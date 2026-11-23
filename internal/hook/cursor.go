@@ -5,6 +5,7 @@ var cursor = Agent{
 	Title: "Cursor",
 	Note: "Cursor now takes a checkpoint before every shell command, edit and delete.\n" +
 		"Restart Cursor agent sessions that are already running in the terminal.",
+	parseEvent: parseCursorEvent,
 	configPath: func() (string, error) {
 		return homePath(".cursor", "hooks.json")
 	},

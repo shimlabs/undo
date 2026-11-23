@@ -3,7 +3,6 @@
 package hook
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,9 +26,11 @@ type Agent struct {
 
 	configPath func() (string, error)
 	installer  installer
+	// parseEvent reads one hook event in the agent's format.
+	parseEvent func(in io.Reader) (hookEvent, error)
 	// isHandledElsewhere reports whether another agent's hook already takes
 	// a checkpoint for event.
-	isHandledElsewhere func(event preToolUseInput) bool
+	isHandledElsewhere func(event hookEvent) bool
 }
 
 // Agents returns every agent undo supports.
@@ -104,104 +105,53 @@ func checkBinary(binary string) error {
 	return nil
 }
 
-// preToolUseInput is the part of a hook event that undo reads. Claude Code,
-// Codex, Cursor and Gemini CLI send these fields, and the OpenCode plugin
-// sends them too. Cursor names its session conversation_id.
-type preToolUseInput struct {
-	Cwd            string `json:"cwd"`
-	SessionID      string `json:"session_id"`
-	ConversationID string `json:"conversation_id"`
-	ToolName       string `json:"tool_name"`
-	ToolInput      struct {
-		Command  string `json:"command"`
-		FilePath string `json:"file_path"`
-		Cwd      string `json:"cwd"`
-	} `json:"tool_input"`
-	WorkspaceRoots []string `json:"workspace_roots"`
-	CursorVersion  string   `json:"cursor_version"`
+// Handle reads one hook event from in and takes a checkpoint of the project
+// the agent session works in, with the stores under storeHome. Errors are
+// logged in the project's store, or under storeHome when there is none yet,
+// and the agent is never blocked.
+func (a Agent) Handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) error {
+	projectStore, err := a.handle(in, storeHome, checkpoint)
+	switch {
+	case err == nil:
+	case projectStore != nil:
+		projectStore.LogError(err)
+	default:
+		store.LogHomeError(storeHome, fmt.Errorf("%s hook: %w", a.Name, err))
+	}
+	return err
 }
 
-// Handle reads one hook event from in and takes a checkpoint of the project
-// the tool works in. Errors are logged in the store when there is one, and the
-// agent is never blocked.
-func (a Agent) Handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) error {
-	var event preToolUseInput
-	if err := json.NewDecoder(in).Decode(&event); err != nil {
-		return err
+// handle takes the checkpoint and returns the project's store, if it got as
+// far as opening one.
+func (a Agent) handle(in io.Reader, storeHome string, checkpoint store.Checkpointer) (*store.Store, error) {
+	parseEvent := a.parseEvent
+	if parseEvent == nil {
+		parseEvent = parseCodexEvent
+	}
+	event, err := parseEvent(in)
+	if err != nil {
+		return nil, err
 	}
 	if a.isHandledElsewhere != nil && a.isHandledElsewhere(event) {
-		return nil
+		return nil, nil
 	}
-	dir, err := event.dir()
-	if err != nil {
-		return err
+	projectDir := firstOf(event.ProjectDir, event.Dir)
+	if projectDir == "" {
+		if projectDir, err = os.Getwd(); err != nil {
+			return nil, err
+		}
 	}
-	root, err := project.Root(dir)
+	root, err := project.Root(projectDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	projectStore, err := store.Create(storeHome, root)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	options := store.CheckpointOptions{Label: event.label(root), Dir: dir, Agent: a.Name, Session: event.session()}
-	if _, err := checkpoint(projectStore, options); err != nil {
-		projectStore.LogError(err)
-		return err
-	}
-	return nil
-}
-
-func (e preToolUseInput) session() string {
-	if e.SessionID != "" {
-		return e.SessionID
-	}
-	return e.ConversationID
-}
-
-// dir returns the directory the tool works in. Agents report it in different
-// places, and Cursor runs hooks from its own directory, so the process's
-// working directory is the last resort.
-func (e preToolUseInput) dir() (string, error) {
-	candidates := []string{e.Cwd, e.ToolInput.Cwd}
-	if len(e.WorkspaceRoots) > 0 {
-		candidates = append(candidates, e.WorkspaceRoots[0])
-	}
-	candidates = append(candidates, os.Getenv("CLAUDE_PROJECT_DIR"), os.Getenv("CURSOR_PROJECT_DIR"), os.Getenv("GEMINI_PROJECT_DIR"))
-	for _, dir := range candidates {
-		if dir != "" {
-			return dir, nil
-		}
-	}
-	return os.Getwd()
-}
-
-// label describes the tool call: the shell command, the files a patch
-// touches, or the tool and the file it changes.
-func (e preToolUseInput) label(root string) string {
-	if e.ToolName == "apply_patch" {
-		return patchLabel(e.ToolInput.Command)
-	}
-	if e.ToolInput.Command != "" {
-		return e.ToolInput.Command
-	}
-	file := e.ToolInput.FilePath
-	if rel, err := filepath.Rel(root, file); err == nil && !strings.HasPrefix(rel, "..") {
-		file = rel
-	}
-	return strings.TrimSpace(e.ToolName + " " + file)
-}
-
-func patchLabel(patch string) string {
-	var files []string
-	for line := range strings.Lines(patch) {
-		for _, prefix := range []string{"*** Update File: ", "*** Add File: ", "*** Delete File: "} {
-			if file, ok := strings.CutPrefix(strings.TrimSpace(line), prefix); ok {
-				files = append(files, file)
-			}
-		}
-	}
-	return strings.TrimSpace("apply_patch " + strings.Join(files, ", "))
+	options := store.CheckpointOptions{Label: event.label(root), Dir: firstOf(event.Dir, projectDir), Agent: a.Name, Session: event.Session}
+	_, err = checkpoint(projectStore, options)
+	return projectStore, err
 }
 
 func homePath(parts ...string) (string, error) {

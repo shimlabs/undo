@@ -14,14 +14,26 @@ const maxLogSize = 1 << 20
 
 // LogError records a failure that happened where nobody could see it, such as
 // in an agent hook or the background watcher. Once the log passes maxLogSize,
-// it starts over.
-// Logging is best effort: if the log cannot be written, the failure is lost.
+// it starts over. Logging is best effort: if the log cannot be written, the
+// failure is lost.
 func (s *Store) LogError(failure error) {
+	appendLog(s.logPath(), failure)
+}
+
+// LogHomeError records a failure that happened before a project's store
+// could be opened, in the log under home.
+func LogHomeError(home string, failure error) {
+	if os.MkdirAll(home, 0o700) == nil {
+		appendLog(filepath.Join(home, "errors.log"), failure)
+	}
+}
+
+func appendLog(path string, failure error) {
 	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY
-	if info, err := os.Stat(s.logPath()); err == nil && info.Size() > maxLogSize {
+	if info, err := os.Stat(path); err == nil && info.Size() > maxLogSize {
 		flags |= os.O_TRUNC
 	}
-	file, err := os.OpenFile(s.logPath(), flags, 0o600)
+	file, err := os.OpenFile(path, flags, 0o600)
 	if err != nil {
 		return
 	}
