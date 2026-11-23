@@ -17,7 +17,8 @@ type streamPosition struct {
 	CheckpointID int    `json:"checkpoint_id"`
 	EventID      uint64 `json:"event_id"`
 	// EventStoreID identifies the volume's event history the ID belongs to.
-	EventStoreID string `json:"event_store_id"`
+	EventStoreID string    `json:"event_store_id"`
+	SavedAt      time.Time `json:"saved_at"`
 }
 
 // maxPositionAge is how old a saved position may be. The system trims its
@@ -31,13 +32,9 @@ func (t *tracker) resume() fsnotify.EventID {
 	if !fsnotify.CanResume {
 		return fsnotify.SinceNow
 	}
-	path := t.store.WatcherPositionPath()
-	info, err := os.Stat(path)
-	if err != nil || time.Since(info.ModTime()) > maxPositionAge {
-		return fsnotify.SinceNow
-	}
 	var position streamPosition
-	if data, err := os.ReadFile(path); err != nil || json.Unmarshal(data, &position) != nil {
+	data, err := os.ReadFile(t.store.WatcherPositionPath())
+	if err != nil || json.Unmarshal(data, &position) != nil || time.Since(position.SavedAt) > maxPositionAge {
 		return fsnotify.SinceNow
 	}
 	eventStoreID, err := fsnotify.EventStoreID(t.root)
@@ -66,6 +63,7 @@ func (t *tracker) savePosition() {
 		return
 	}
 	t.position.EventStoreID = eventStoreID
+	t.position.SavedAt = time.Now()
 	data, err := json.Marshal(t.position)
 	if err == nil {
 		err = atomicfile.WriteFile(t.store.WatcherPositionPath(), data, 0o600)
