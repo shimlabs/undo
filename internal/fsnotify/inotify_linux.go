@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -178,34 +177,61 @@ func (s *Stream) isRoot(path string) bool {
 // watched, such as one that was moved, updates the path it reports.
 func (s *Stream) watchTree(dir string) ([]string, error) {
 	var found []string
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			if path == dir {
-				return err
-			}
-			return nil
-		}
-		if path != dir {
-			found = append(found, path)
-		}
-		if !entry.IsDir() {
-			return nil
-		}
-		if path != dir && s.shouldSkip(path) {
-			return filepath.SkipDir
-		}
-		wd, err := unix.InotifyAddWatch(s.fd, path, watchMask)
-		if errors.Is(err, unix.ENOSPC) {
-			return ErrWatchLimit
-		}
-		if err != nil {
-			if path == dir {
-				return fmt.Errorf("watch %s: %w", path, err)
-			}
-			return nil
-		}
-		s.dirsByWatch[wd] = path
-		return nil
-	})
+	if err := s.addWatch(dir); errors.Is(err, ErrWatchLimit) {
+		return nil, err
+	} else if err != nil {
+		return nil, fmt.Errorf("watch %s: %w", dir, err)
+	}
+	err := s.watchInside(dir, &found)
 	return found, err
+}
+
+func (s *Stream) addWatch(dir string) error {
+	wd, err := unix.InotifyAddWatch(s.fd, dir, watchMask)
+	if errors.Is(err, unix.ENOSPC) {
+		return ErrWatchLimit
+	}
+	if err != nil {
+		return err
+	}
+	s.dirsByWatch[wd] = dir
+	return nil
+}
+
+// watchInside adds every path inside dir to found and watches the
+// directories among them. Each directory is opened without following a
+// symlink, so one swapped for a symlink or a named pipe fails at once
+// instead of leading elsewhere or blocking. Below dir, a directory that is
+// gone or cannot be read is passed over.
+func (s *Stream) watchInside(dir string, found *[]string) error {
+	entries, err := readDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		*found = append(*found, path)
+		if !entry.IsDir() || s.shouldSkip(path) {
+			continue
+		}
+		if err := s.addWatch(path); errors.Is(err, ErrWatchLimit) {
+			return err
+		} else if err != nil {
+			continue
+		}
+		if err := s.watchInside(path, found); errors.Is(err, ErrWatchLimit) {
+			return err
+		}
+	}
+	return nil
+}
+
+func readDir(dir string) ([]os.DirEntry, error) {
+	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: dir, Err: err}
+	}
+	file := os.NewFile(uintptr(fd), dir)
+	defer file.Close()
+	return file.ReadDir(-1)
 }
