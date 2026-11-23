@@ -161,7 +161,7 @@ func unknownCommandError(name string) error {
 	if suggestion, ok := closestCommand(name); ok {
 		message += fmt.Sprintf(". Did you mean undo %s?", suggestion)
 	}
-	return usageError{message: message}
+	return usageError{message: message, isUnknownCommand: true}
 }
 
 // closestCommand returns the listed command nearest to name: within one

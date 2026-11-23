@@ -17,6 +17,9 @@ import (
 type usageError struct {
 	message string
 	command *command
+	// isUnknownCommand marks an error about which command to run, which
+	// points to the list of commands rather than to one command's help.
+	isUnknownCommand bool
 }
 
 func (e usageError) Error() string { return e.message }
@@ -102,7 +105,7 @@ func printError(out *terminal.Writer, err error) {
 // more.
 func printUsageError(out *terminal.Writer, err usageError) {
 	out.Errorf("%s", sentence(terminal.Printable(err.message)))
-	if err.command == nil {
+	if err.command == nil || err.isUnknownCommand {
 		out.Printf("Run %s for the list of commands.\n", out.Bold("undo help"))
 		return
 	}

@@ -86,3 +86,10 @@ func TestListAlias(t *testing.T) {
 		t.Fatalf("undo ls --help: exit %d\n%s", code, out)
 	}
 }
+
+func TestHelpForUnknownCommandPointsToCommandList(t *testing.T) {
+	code, out := run(t, t.TempDir(), "", "help", "nope")
+	if code != 2 || !strings.Contains(out, "Run undo help for the list of commands.") || strings.Contains(out, "Run undo help nope") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}
