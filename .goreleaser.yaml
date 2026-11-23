@@ -1,0 +1,48 @@
+version: 2
+
+builds:
+  # FSEvents needs cgo, so macOS builds run on a macOS machine.
+  - id: darwin
+    main: ./cmd/undo
+    binary: undo
+    env:
+      - CGO_ENABLED=1
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/shimlabs/undo/internal/cli.Version={{ .Version }}
+  - id: linux
+    main: ./cmd/undo
+    binary: undo
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/shimlabs/undo/internal/cli.Version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^chore"
+      - "^test"
+
+homebrew_casks:
+  - name: undo
+    repository:
+      owner: shimlabs
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/shimlabs/undo
+    description: Undo anything a coding agent does to your project
+    license: MIT
