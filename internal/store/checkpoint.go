@@ -544,32 +544,17 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 // changed files share a directory, so each one is created and opened once,
 // in the project and in the layer.
 func (s *Store) cloneBatch(layer *os.Root, files []string, batch []int, listing tree.Listing, clonedFiles []clonedFile) error {
-	dirs := map[string]dirPair{}
-	defer func() {
-		for _, pair := range dirs {
-			if pair.project != nil {
-				pair.project.Close()
-				pair.stored.Close()
-			}
-		}
-	}()
-	for _, i := range batch {
-		dir := path.Dir(files[i])
-		if _, isOpen := dirs[dir]; isOpen {
-			continue
-		}
-		pair, err := s.openDirPair(layer, dir)
-		// A directory gone since the listing was made takes its files with
-		// it, and they are recorded as deleted.
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		dirs[dir] = pair
+	dirs, err := openDirPairs(files, batch, func(dir string) (dirPair, error) { return s.openDirPair(layer, dir) })
+	if err != nil {
+		return err
 	}
+	defer closeDirPairs(dirs)
 	return parallel.For(len(batch), func(j int) error {
 		rel := files[batch[j]]
-		pair := dirs[path.Dir(rel)]
-		if pair.project == nil {
+		pair, isOpen := dirs[path.Dir(rel)]
+		if !isOpen {
+			// A directory gone since the listing was made takes its files
+			// with it, and they are recorded as deleted.
 			clonedFiles[batch[j]] = clonedFile{err: fs.ErrNotExist}
 			return nil
 		}
@@ -653,11 +638,45 @@ func (s *Store) openLayer(id int) (*os.Root, error) {
 	return s.openRoot(s.layerFile(id, "."))
 }
 
-// dirPair is one directory open in the project and in a layer.
+// dirPair is one directory open in the project and in the store, in a layer
+// or the base.
 type dirPair struct {
 	project *os.File
-	// stored is the directory in the store, in a layer or in the base.
-	stored *os.File
+	stored  *os.File
+}
+
+// openDirPairs opens, with open, the directory of paths[i] for each i in
+// batch, each directory once. A directory gone since it was listed is left
+// out.
+func openDirPairs(paths []string, batch []int, open func(dir string) (dirPair, error)) (map[string]dirPair, error) {
+	dirs := map[string]dirPair{}
+	for _, i := range batch {
+		dir := path.Dir(paths[i])
+		if _, isOpen := dirs[dir]; isOpen {
+			continue
+		}
+		pair, err := open(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			closeDirPairs(dirs)
+			return nil, err
+		}
+		dirs[dir] = pair
+	}
+	return dirs, nil
+}
+
+func closeDirPairs(dirs map[string]dirPair) {
+	for _, pair := range dirs {
+		pair.close()
+	}
+}
+
+func (p dirPair) close() {
+	p.project.Close()
+	p.stored.Close()
 }
 
 // openDirPair creates the directory dir in layer and opens it there and in
