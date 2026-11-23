@@ -771,6 +771,64 @@ func TestRestoreOfDirectoryMovedOutEditedAndBack(t *testing.T) {
 	}
 }
 
+// secret.txt is unreadable at checkpoint 2 and still at checkpoint 3, then
+// readable again. It existed at checkpoint 3, so restoring 3 must keep it.
+func TestTrackerKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	secret := filepath.Join(root, "secret.txt")
+	testutil.WriteFile(t, secret, "v1")
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, secret, "v2")
+	os.Chmod(secret, 0)
+	takeCheckpoint(t, projectTracker, "2")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "other")
+	third := takeCheckpoint(t, projectTracker, "3")
+	m3, _ := projectStore.Manifest(third.ID)
+	os.Chmod(secret, 0o644)
+	takeCheckpoint(t, projectTracker, "4")
+	changes, err := restore.Apply(projectStore, third.ID, checkpointThroughTracker(projectTracker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(secret); err != nil {
+		t.Fatalf("restoring checkpoint 3 removed secret.txt, which existed then (removed %v, kept %v, manifest 3 unreadable %v)", changes.Removed, changes.Kept, m3.Unreadable)
+	}
+}
+
+func TestScanKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	_, projectStore, root := newTrackerWithFiles(t)
+	secret := filepath.Join(root, "secret.txt")
+	take := func() store.Checkpoint {
+		c, err := projectStore.Take(store.CheckpointOptions{Label: "x", Dir: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	testutil.WriteFile(t, secret, "v1")
+	take()
+	testutil.WriteFile(t, secret, "v2")
+	os.Chmod(secret, 0)
+	take()
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "other")
+	third := take()
+	os.Chmod(secret, 0o644)
+	take()
+	changes, err := restore.Apply(projectStore, third.ID, (*store.Store).Take)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(secret); err != nil {
+		t.Fatalf("scan mode: restoring 3 removed secret.txt (removed %v)", changes.Removed)
+	}
+}
+
 // A stored copy lost in a power cut, then merged away. The tracker's listing
 // and the saved listing still hold the file, so no later checkpoint stores it
 // again, while State no longer has it.

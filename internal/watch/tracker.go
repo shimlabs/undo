@@ -55,7 +55,11 @@ type tracker struct {
 	// request at a time.
 	listing    tree.Listing
 	unreadable []string
-	lastID     int
+	// unsavedFiles are files the last checkpoint could not store, usually
+	// because they cannot be read. Every checkpoint tries them again, as a
+	// scan would, so each one records them as unsaved.
+	unsavedFiles []string
+	lastID       int
 	// position is where a new tracker can resume the events, as of the last
 	// checkpoint whose marker arrived.
 	position streamPosition
@@ -128,11 +132,14 @@ func (t *tracker) loadListing(id int) error {
 		return err
 	}
 	t.listing, t.lastID = listing, id
-	// Files that could not be cloned are listed too, but they are not in the
-	// listing, and an event brings them back once they are readable.
-	t.unreadable = slices.DeleteFunc(slices.Clone(manifest.Unreadable), func(rel string) bool {
-		return listing[rel].Kind != tree.Dir
-	})
+	t.unreadable, t.unsavedFiles = nil, nil
+	for _, rel := range manifest.Unreadable {
+		if listing[rel].Kind == tree.Dir {
+			t.unreadable = append(t.unreadable, rel)
+		} else {
+			t.unsavedFiles = append(t.unsavedFiles, rel)
+		}
+	}
 	return nil
 }
 
@@ -295,6 +302,11 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 
 	var changed, deleted []string
 	if !shouldRescan {
+		for _, rel := range t.unsavedFiles {
+			if fullPath := filepath.Join(t.root, filepath.FromSlash(rel)); !dirty[fullPath] {
+				dirty[fullPath] = false
+			}
+		}
 		changed, deleted, err = t.applyDirty(dirty)
 		if errors.Is(err, fs.ErrPermission) {
 			shouldRescan = true
@@ -327,6 +339,11 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		return store.Checkpoint{}, err
 	}
 	t.lastID = checkpoint.ID
+	// Commit drops a changed file it could not store from the listing.
+	t.unsavedFiles = slices.DeleteFunc(changed, func(rel string) bool {
+		_, isListed := t.listing[rel]
+		return isListed
+	})
 	return checkpoint, nil
 }
 
