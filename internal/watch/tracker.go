@@ -50,6 +50,10 @@ type tracker struct {
 	lastID     int
 }
 
+// errStreamStopped means the tracker no longer watches the project, so the
+// server has to stop and let clients scan instead.
+var errStreamStopped = errors.New("watching stopped")
+
 // newTracker starts watching the project in projectStore. Its first checkpoint compares
 // the whole project, because changes made before it started are not known.
 func newTracker(projectStore *store.Store) (*tracker, error) {
@@ -83,9 +87,10 @@ func (t *tracker) startStream() error {
 	if err != nil {
 		return err
 	}
-	t.matcher.Store(matcher)
+	previous := t.matcher.Swap(matcher)
 	stream, err := fsnotify.NewStream([]string{t.root, t.markerDir}, t.shouldSkip, t.handleEvents)
 	if err != nil {
+		t.matcher.Store(previous)
 		return err
 	}
 	t.stream = stream
@@ -172,7 +177,7 @@ func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint,
 		// treat them as created after the checkpoint.
 		t.stream.Close()
 		if err := t.startStream(); err != nil {
-			return store.Checkpoint{}, err
+			return store.Checkpoint{}, fmt.Errorf("%w: %w", errStreamStopped, err)
 		}
 		shouldRescan = true
 	}

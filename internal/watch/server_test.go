@@ -256,3 +256,30 @@ func TestServerPrunesWhenQuiet(t *testing.T) {
 	}
 	waitForCheckpointCount(t, projectStore, 1)
 }
+
+func TestServerStopsWhenStreamCannotRestart(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	projectStore, root, socketDir := newServerProject(t)
+	done, _ := runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
+	client := Client{SocketDir: socketDir}
+	if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+		t.Fatal(err)
+	}
+	ignoreFile := filepath.Join(root, ".undoignore")
+	testutil.WriteFile(t, ignoreFile, "build/\n")
+	if err := os.Chmod(ignoreFile, 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	client.Checkpoint(projectStore, store.CheckpointOptions{Label: "rules changed", Dir: root})
+	select {
+	case err := <-done:
+		if !errors.Is(err, errStreamStopped) {
+			t.Fatalf("Serve returned %v, want errStreamStopped", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server kept running without a stream")
+	}
+}

@@ -179,27 +179,36 @@ func (s *server) acceptLoop() error {
 		if err != nil {
 			return err
 		}
-		if s.handleConn(conn) {
+		isCheckpointed, err := s.handleConn(conn)
+		if err != nil {
+			return err
+		}
+		if isCheckpointed {
 			isPruneDue = true
 		}
 	}
 }
 
 // handleConn answers one request and reports whether it took a checkpoint.
-func (s *server) handleConn(conn net.Conn) bool {
+// It returns an error only when the server cannot go on.
+func (s *server) handleConn(conn net.Conn) (bool, error) {
 	defer conn.Close()
 	if checkPeer(conn) != nil || conn.SetDeadline(time.Now().Add(requestTimeout)) != nil {
-		return false
+		return false, nil
 	}
 	var request serverRequest
 	if err := json.NewDecoder(conn).Decode(&request); err != nil {
-		return false
+		return false, nil
 	}
 	var reply serverResponse
+	var fatal error
 	isCheckpointed := false
 	switch request.Operation {
 	case operationCheckpoint:
 		checkpoint, err := s.tracker.Checkpoint(request.Options)
+		if errors.Is(err, errStreamStopped) {
+			fatal = err
+		}
 		if err != nil {
 			reply.Error = err.Error()
 		} else {
@@ -214,5 +223,5 @@ func (s *server) handleConn(conn net.Conn) bool {
 	reply.CheckpointCount = s.checkpointCount
 	// A client that does not get the reply scans the project instead.
 	_ = json.NewEncoder(conn).Encode(reply)
-	return isCheckpointed
+	return isCheckpointed, fatal
 }
