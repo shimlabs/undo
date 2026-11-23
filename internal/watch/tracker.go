@@ -534,17 +534,24 @@ func lookUp(parents *tree.ParentChecker, rel, fullPath string) (tree.Entry, stri
 		return tree.Entry{}, "", err
 	}
 	entry, err := tree.Stat(fullPath)
-	if errors.Is(err, fs.ErrNotExist) {
+	if isGone(err) {
 		return tree.Entry{}, "", errPathGone
 	}
 	if err != nil {
 		return tree.Entry{}, "", err
 	}
 	storedName, err := tree.StoredName(fullPath)
-	if errors.Is(err, fs.ErrNotExist) {
+	if isGone(err) {
 		return tree.Entry{}, "", errPathGone
 	}
 	return entry, storedName, err
+}
+
+// isGone reports whether err means the path does not exist, which includes a
+// parent that a file or a symlink has replaced since the parents were
+// checked.
+func isGone(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP)
 }
 
 // addUnder adds everything inside a new directory to the listing, in case some

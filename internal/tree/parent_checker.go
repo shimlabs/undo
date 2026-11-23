@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"syscall"
 )
 
 // ErrParentNotDir means a directory above a path is now a symlink or a file,
@@ -38,6 +39,9 @@ func (c *ParentChecker) Check(rel string) error {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			continue
+		case errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP):
+			// A directory further up is a file or a symlink.
+			return fmt.Errorf("%s: %w", dir, ErrParentNotDir)
 		case err != nil:
 			return err
 		case !info.IsDir():

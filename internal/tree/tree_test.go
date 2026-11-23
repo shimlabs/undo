@@ -299,3 +299,21 @@ func TestOpenDirRefusesSymlinkedDirectory(t *testing.T) {
 		t.Fatalf("OpenDir = %v, %v, want an error matching fs.ErrNotExist", dir, err)
 	}
 }
+
+func TestParentCheckerReportsFileAboveNearestParent(t *testing.T) {
+	root := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(root, "c"), "now a file")
+	if err := NewParentChecker(root).Check("c/b/x"); !errors.Is(err, ErrParentNotDir) {
+		t.Fatalf("Check = %v, want ErrParentNotDir", err)
+	}
+}
+
+func TestParentCheckerReportsSymlinkLoopAboveNearestParent(t *testing.T) {
+	root := testutil.TempDir(t)
+	if err := os.Symlink("a", filepath.Join(root, "a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewParentChecker(root).Check("a/b/x"); !errors.Is(err, ErrParentNotDir) {
+		t.Fatalf("Check = %v, want ErrParentNotDir", err)
+	}
+}
