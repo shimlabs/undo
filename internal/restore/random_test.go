@@ -59,11 +59,11 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 	t.Helper()
 	root := projectStore.Root()
 	mutator := testutil.NewMutator(t, root, seed)
-	rng := rand.New(rand.NewPCG(seed, seed+1))
+	random := rand.New(rand.NewPCG(seed, seed+1))
 	states := map[int]map[string]string{}
 	var log []string
 	checkpoint := func(label string) {
-		before := testutil.Snapshot(t, root)
+		before := testutil.Snapshot(t, root, testutil.SnapshotOptions{ShouldSkipExcluded: true})
 		taken, err := checkpointer(projectStore, store.CheckpointOptions{Label: label, Dir: root})
 		if err != nil {
 			t.Fatalf("seed %d: checkpoint after %v: %v", seed, log, err)
@@ -79,9 +79,9 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 		if err != nil {
 			t.Fatal(err)
 		}
-		target := checkpoints[rng.IntN(len(checkpoints))]
+		target := checkpoints[random.IntN(len(checkpoints))]
 		log = append(log, "undo to "+strconv.Itoa(target.ID))
-		before := testutil.Snapshot(t, root)
+		before := testutil.Snapshot(t, root, testutil.SnapshotOptions{ShouldSkipExcluded: true})
 		latestBefore, _, err := projectStore.Latest()
 		if err != nil {
 			t.Fatal(err)
@@ -100,7 +100,7 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 				log = append(log, "#"+strconv.Itoa(id))
 			}
 		}
-		want, got := states[target.ID], testutil.Snapshot(t, root)
+		want, got := states[target.ID], testutil.Snapshot(t, root, testutil.SnapshotOptions{ShouldSkipExcluded: true})
 		differences := slices.DeleteFunc(testutil.SnapshotDiff(want, got), func(rel string) bool {
 			return isAtOrInside(filepath.ToSlash(rel), changes.Kept)
 		})
@@ -111,7 +111,7 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 	}
 	checkpoint("start")
 	for step := range 40 {
-		switch roll := rng.IntN(20); {
+		switch roll := random.IntN(20); {
 		case roll < 3:
 			restoreRandom()
 		case roll == 3:
@@ -137,8 +137,8 @@ func TestRandomHistoryWithScans(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { projectStore.Close() })
 		runRandomHistory(t, seed, projectStore, (*store.Store).Take, true)
-		projectStore.Close()
 	}
 }
 
@@ -191,6 +191,7 @@ func TestRandomHistoryWithWatcher(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { projectStore.Close() })
 		client := startWatcher(t, projectStore)
 		checkpointer := func(projectStore *store.Store, options store.CheckpointOptions) (store.Checkpoint, error) {
 			checkpoint, err := client.Checkpoint(projectStore, options)

@@ -3,7 +3,6 @@ package restore
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -67,43 +66,7 @@ func apply(tb testing.TB, projectStore *store.Store, id int) Changes {
 // every path under root.
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
-	entries := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, _ fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		switch {
-		case info.Mode()&fs.ModeSymlink != 0:
-			target, err := os.Readlink(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			entries[rel] = "link " + target
-		case info.Mode()&fs.ModeNamedPipe != 0:
-			entries[rel] = fmt.Sprintf("fifo %v", info.Mode().Perm())
-		case info.IsDir():
-			entries[rel] = fmt.Sprintf("dir %v %d", info.Mode().Perm(), info.ModTime().UnixNano())
-		default:
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			entries[rel] = fmt.Sprintf("file %v %d %q", info.Mode().Perm(), info.ModTime().UnixNano(), data)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return entries
+	return testutil.Snapshot(t, root, testutil.SnapshotOptions{ShouldIncludeDirTimes: true})
 }
 
 func requireSame(t *testing.T, want, got map[string]string) {

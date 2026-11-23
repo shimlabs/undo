@@ -19,9 +19,9 @@ import (
 // pipes, mode changes and excluded directories. Names come from a small set,
 // so changes often hit the same paths.
 type Mutator struct {
-	tb   testing.TB
-	rng  *rand.Rand
-	root string
+	tb     testing.TB
+	random *rand.Rand
+	root   string
 }
 
 // NewMutator returns a Mutator for the project at root, seeded with seed so a
@@ -29,7 +29,7 @@ type Mutator struct {
 func NewMutator(tb testing.TB, root string, seed uint64) *Mutator {
 	tb.Helper()
 	tb.Cleanup(func() { makeTreeWritable(root) })
-	return &Mutator{tb: tb, rng: rand.New(rand.NewPCG(seed, seed)), root: root}
+	return &Mutator{tb: tb, random: rand.New(rand.NewPCG(seed, seed)), root: root}
 }
 
 // Mutate makes one random change and describes it. A change the filesystem
@@ -40,9 +40,9 @@ func (m *Mutator) Mutate() string {
 	if m.isThroughSymlink(rel) {
 		return "skip " + rel
 	}
-	switch m.rng.IntN(11) {
+	switch m.random.IntN(11) {
 	case 0, 1, 2:
-		content := strings.Repeat(string(rune('a'+m.rng.IntN(26))), m.rng.IntN(5000))
+		content := strings.Repeat(string(rune('a'+m.random.IntN(26))), m.random.IntN(5000))
 		// Opening a named pipe to write waits for a reader forever.
 		if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
 			return "skip write " + rel
@@ -69,14 +69,14 @@ func (m *Mutator) Mutate() string {
 		// An excluded name in another case is a different name to the
 		// exclude rules but the same folder to a filesystem that ignores
 		// case, which undo does not reconcile.
-		if filepath.Base(path) == "node_modules" {
+		if filepath.Base(path) == excludedDirName {
 			return "skip rename to upper case " + rel
 		}
 		upper := filepath.Join(filepath.Dir(path), strings.ToUpper(filepath.Base(path)))
 		_ = os.Rename(path, upper)
 		return "rename to upper case " + rel
 	case 7:
-		target := []string{"a", "b", "c/a", "missing"}[m.rng.IntN(4)]
+		target := []string{"a", "b", "c/a", "missing"}[m.random.IntN(4)]
 		if os.MkdirAll(filepath.Dir(path), 0o755) == nil {
 			_ = os.Symlink(target, path)
 		}
@@ -90,7 +90,7 @@ func (m *Mutator) Mutate() string {
 		}
 		// Linux watches no excluded directory, so a name made there is seen
 		// only at the next full comparison, as design.md says.
-		if runtime.GOOS == "linux" && slices.Contains(strings.Split(rel, string(filepath.Separator)), "node_modules") {
+		if runtime.GOOS == "linux" && slices.Contains(strings.Split(rel, string(filepath.Separator)), excludedDirName) {
 			return "skip hard link into " + rel
 		}
 		_ = os.Link(filepath.Join(m.root, from), path)
@@ -111,17 +111,17 @@ func (m *Mutator) Mutate() string {
 		if info.IsDir() {
 			modes = []fs.FileMode{0o700, 0o755, 0o555}
 		}
-		mode := modes[m.rng.IntN(len(modes))]
+		mode := modes[m.random.IntN(len(modes))]
 		_ = os.Chmod(path, mode)
 		return fmt.Sprintf("chmod %s %v", rel, mode)
 	}
 }
 
 func (m *Mutator) randomPath() string {
-	names := []string{"a", "b", "c", "A", "node_modules"}
-	parts := make([]string, 1+m.rng.IntN(3))
+	names := []string{"a", "b", "c", "A", excludedDirName}
+	parts := make([]string, 1+m.random.IntN(3))
 	for i := range parts {
-		parts[i] = names[m.rng.IntN(len(names))]
+		parts[i] = names[m.random.IntN(len(names))]
 	}
 	return filepath.Join(parts...)
 }
@@ -150,85 +150,4 @@ func makeTreeWritable(path string) {
 		}
 		return nil
 	})
-}
-
-// Snapshot describes every path under root that undo restores: its kind,
-// permissions, symlink target, and for a file its modification time and
-// content. Paths inside an excluded node_modules directory are left out,
-// since a restore never touches them, and so are directory times, which an
-// excluded change also moves.
-func Snapshot(tb testing.TB, root string) map[string]string {
-	tb.Helper()
-	entries := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, _ fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if slices.Contains(strings.Split(rel, string(filepath.Separator)), "node_modules") {
-			return nil
-		}
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		entries[rel], err = describe(path, info)
-		return err
-	})
-	if err != nil {
-		tb.Fatal(err)
-	}
-	return entries
-}
-
-func describe(path string, info fs.FileInfo) (string, error) {
-	switch {
-	case info.Mode()&fs.ModeSymlink != 0:
-		target, err := os.Readlink(path)
-		return "link " + target, err
-	case info.Mode()&fs.ModeNamedPipe != 0:
-		return fmt.Sprintf("fifo %v", info.Mode().Perm()), nil
-	case info.IsDir():
-		return fmt.Sprintf("dir %v", info.Mode().Perm()), nil
-	default:
-		data, err := os.ReadFile(path)
-		return fmt.Sprintf("file %v %d %q", info.Mode().Perm(), info.ModTime().UnixNano(), data), err
-	}
-}
-
-// SnapshotDiff lists the paths whose description differs between want and
-// got. A directory got has and want lacks is not listed when it holds an
-// excluded node_modules, which a restore must leave in place.
-func SnapshotDiff(want, got map[string]string) []string {
-	var paths []string
-	for rel, description := range want {
-		if got[rel] != description {
-			paths = append(paths, rel)
-		}
-	}
-	for rel, description := range got {
-		if _, isWanted := want[rel]; isWanted {
-			continue
-		}
-		if !strings.HasPrefix(description, "dir ") || !holdsExcluded(got, rel) {
-			paths = append(paths, rel)
-		}
-	}
-	slices.Sort(paths)
-	return paths
-}
-
-// holdsExcluded reports whether the directory rel in snapshot has nothing in
-// it but directories, which then must lead to excluded content.
-func holdsExcluded(snapshot map[string]string, rel string) bool {
-	prefix := rel + string(filepath.Separator)
-	for other, description := range snapshot {
-		if strings.HasPrefix(other, prefix) && !strings.HasPrefix(description, "dir ") {
-			return false
-		}
-	}
-	return true
 }
