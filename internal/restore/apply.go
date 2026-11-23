@@ -292,7 +292,7 @@ func (p *restorePlan) restoreNameCase(rel string) error {
 // inParent opens the directory that holds rel through the project root and
 // calls write with it and rel's name.
 func (p *restorePlan) inParent(rel string, write func(dir *os.File, name string) error) error {
-	dir, err := p.projectRoot.Open(filepath.FromSlash(path.Dir(rel)))
+	dir, err := openDirIn(p.projectRoot, path.Dir(rel))
 	if err != nil {
 		return err
 	}

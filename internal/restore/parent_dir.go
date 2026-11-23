@@ -4,6 +4,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+
+	"golang.org/x/sys/unix"
 )
 
 // parentDir keeps open the directory that holds the path being written or
@@ -26,7 +28,7 @@ func (d *parentDir) open(rel string) (*os.File, error) {
 		return d.file, nil
 	}
 	d.close()
-	file, err := d.root.Open(filepath.FromSlash(dir))
+	file, err := openDirIn(d.root, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -46,4 +48,10 @@ func (d *parentDir) close() {
 		_ = d.file.Close()
 		d.rel, d.file = "", nil
 	}
+}
+
+// openDirIn opens the directory rel in root. A named pipe swapped in for it
+// fails at once instead of blocking until a writer opens the pipe.
+func openDirIn(root *os.Root, rel string) (*os.File, error) {
+	return root.OpenFile(filepath.FromSlash(rel), os.O_RDONLY|unix.O_DIRECTORY|unix.O_NONBLOCK, 0)
 }
