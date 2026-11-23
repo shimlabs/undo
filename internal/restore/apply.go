@@ -44,8 +44,6 @@ func (p *restorePlan) apply(projectStore *store.Store, id int) error {
 	if err != nil {
 		return err
 	}
-	// A lost or skipped path still holds what the project had, not what the
-	// checkpoint did.
 	written := slices.Concat(p.changes.RestoredPaths(), dirs)
 	entries := p.restoredEntries(written)
 	for rel, entry := range p.unchanged {

@@ -50,9 +50,8 @@ const (
 	KeptOccupied
 )
 
-// RestoredPaths returns the written paths the restore wrote: those whose
-// stored copy was lost and the sockets and devices it skipped hold what the
-// project had, not what the checkpoint did.
+// RestoredPaths returns Written without Lost and Skipped, which still hold
+// what the project had, not what the checkpoint did.
 func (c Changes) RestoredPaths() []string {
 	notWritten := toSet(slices.Concat(c.Lost, c.Skipped))
 	return slices.DeleteFunc(slices.Clone(c.Written), func(rel string) bool { return notWritten[rel] })
