@@ -177,11 +177,11 @@ func TestDiffGroupsDirectories(t *testing.T) {
 
 	_, out := run(t, root, "", "diff", "1")
 
-	if !strings.Contains(out, "restore  big/  (32 paths)") || !strings.Contains(out, "restore  f.txt\n") {
+	if !strings.Contains(out, "restore  big/") || !strings.Contains(out, "32 paths") || !strings.Contains(out, "restore  f.txt\n") {
 		t.Fatalf("output not grouped:\n%s", out)
 	}
-	if lines := strings.Count(out, "\n"); lines > 3 {
-		t.Fatalf("%d lines, want at most 3:\n%s", lines, out)
+	if rows := strings.Count(out, "  restore  "); rows != 2 {
+		t.Fatalf("%d restore rows, want 2:\n%s", rows, out)
 	}
 }
 
@@ -265,7 +265,7 @@ func TestStatusShowsDiskUseAndWatcher(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	for _, want := range []string{
-		"Checkpoints  1 (oldest ",
+		"Checkpoints  1, the oldest ",
 		"Disk used    ",
 		"not shared with the project, limit 5.0 GB",
 		"Watcher      not running",
@@ -395,7 +395,7 @@ func TestUndoFindsDeletedProject(t *testing.T) {
 	}
 
 	_, out := run(t, parent, "", "list")
-	if !strings.Contains(out, "was deleted. Bring it back with: undo to 1 --project") {
+	if !strings.Contains(out, "was deleted. Bring it back with:\n  undo to 1 --project") {
 		t.Fatalf("list in the parent does not point to the deleted project:\n%s", out)
 	}
 	if code, out := run(t, parent, "", "to", "1", "--yes", "--project", root); code != 0 {
@@ -512,7 +512,7 @@ func TestListInHomeFindsDeletedProject(t *testing.T) {
 	}
 
 	code, out := run(t, home, "", "list")
-	if code != 0 || !strings.Contains(out, "was deleted. Bring it back with: undo to 1 --project") {
+	if code != 0 || !strings.Contains(out, "was deleted. Bring it back with:\n  undo to 1 --project") {
 		t.Fatalf("exit %d, list in the home directory:\n%s", code, out)
 	}
 }

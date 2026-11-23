@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"os/exec"
 	"strings"
 
@@ -26,7 +25,7 @@ func checkpointCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "Checkpoint %d\n", checkpoint.ID)
+	env.stdout().Success("Took checkpoint %d", checkpoint.ID)
 	return nil
 }
 

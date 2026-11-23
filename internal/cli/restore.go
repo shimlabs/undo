@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/terminal"
 )
 
 func undoCommand(args []string, env Env) error {
@@ -71,11 +71,15 @@ func diffCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
+	out := env.stdout()
+	printCheckpointHeading(out, checkpoint, projectStore.Root())
 	if changes.Len() == 0 {
-		fmt.Fprintln(env.Stdout, "No changes since this checkpoint.")
+		out.Success("The project already matches checkpoint %d.", checkpoint.ID)
 		return nil
 	}
-	printChanges(env.Stdout, changes)
+	printChanges(out, changes)
+	out.Println("")
+	out.Printf("Run %s to change these %s.\n", out.Bold(fmt.Sprintf("undo to %d", checkpoint.ID)), countOf(changes.Len(), "path"))
 	return nil
 }
 
@@ -100,14 +104,35 @@ func listCommand(args []string, env Env) error {
 		printNoCheckpoints(env, parsed)
 		return nil
 	}
-	for _, checkpoint := range checkpoints {
-		label := printable(checkpoint.Label)
-		if checkpoint.Dir != "" && checkpoint.Dir != projectStore.Root() {
-			label += "  (in " + printable(checkpoint.Dir) + ")"
-		}
-		fmt.Fprintf(env.Stdout, "%5d  %-9s  %s\n", checkpoint.ID, timeAgo(checkpoint.Time), label)
-	}
+	printCheckpoints(env.stdout(), checkpoints, projectStore.Root())
 	return nil
+}
+
+// printCheckpoints lists checkpoints in a table: id, age, the command that
+// followed, and where and by which agent it ran when that adds something.
+func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root string) {
+	out.Heading("Checkpoints in %s", displayPath(root))
+	idWidth := len(strconv.Itoa(checkpoints[len(checkpoints)-1].ID))
+	ages := make([]string, len(checkpoints))
+	ageWidth := 0
+	for i, checkpoint := range checkpoints {
+		ages[i] = timeAgo(checkpoint.Time)
+		ageWidth = max(ageWidth, len(ages[i]))
+	}
+	for i, checkpoint := range checkpoints {
+		var details []string
+		if checkpoint.Dir != "" && checkpoint.Dir != root {
+			details = append(details, "in "+displayPath(checkpoint.Dir))
+		}
+		if checkpoint.Agent != "" {
+			details = append(details, checkpoint.Agent)
+		}
+		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), printable(checkpoint.Label))
+		if len(details) > 0 {
+			line += "  " + out.Cyan(strings.Join(details, " · "))
+		}
+		out.Println(line)
+	}
 }
 
 // isMissingProject reports whether err means there is nothing to restore
@@ -125,7 +150,8 @@ func printNoCheckpoints(env Env, parsed flags) {
 	if root, err := projectRoot(env, parsed); err == nil {
 		dir = root
 	}
-	fmt.Fprintf(env.Stdout, "No checkpoints yet for %s\n", printable(dir))
+	out := env.stdout()
+	out.Printf("No checkpoints yet in %s. The next agent command, or %s, takes one.\n", displayPath(dir), out.Bold("undo checkpoint"))
 	stores, err := store.StoresUnder(env.StoreHome, env.Dir)
 	if err != nil {
 		return
@@ -139,9 +165,10 @@ func printNoCheckpoints(env Env, parsed flags) {
 			if shown := printable(root); shown != root {
 				// A path with control characters cannot be shown both readably
 				// and safe to paste, so the command is described instead.
-				fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with undo to %d and --project set to that path.\n", shown, latest.ID)
+				out.Warning("%s was deleted. Bring it back with undo to %d and --project set to that path.", shown, latest.ID)
 			} else {
-				fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with: undo to %d --project %s\n", root, latest.ID, shell.Quote(root))
+				out.Warning("%s was deleted. Bring it back with:", displayPath(root))
+				out.Printf("  %s\n", out.Bold(fmt.Sprintf("undo to %d --project %s", latest.ID, shell.Quote(root))))
 			}
 		}
 	}
@@ -167,18 +194,20 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 // and asks first. With it, it skips that preview, which costs a scan of the
 // project, and shows the changes it made instead.
 func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, isConfirmed bool) error {
-	fmt.Fprintf(env.Stdout, "Checkpoint %d, %s, before: %s\n", checkpoint.ID, timeAgo(checkpoint.Time), printable(checkpoint.Label))
+	out := env.stdout()
+	printCheckpointHeading(out, checkpoint, projectStore.Root())
 	if !isConfirmed {
 		changes, err := restore.Plan(projectStore, checkpoint.ID)
 		if err != nil {
 			return err
 		}
 		if changes.Len() == 0 {
-			fmt.Fprintln(env.Stdout, "Nothing to restore: the project already matches this checkpoint.")
+			out.Success("Nothing to restore: the project already matches checkpoint %d.", checkpoint.ID)
 			return nil
 		}
-		printChanges(env.Stdout, changes)
-		if !confirm(env, fmt.Sprintf("Restore %d paths? [y/N] ", changes.Len())) {
+		printChanges(out, changes)
+		out.Println("")
+		if !confirm(env, out.Bold(fmt.Sprintf("Restore %s?", countOf(changes.Len(), "path")))+" [y/N] ") {
 			return errDeclined
 		}
 	}
@@ -187,37 +216,90 @@ func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, 
 		return err
 	}
 	if isConfirmed {
-		printChanges(env.Stdout, applied)
+		printChanges(out, applied)
+		out.Println("")
 	}
-	printNotRestored(env.Stdout, applied)
-	fmt.Fprintf(env.Stdout, "Restored %d paths. Run undo again to put them back.\n", applied.Len())
+	if printNotRestored(out, applied) {
+		out.Println("")
+	}
+	out.Success("Restored %s. Run %s again to put them back.", countOf(applied.Len(), "path"), out.Bold("undo"))
 	return nil
 }
 
-// printNotRestored lists what the restore left alone and why.
-func printNotRestored(out io.Writer, applied restore.Changes) {
-	for _, rel := range applied.Skipped {
-		fmt.Fprintf(out, "  skipped  %s  (sockets and devices cannot be restored)\n", printable(rel))
+// printCheckpointHeading names checkpoint, its age, and the command that
+// followed it.
+func printCheckpointHeading(out *terminal.Writer, checkpoint store.Checkpoint, root string) {
+	out.Heading("Checkpoint %d · %s", checkpoint.ID, timeAgo(checkpoint.Time))
+	if checkpoint.Label != "" {
+		out.Printf("    %s %s\n", out.Dim("before"), printable(checkpoint.Label))
 	}
-	for _, rel := range applied.Kept {
-		fmt.Fprintf(out, "  kept     %s  (left as it is: unreadable, locked, or excluded since the checkpoint)\n", printable(rel))
+	if checkpoint.Dir != "" && checkpoint.Dir != root {
+		out.Printf("    %s %s\n", out.Dim("in"), displayPath(checkpoint.Dir))
 	}
-	for _, rel := range applied.Lost {
-		fmt.Fprintf(out, "  lost     %s  (its saved copy is gone, as after a power cut)\n", printable(rel))
+	out.Println("")
+}
+
+// changeRow is one line of a list of changes: what happens to a path, the
+// path, and a detail such as how many paths it holds.
+type changeRow struct {
+	action string
+	path   string
+	detail string
+}
+
+// printRows writes rows as aligned columns.
+func printRows(out *terminal.Writer, rows []changeRow, colorAction func(string) string) {
+	actionWidth, pathWidth := 0, 0
+	for _, row := range rows {
+		actionWidth = max(actionWidth, len(row.action))
+		pathWidth = max(pathWidth, len(row.path))
 	}
-	for _, rel := range applied.Unstable {
-		fmt.Fprintf(out, "  check    %s  (it was changing while it was saved)\n", printable(rel))
+	pathWidth = min(pathWidth, 48)
+	for _, row := range rows {
+		line := fmt.Sprintf("  %s  %s", colorAction(fmt.Sprintf("%-*s", actionWidth, row.action)), row.path)
+		if row.detail != "" {
+			line += strings.Repeat(" ", max(pathWidth-len(row.path), 0)) + "  " + out.Dim(row.detail)
+		}
+		out.Println(line)
 	}
 }
 
-func printChanges(out io.Writer, changes restore.Changes) {
-	printGrouped(out, "restore", changes.Written)
-	printGrouped(out, "delete ", changes.Removed)
+// printNotRestored lists what the restore left alone and why, and reports
+// whether it listed anything.
+func printNotRestored(out *terminal.Writer, applied restore.Changes) bool {
+	groups := []struct {
+		action string
+		paths  []string
+		reason string
+		color  func(string) string
+	}{
+		{"kept", applied.Kept, "unreadable, locked, or excluded since the checkpoint", out.Yellow},
+		{"lost", applied.Lost, "its saved copy is gone, as after a power cut", out.Red},
+		{"check", applied.Unstable, "it was changing while it was saved", out.Yellow},
+		{"skipped", applied.Skipped, "sockets and devices cannot be restored", out.Dim},
+	}
+	hasRows := false
+	for _, group := range groups {
+		var rows []changeRow
+		for _, rel := range group.paths {
+			rows = append(rows, changeRow{action: group.action, path: printable(rel), detail: group.reason})
+		}
+		if len(rows) > 0 {
+			printRows(out, rows, group.color)
+			hasRows = true
+		}
+	}
+	return hasRows
 }
 
-// printGrouped prints one line for each top-level path. Everything inside a
-// directory is shown as a single line with a count.
-func printGrouped(out io.Writer, verb string, paths []string) {
+func printChanges(out *terminal.Writer, changes restore.Changes) {
+	printRows(out, groupedRows("restore", changes.Written), out.Green)
+	printRows(out, groupedRows("remove", changes.Removed), out.Red)
+}
+
+// groupedRows returns one row for each top-level path. Everything inside a
+// directory is shown as a single row with a count.
+func groupedRows(action string, paths []string) []changeRow {
 	var order []string
 	groups := map[string][]string{}
 	for _, rel := range paths {
@@ -230,14 +312,16 @@ func printGrouped(out io.Writer, verb string, paths []string) {
 		}
 		groups[top] = append(groups[top], rel)
 	}
+	rows := make([]changeRow, 0, len(order))
 	for _, top := range order {
 		members := groups[top]
 		if len(members) == 1 {
-			fmt.Fprintf(out, "  %s  %s\n", verb, printable(members[0]))
+			rows = append(rows, changeRow{action: action, path: printable(members[0])})
 			continue
 		}
-		fmt.Fprintf(out, "  %s  %s/  (%d paths)\n", verb, printable(top), len(members))
+		rows = append(rows, changeRow{action: action, path: printable(top) + "/", detail: countOf(len(members), "path")})
 	}
+	return rows
 }
 
 func confirm(env Env, prompt string) bool {

@@ -17,7 +17,9 @@ func installCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "Updated %s\n%s\n", path, agent.Note)
+	out := env.stdout()
+	out.Success("Installed the undo hook for %s", agent.Title)
+	out.Printf("  %s %s\n\n%s\n", out.Dim("in"), displayPath(path), agent.Note)
 	return nil
 }
 
@@ -30,7 +32,7 @@ func uninstallCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "Removed the undo hook from %s\n", path)
+	env.stdout().Success("Removed the undo hook for %s from %s", agent.Title, displayPath(path))
 	return nil
 }
 

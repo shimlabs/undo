@@ -16,6 +16,7 @@ import (
 	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/terminal"
 	"github.com/shimlabs/undo/internal/watch"
 )
 
@@ -44,10 +45,27 @@ Flags:
   --project <path>         use the project at <path>, even one that was deleted
 `
 
+// printUsage writes the usage text with its section names in bold.
+func printUsage(out *terminal.Writer) {
+	text := usage()
+	for _, section := range []string{"Usage:", "Flags:"} {
+		text = strings.Replace(text, section, out.Bold(section), 1)
+	}
+	out.Printf("%s", text)
+}
+
 func usage() string {
 	names := hook.AgentNames()
 	last := len(names) - 1
 	return fmt.Sprintf(usageFormat, strings.Join(names[:last], ", ")+" or "+names[last])
+}
+
+func (env Env) stdout() *terminal.Writer {
+	return terminal.NewWriter(env.Stdout)
+}
+
+func (env Env) stderr() *terminal.Writer {
+	return terminal.NewWriter(env.Stderr)
 }
 
 // Env holds the directories, streams and settings a command works with.
@@ -94,19 +112,23 @@ func Run(args []string, env Env) int {
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		return exit.ExitCode()
 	}
+	errOut := env.stderr()
 	if usageErr, ok := errors.AsType[usageError](err); ok {
-		fmt.Fprintf(env.Stderr, "undo: %s\n\n%s", usageErr.message, usage())
+		errOut.Error("%s", usageErr.message)
+		errOut.Println("")
+		printUsage(errOut)
 		return 2
 	}
 	switch {
 	case errors.Is(err, errDeclined):
 	case errors.Is(err, store.ErrCloneUnsupported):
-		fmt.Fprintf(env.Stderr, "undo: %s, so it cannot protect this project cheaply.\n"+
-			"Run 'undo checkpoint --copy' once to keep full copies instead. They take as much disk as the project.\n", printable(err.Error()))
+		errOut.Error("%s, so undo cannot protect this project cheaply.", printable(err.Error()))
+		errOut.Printf("Run %s once to keep full copies instead. They take as much disk as the project.\n", errOut.Bold("undo checkpoint --copy"))
 	case errors.Is(err, project.ErrNotProject):
-		fmt.Fprintf(env.Stderr, "undo: %s.\nRun undo, or start your agent, inside a project folder.\n", printable(err.Error()))
+		errOut.Error("%s.", printable(err.Error()))
+		errOut.Println("Run undo, or start your agent, inside a project folder.")
 	default:
-		fmt.Fprintf(env.Stderr, "undo: %s\n", printable(err.Error()))
+		errOut.Error("%s", printable(err.Error()))
 	}
 	return 1
 }
@@ -144,7 +166,7 @@ func dispatch(args []string, env Env) error {
 		fmt.Fprintln(env.Stdout, "undo", Version)
 		return nil
 	case "help":
-		fmt.Fprint(env.Stdout, usage())
+		printUsage(env.stdout())
 		return nil
 	}
 	return usageError{fmt.Sprintf("unknown command %q", command)}
