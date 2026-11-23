@@ -15,7 +15,7 @@ import (
 
 // watchCommand runs the project's watcher until it has been idle for an hour
 // or is told to stop.
-func watchCommand(env Env) error {
+func watchCommand(_ flags, env Env) error {
 	projectStore, err := openStore(env, flags{})
 	if err != nil {
 		return err

@@ -8,8 +8,8 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-func installCommand(args []string, env Env) error {
-	agent, err := agentArg("install", args)
+func installCommand(parsed flags, env Env) error {
+	agent, err := agentArg("install", parsed.args)
 	if err != nil {
 		return err
 	}
@@ -23,8 +23,8 @@ func installCommand(args []string, env Env) error {
 	return nil
 }
 
-func uninstallCommand(args []string, env Env) error {
-	agent, err := agentArg("uninstall", args)
+func uninstallCommand(parsed flags, env Env) error {
+	agent, err := agentArg("uninstall", parsed.args)
 	if err != nil {
 		return err
 	}
@@ -50,10 +50,10 @@ func agentArg(command string, args []string) (hook.Agent, error) {
 // hookCommand handles one event from an agent. It never fails and never
 // prints, because some agents block the tool when a hook fails or prints.
 // Failures go to the error log instead.
-func hookCommand(args []string, env Env) {
+func hookCommand(parsed flags, env Env) error {
 	name := ""
-	if len(args) > 0 {
-		name = args[0]
+	if len(parsed.args) > 0 {
+		name = parsed.args[0]
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -63,9 +63,10 @@ func hookCommand(args []string, env Env) {
 	agent, ok := hook.FindAgent(name)
 	if !ok {
 		store.LogHomeError(env.StoreHome, fmt.Errorf("hook for unknown agent %q", name))
-		return
+		return nil
 	}
 	_ = agent.Handle(env.Stdin, env.StoreHome, env.checkpointer())
+	return nil
 }
 
 // installedAgentTitles returns the product names of the agents that have

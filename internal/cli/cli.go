@@ -3,13 +3,11 @@ package cli
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/shimlabs/undo/internal/project"
@@ -97,79 +95,6 @@ func Run(args []string, env Env) int {
 	return 1
 }
 
-func dispatch(args []string, env Env) error {
-	name, rest := "", args
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		name, rest = args[0], args[1:]
-	}
-	if name == "" && len(rest) > 0 && (rest[0] == "--version" || rest[0] == "-v") {
-		return versionCommand(nil, env)
-	}
-	cmd, ok := findCommand(name)
-	if !ok {
-		return unknownCommandError(name)
-	}
-	isHelp, err := checkArguments(cmd, rest)
-	if err != nil {
-		return err
-	}
-	if isHelp {
-		if cmd.name == "" {
-			printHelp(env.stdout())
-		} else {
-			printCommandHelp(env.stdout(), cmd)
-		}
-		return nil
-	}
-	err = cmd.run(rest, env)
-	if usageErr, ok := errors.AsType[usageError](err); ok && usageErr.command == nil {
-		usageErr.command = &cmd
-		return usageErr
-	}
-	return err
-}
-
-// checkArguments reports whether args ask for help, and refuses flags cmd
-// does not take and more arguments than it takes. Commands that run another
-// command, or that agents and the watcher run, take whatever they get.
-func checkArguments(cmd command, args []string) (isHelp bool, err error) {
-	if cmd.group == "" && cmd.name != "help" && cmd.name != "version" {
-		return false, nil
-	}
-	if cmd.maxArguments < 0 {
-		return len(args) > 0 && (args[0] == "-h" || args[0] == "--help"), nil
-	}
-	count := 0
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "-h" || arg == "--help" {
-			return true, nil
-		}
-		if !strings.HasPrefix(arg, "-") || arg == "-" {
-			count++
-			continue
-		}
-		name, _, hasValue := strings.Cut(arg, "=")
-		flag, isKnown := findFlag(name)
-		if !isKnown {
-			return false, usageError{message: fmt.Sprintf("unknown flag %s", name), command: &cmd}
-		}
-		if !slices.Contains(cmd.flags, flag.name) {
-			return false, usageError{message: fmt.Sprintf("%s does not take %s", cmd.listing(), flag.name), command: &cmd}
-		}
-		if flag.value != "" && !hasValue {
-			i++
-		}
-	}
-	if count > cmd.maxArguments {
-		if cmd.maxArguments == 0 {
-			return false, usageError{message: fmt.Sprintf("%s takes no arguments", cmd.listing()), command: &cmd}
-		}
-		return false, usageError{message: fmt.Sprintf("too many arguments for %s", cmd.listing()), command: &cmd}
-	}
-	return false, nil
-}
-
 // printUsageError writes err, how its command is typed, and where to read
 // more.
 func printUsageError(out *terminal.Writer, err usageError) {
@@ -184,47 +109,6 @@ func printUsageError(out *terminal.Writer, err usageError) {
 		help = "undo help"
 	}
 	out.Printf("Run %s for more.\n", out.Bold(strings.TrimSpace(help)))
-}
-
-// flags holds the parsed command-line flags and the remaining arguments.
-type flags struct {
-	isConfirmed bool
-	isCopyMode  bool
-	label       string
-	project     string
-	args        []string
-}
-
-func parseFlags(args []string) (flags, error) {
-	var parsed flags
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		name, value, hasValue := strings.Cut(arg, "=")
-		switch {
-		case arg == "--yes" || arg == "-y":
-			parsed.isConfirmed = true
-		case arg == "--copy":
-			parsed.isCopyMode = true
-		case name == "--label" || name == "--project":
-			if !hasValue {
-				if i+1 == len(args) {
-					return parsed, usageError{message: name + " needs a value"}
-				}
-				i++
-				value = args[i]
-			}
-			if name == "--label" {
-				parsed.label = value
-			} else {
-				parsed.project = value
-			}
-		case strings.HasPrefix(arg, "-"):
-			return parsed, usageError{message: fmt.Sprintf("unknown flag %s", arg)}
-		default:
-			parsed.args = append(parsed.args, arg)
-		}
-	}
-	return parsed, nil
 }
 
 // projectRoot returns the root of the project in env.Dir, or of the project

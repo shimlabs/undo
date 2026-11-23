@@ -11,8 +11,8 @@ func TestHelpListsEveryCommand(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	for _, cmd := range commands() {
-		if cmd.group != "" && !strings.Contains(out, cmd.listing()) {
-			t.Errorf("help does not list %q", cmd.listing())
+		if cmd.group != "" && !strings.Contains(out, cmd.synopsis()) {
+			t.Errorf("help does not list %q", cmd.synopsis())
 		}
 	}
 }

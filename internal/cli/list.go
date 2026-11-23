@@ -15,11 +15,7 @@ import (
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
-func listCommand(args []string, env Env) error {
-	parsed, err := parseFlags(args)
-	if err != nil {
-		return err
-	}
+func listCommand(parsed flags, env Env) error {
 	projectStore, err := openStore(env, parsed)
 	if isMissingProject(err) {
 		printNoCheckpoints(env, parsed)

@@ -7,11 +7,7 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-func checkpointCommand(args []string, env Env) error {
-	parsed, err := parseFlags(args)
-	if err != nil {
-		return err
-	}
+func checkpointCommand(parsed flags, env Env) error {
 	projectStore, err := createStore(env, parsed)
 	if err != nil {
 		return err
@@ -30,10 +26,8 @@ func checkpointCommand(args []string, env Env) error {
 	return nil
 }
 
-func runCommand(args []string, env Env) error {
-	if len(args) > 0 && args[0] == "--" {
-		args = args[1:]
-	}
+func runCommand(parsed flags, env Env) error {
+	args := parsed.args
 	if len(args) == 0 {
 		return usageError{message: "undo run needs a command to run, after --"}
 	}

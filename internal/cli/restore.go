@@ -11,11 +11,7 @@ import (
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
-func undoCommand(args []string, env Env) error {
-	parsed, err := parseFlags(args)
-	if err != nil {
-		return err
-	}
+func undoCommand(parsed flags, env Env) error {
 	projectStore, err := openStore(env, parsed)
 	if isMissingProject(err) {
 		printNoCheckpoints(env, parsed)
@@ -36,11 +32,7 @@ func undoCommand(args []string, env Env) error {
 	return restoreTo(env, projectStore, latest, parsed.isConfirmed)
 }
 
-func toCommand(args []string, env Env) error {
-	parsed, err := parseFlags(args)
-	if err != nil {
-		return err
-	}
+func toCommand(parsed flags, env Env) error {
 	if len(parsed.args) != 1 {
 		return usageError{message: "undo to needs a checkpoint id; undo list shows them"}
 	}
@@ -52,11 +44,7 @@ func toCommand(args []string, env Env) error {
 	return restoreTo(env, projectStore, checkpoint, parsed.isConfirmed)
 }
 
-func diffCommand(args []string, env Env) error {
-	parsed, err := parseFlags(args)
-	if err != nil {
-		return err
-	}
+func diffCommand(parsed flags, env Env) error {
 	if len(parsed.args) != 1 {
 		return usageError{message: "undo diff needs a checkpoint id; undo list shows them"}
 	}

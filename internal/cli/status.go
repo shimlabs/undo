@@ -10,11 +10,7 @@ import (
 	"github.com/shimlabs/undo/internal/watch"
 )
 
-func statusCommand(args []string, env Env) error {
-	parsed, err := parseFlags(args)
-	if err != nil {
-		return err
-	}
+func statusCommand(parsed flags, env Env) error {
 	root, err := projectRoot(env, parsed)
 	if err != nil {
 		return err
