@@ -303,10 +303,14 @@ func StoresUnder(home, dir string) ([]*Store, error) {
 	var stores []*Store
 	for _, storeDir := range candidates {
 		s := &Store{dir: storeDir}
-		if s.loadConfig() != nil || s.config.Load().Root == "" || filepath.Dir(s.config.Load().Root) != dir || checkPrivateDir(storeDir) != nil {
+		if s.loadConfig() != nil || checkPrivateDir(storeDir) != nil {
 			continue
 		}
-		s.root = s.config.Load().Root
+		settings := s.config.Load()
+		if settings.Root == "" || filepath.Dir(settings.Root) != dir {
+			continue
+		}
+		s.root = settings.Root
 		stores = append(stores, s)
 	}
 	return stores, nil
