@@ -47,11 +47,15 @@ func agentArg(command string, args []string) (hook.Agent, error) {
 // prints, because some agents block the tool when a hook fails or prints.
 // Failures go to the error log instead.
 func hookCommand(args []string, env Env) {
-	defer func() { _ = recover() }()
 	name := ""
 	if len(args) > 0 {
 		name = args[0]
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			store.LogHomeError(env.StoreHome, fmt.Errorf("%s hook panicked: %v", name, recovered))
+		}
+	}()
 	agent, ok := hook.FindAgent(name)
 	if !ok {
 		store.LogHomeError(env.StoreHome, fmt.Errorf("hook for unknown agent %q", name))
