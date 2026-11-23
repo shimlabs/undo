@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math/rand/v2"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -177,9 +178,9 @@ func isAroundKept(rel string, want, got map[string]string, kept []string) bool {
 // listingDifferences compares the listing the store builds for checkpoint id
 // with a scan of the project as it is now. Files the checkpoint could not
 // read are left out of the scan, as they are of the listing. Without isExact,
-// named pipes are left out too: FSEvents does not report them on every
-// version of macOS, and the watcher learns of them at its next full
-// comparison, as design.md says.
+// named pipes are left out too, with the times of their directories:
+// FSEvents does not report them on every version of macOS, and the watcher
+// learns of them at its next full comparison, as design.md says.
 func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact bool) string {
 	t.Helper()
 	matcher, err := exclude.New(projectStore.Root())
@@ -204,9 +205,7 @@ func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact
 		}
 	}
 	if !isExact {
-		for _, listing := range []tree.Listing{stored, scanned} {
-			maps.DeleteFunc(listing, func(_ string, entry tree.Entry) bool { return entry.Kind == tree.Other })
-		}
+		ignoreNamedPipes(stored, scanned)
 	}
 	changed, deleted := tree.Changed(stored, scanned)
 	var lines strings.Builder
@@ -217,6 +216,28 @@ func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact
 		fmt.Fprintf(&lines, "  %s: stored %+v, not in the scan\n", rel, stored[rel])
 	}
 	return lines.String()
+}
+
+// ignoreNamedPipes leaves named pipes out of both listings, and the times of
+// the directories that hold one, which change with a pipe the events missed.
+func ignoreNamedPipes(listings ...tree.Listing) {
+	holdsPipe := map[string]bool{}
+	for _, listing := range listings {
+		for rel, entry := range listing {
+			if entry.Kind == tree.Other {
+				holdsPipe[path.Dir(rel)] = true
+			}
+		}
+	}
+	for _, listing := range listings {
+		maps.DeleteFunc(listing, func(_ string, entry tree.Entry) bool { return entry.Kind == tree.Other })
+		for dir := range holdsPipe {
+			if entry, ok := listing[dir]; ok {
+				entry.ModTime, entry.ChangeTime = 0, 0
+				listing[dir] = entry
+			}
+		}
+	}
 }
 
 func TestRandomHistoryWithWatcher(t *testing.T) {
