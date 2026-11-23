@@ -18,9 +18,7 @@ func TestLogErrorStaysSmall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.LogError(errors.New("disk full")); err != nil {
-		t.Fatal(err)
-	}
+	s.LogError(errors.New("disk full"))
 
 	info, err := os.Stat(filepath.Join(s.Dir(), "errors.log"))
 	if err != nil {

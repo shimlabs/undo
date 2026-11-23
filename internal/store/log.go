@@ -15,18 +15,18 @@ const maxLogSize = 1 << 20
 // LogError records a failure that happened where nobody could see it, such as
 // in an agent hook or the background watcher. Once the log passes maxLogSize,
 // it starts over.
-func (s *Store) LogError(failure error) error {
+// Logging is best effort: if the log cannot be written, the failure is lost.
+func (s *Store) LogError(failure error) {
 	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY
 	if info, err := os.Stat(s.logPath()); err == nil && info.Size() > maxLogSize {
 		flags |= os.O_TRUNC
 	}
 	file, err := os.OpenFile(s.logPath(), flags, 0o600)
 	if err != nil {
-		return err
+		return
 	}
 	defer file.Close()
-	_, err = fmt.Fprintf(file, "%s %v\n", time.Now().Format(time.RFC3339), failure)
-	return err
+	fmt.Fprintf(file, "%s %v\n", time.Now().Format(time.RFC3339), failure)
 }
 
 // LastError returns the most recent line written by LogError, or "" if there

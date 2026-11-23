@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -158,7 +159,7 @@ func TestSecondServerExits(t *testing.T) {
 	s, _ := serverProject(t)
 	startServer(t, s, time.Minute)
 
-	if err := Serve(context.Background(), s, Options{Idle: time.Minute, Limits: store.DefaultLimits}); err != ErrRunning {
+	if err := Serve(context.Background(), s, Options{Idle: time.Minute, Limits: store.DefaultLimits}); !errors.Is(err, ErrRunning) {
 		t.Fatalf("second Serve = %v, want ErrRunning", err)
 	}
 }

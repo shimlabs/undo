@@ -1,3 +1,5 @@
+// Command undo puts a project back the way it was before a coding agent ran a
+// command.
 package main
 
 import (

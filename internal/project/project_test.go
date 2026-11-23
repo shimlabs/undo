@@ -8,11 +8,11 @@ import (
 
 func resolved(t *testing.T, path string) string {
 	t.Helper()
-	real, err := filepath.EvalSymlinks(path)
+	path, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return real
+	return path
 }
 
 func TestRootFindsGitRoot(t *testing.T) {

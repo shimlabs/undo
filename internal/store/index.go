@@ -93,10 +93,8 @@ func (s *Store) flock(how int) (unlock func(), err error) {
 		file.Close()
 		return nil, err
 	}
-	unlock = func() {
-		unix.Flock(int(file.Fd()), unix.LOCK_UN)
-		file.Close()
-	}
+	// Closing the file releases the lock.
+	unlock = func() { file.Close() }
 	if err := s.loadConfig(); err != nil {
 		unlock()
 		return nil, err

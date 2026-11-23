@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"time"
@@ -87,7 +88,9 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 	go func() {
 		defer close(pruned)
 		for range prunes {
-			s.Prune(time.Now(), options.Limits)
+			if _, err := s.Prune(time.Now(), options.Limits); err != nil {
+				s.LogError(fmt.Errorf("pruning failed: %w", err))
+			}
 		}
 	}()
 	defer func() {
@@ -136,7 +139,9 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 
 func serveOne(conn net.Conn, tracker *Tracker, lastID int) int {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(requestTimeout))
+	if err := conn.SetDeadline(time.Now().Add(requestTimeout)); err != nil {
+		return lastID
+	}
 	var req request
 	if err := json.NewDecoder(conn).Decode(&req); err != nil {
 		return lastID
@@ -156,6 +161,7 @@ func serveOne(conn net.Conn, tracker *Tracker, lastID int) int {
 		resp.Error = "unknown request " + req.Op
 	}
 	resp.LastID = lastID
-	json.NewEncoder(conn).Encode(resp)
+	// A client that does not get the reply scans the project instead.
+	_ = json.NewEncoder(conn).Encode(resp)
 	return lastID
 }

@@ -70,9 +70,9 @@ type Stream struct {
 }
 
 // Start watches the directories in paths and calls onEvents on a background
-// thread with each batch of changes. FSEvents watches whole trees, so skip is
-// not used.
-func Start(paths []string, skip func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
+// thread with each batch of changes. FSEvents watches whole trees, so the
+// second argument, which tells the Linux stream what not to watch, is not used.
+func Start(paths []string, _ func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
 	cPaths := make([]*C.char, len(paths))
 	for i, path := range paths {
 		cPaths[i] = C.CString(path)

@@ -19,6 +19,8 @@ import (
 // Kind is the type of a filesystem entry.
 type Kind uint8
 
+// The kinds of entry a listing records. Other covers named pipes, sockets
+// and devices.
 const (
 	File Kind = iota + 1
 	Dir

@@ -29,9 +29,10 @@ func File(src, dst string) error {
 // unsupported marks the errors FICLONE returns on filesystems without clones,
 // or across filesystems, as errors.ErrUnsupported.
 func unsupported(err error) error {
-	switch err {
-	case unix.EXDEV, unix.EINVAL, unix.ENOTTY, unix.EOPNOTSUPP, unix.ENOSYS:
-		return errors.Join(errors.ErrUnsupported, err)
+	for _, errno := range []error{unix.EXDEV, unix.EINVAL, unix.ENOTTY, unix.EOPNOTSUPP, unix.ENOSYS} {
+		if errors.Is(err, errno) {
+			return errors.Join(errors.ErrUnsupported, err)
+		}
 	}
 	return err
 }

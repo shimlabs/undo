@@ -118,10 +118,12 @@ func dispatch(args []string, env Env) error {
 		checkpoint := func(s *store.Store, label, dir string) (store.Checkpoint, error) {
 			return take(s, label, dir, env)
 		}
+		// The handlers log their failures in the store. Returning them would
+		// make the agent see a failed hook.
 		if len(rest) > 0 && rest[0] == "codex" {
-			hook.HandleCodex(env.Stdin, checkpoint)
+			_ = hook.HandleCodex(env.Stdin, checkpoint)
 		} else {
-			hook.HandleClaude(env.Stdin, checkpoint)
+			_ = hook.HandleClaude(env.Stdin, checkpoint)
 		}
 		return nil
 	case "watch":

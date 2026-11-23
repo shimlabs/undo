@@ -57,7 +57,7 @@ func write(t *testing.T, path, content string) {
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
 	snap := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, _ fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

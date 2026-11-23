@@ -85,7 +85,9 @@ func connect(s *store.Store, start func() error) (net.Conn, error) {
 
 func send(conn net.Conn, req request) (response, error) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(requestTimeout))
+	if err := conn.SetDeadline(time.Now().Add(requestTimeout)); err != nil {
+		return response{}, err
+	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return response{}, err
 	}

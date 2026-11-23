@@ -115,7 +115,7 @@ func (s *Stream) parse(buf []byte) []Event {
 		}
 		if raw.Mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
 			if s.isRoot(dir) {
-				unix.InotifyRmWatch(s.fd, uint32(raw.Wd))
+				_, _ = unix.InotifyRmWatch(s.fd, uint32(raw.Wd))
 				events = append(events, Event{Path: dir, Rescan: true})
 			}
 			continue

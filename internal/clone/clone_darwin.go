@@ -14,7 +14,7 @@ import (
 // the volume cannot clone.
 func File(src, dst string) error {
 	if err := unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW); err != nil {
-		if err == unix.EXDEV {
+		if errors.Is(err, unix.EXDEV) {
 			err = errors.Join(errors.ErrUnsupported, err)
 		}
 		return &os.LinkError{Op: "clonefile", Old: src, New: dst, Err: err}

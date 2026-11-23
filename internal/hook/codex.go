@@ -62,7 +62,7 @@ func HandleCodex(in io.Reader, checkpoint store.Checkpointer) error {
 
 // codexLabel uses the shell command, or for apply_patch, whose command is the
 // whole patch, the files the patch touches.
-func codexLabel(event input, root string) string {
+func codexLabel(event input, _ string) string {
 	if event.ToolName != "apply_patch" {
 		return event.ToolInput.Command
 	}
