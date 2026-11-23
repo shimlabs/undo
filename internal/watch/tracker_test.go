@@ -293,6 +293,21 @@ func TestTrackerFollowsHardLinks(t *testing.T) {
 	checkMatchesScan(t, s, root, cp.ID)
 }
 
+func TestTrackerSavesListingWhenClosed(t *testing.T) {
+	tracker, s, root := newTracker(t)
+	checkpoint(t, tracker, "first")
+	writeFile(t, filepath.Join(root, "README.md"), "# edited")
+	cp := checkpoint(t, tracker, "second")
+
+	tracker.Close()
+
+	data, err := os.ReadFile(s.FilePath("listing.gob"))
+	if err != nil || len(data) == 0 {
+		t.Fatalf("no listing saved: %v", err)
+	}
+	checkMatchesScan(t, s, root, cp.ID)
+}
+
 func TestTrackerRescansAfterDroppedEvents(t *testing.T) {
 	tracker, s, root := newTracker(t)
 	checkpoint(t, tracker, "first")

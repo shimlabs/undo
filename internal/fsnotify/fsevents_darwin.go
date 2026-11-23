@@ -54,6 +54,7 @@ import "C"
 import (
 	"errors"
 	"runtime/cgo"
+	"sync"
 	"unsafe"
 )
 
@@ -64,9 +65,10 @@ const rescanFlags = C.kFSEventStreamEventFlagMustScanSubDirs |
 
 // Stream delivers FSEvents for a set of directories.
 type Stream struct {
-	ref    C.FSEventStreamRef
-	queue  C.dispatch_queue_t
-	handle cgo.Handle
+	ref       C.FSEventStreamRef
+	queue     C.dispatch_queue_t
+	handle    cgo.Handle
+	closeOnce sync.Once
 }
 
 // NewStream watches the directories in paths and calls onEvents on a
@@ -94,10 +96,12 @@ func NewStream(paths []string, _ func(dir string) bool, onEvents func([]Event)) 
 	return &Stream{ref: ref, queue: queue, handle: handle}, nil
 }
 
-// Close stops the stream.
+// Close stops the stream. Closing it again does nothing.
 func (s *Stream) Close() {
-	C.undoStreamStop(s.ref, s.queue)
-	s.handle.Delete()
+	s.closeOnce.Do(func() {
+		C.undoStreamStop(s.ref, s.queue)
+		s.handle.Delete()
+	})
 }
 
 //export undoStreamEvents

@@ -52,6 +52,13 @@ func (s *Store) ListingAt(id int) (tree.Listing, error) {
 	return listing, nil
 }
 
+// SaveListing saves listing as the project's listing at checkpoint id, so the
+// next ListingAt does not have to rebuild it from the layers. The watcher
+// calls it when it goes quiet.
+func (s *Store) SaveListing(id int, listing tree.Listing) error {
+	return s.saveListing(id, listing)
+}
+
 func (s *Store) saveListing(id int, listing tree.Listing) error {
 	return writeGob(s.listingPath(), savedListing{ID: id, Listing: listing})
 }

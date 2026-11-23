@@ -28,6 +28,7 @@ type Stream struct {
 	shouldSkip func(dir string) bool
 	onEvents   func([]Event)
 	done       chan struct{}
+	closeOnce  sync.Once
 
 	mu           sync.Mutex
 	dirsByWatch  map[int]string
@@ -75,9 +76,10 @@ func NewStream(paths []string, shouldSkip func(dir string) bool, onEvents func([
 	return s, nil
 }
 
-// Close stops the stream. No callback runs after it returns.
+// Close stops the stream. No callback runs after it returns, and closing it
+// again does nothing.
 func (s *Stream) Close() {
-	s.file.Close()
+	s.closeOnce.Do(func() { s.file.Close() })
 	<-s.done
 }
 

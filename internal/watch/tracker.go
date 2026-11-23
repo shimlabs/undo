@@ -37,6 +37,7 @@ type Tracker struct {
 	matcher   atomic.Pointer[exclude.Matcher]
 	stream    *fsnotify.Stream
 	sequence  atomic.Uint64
+	closeOnce sync.Once
 
 	mu             sync.Mutex
 	dirty          map[string]bool
@@ -91,9 +92,24 @@ func (t *Tracker) startStream() error {
 	return nil
 }
 
-// Close stops watching.
+// Close stops watching and saves the listing, so the next tracker or scan
+// does not have to rebuild it from the layers.
+// Closing it again does nothing.
 func (t *Tracker) Close() {
-	t.stream.Close()
+	t.closeOnce.Do(func() {
+		t.stream.Close()
+		t.SaveListing()
+	})
+}
+
+// SaveListing saves the tracker's listing in the store. The server calls it
+// when it goes quiet.
+func (t *Tracker) SaveListing() {
+	if t.listing != nil && t.lastID > 0 {
+		if err := t.store.SaveListing(t.lastID, t.listing); err != nil {
+			t.store.LogError(fmt.Errorf("saving the listing: %w", err))
+		}
+	}
 }
 
 // shouldSkip reports whether dir is excluded, so the stream does not need to

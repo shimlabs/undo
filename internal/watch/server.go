@@ -172,6 +172,7 @@ func (s *server) acceptLoop() error {
 				return nil
 			}
 			isPruneDue = false
+			s.tracker.SaveListing()
 			s.pruner.request()
 			continue
 		}
