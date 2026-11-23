@@ -44,11 +44,13 @@ func newProject(t *testing.T) (*store.Store, string) {
 	return projectStore, root
 }
 
-func take(t testing.TB, projectStore *store.Store, label string) {
+func take(t testing.TB, projectStore *store.Store, label string) store.Checkpoint {
 	t.Helper()
-	if _, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: projectStore.Root()}); err != nil {
+	checkpoint, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: projectStore.Root()})
+	if err != nil {
 		t.Fatal(err)
 	}
+	return checkpoint
 }
 
 // apply restores checkpoint id, taking the safety checkpoint with a scan.

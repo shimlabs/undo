@@ -1,7 +1,6 @@
 package clone
 
 import (
-	"errors"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -24,20 +23,23 @@ func IsLocked(path string) bool {
 // UnlockAt clears the lock flags the owner may clear from name in dir,
 // without following a symlink.
 func UnlockAt(dir *os.File, name string) error {
-	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if errors.Is(err, unix.ELOOP) {
+	// Most files are not locked, and one stat is much cheaper than opening
+	// each of them.
+	var stat unix.Stat_t
+	if err := unix.Fstatat(int(dir.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return &os.PathError{Op: "fstatat", Path: name, Err: err}
+	}
+	if stat.Flags&userLockFlags == 0 {
 		return nil
 	}
+	// O_SYMLINK opens a symlink itself, which clonefile also locks.
+	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_SYMLINK|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return &os.PathError{Op: "openat", Path: name, Err: err}
 	}
 	defer unix.Close(fd)
-	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return &os.PathError{Op: "fstat", Path: name, Err: err}
-	}
-	if stat.Flags&userLockFlags == 0 {
-		return nil
 	}
 	if err := unix.Fchflags(fd, int(stat.Flags&^userLockFlags)); err != nil {
 		return &os.PathError{Op: "fchflags", Path: name, Err: err}

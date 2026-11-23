@@ -138,6 +138,11 @@ func (s *Store) cloneIntoStore(src, dst string) error {
 // would otherwise stop merges. Their recorded modes live in the listings,
 // not on disk.
 func (s *Store) makeWritable(path string) error {
+	// A whole-directory clone keeps a locked folder's lock flags, which stop
+	// adding and removing entries whatever its mode.
+	if err := s.unlock(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	info, err := s.lstat(path)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0o700 == 0o700 {
 		return err
@@ -147,6 +152,10 @@ func (s *Store) makeWritable(path string) error {
 
 // unlock clears the lock flags on path that a whole-directory clone kept.
 func (s *Store) unlock(path string) error {
+	// The store directory itself is never a clone.
+	if s.storeName(path) == "." {
+		return nil
+	}
 	dir, err := s.openDir(filepath.Dir(path))
 	if err != nil {
 		return err
