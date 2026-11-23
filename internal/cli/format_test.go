@@ -68,12 +68,21 @@ func TestDisplayPath(t *testing.T) {
 }
 
 func TestGroupedRows(t *testing.T) {
-	rows := groupedRows("restore", []string{".", "README.md", "src", "src/main.go", "src/util.go"})
+	paths := []string{".", "README.md", "src", "src/main.go", "src/util.go", "docs", "lib/a.go"}
+	rows := groupedRows("restore", paths, map[string]bool{"src": true, "docs": true})
 	want := []changeRow{
-		{action: "restore", path: "README.md"},
-		{action: "restore", path: "src/", detail: "3 paths"},
+		{action: "restore", path: "README.md", count: 1},
+		{action: "restore", path: "src/", detail: "2 paths", count: 2},
+		{action: "restore", path: "docs/", count: 1},
+		{action: "restore", path: "lib/a.go", count: 1},
 	}
-	if !slices.Equal(rows, want) {
+	isEqual := func(a, b changeRow) bool {
+		return a.action == b.action && a.path == b.path && a.detail == b.detail && a.count == b.count
+	}
+	if !slices.EqualFunc(rows, want, isEqual) {
 		t.Fatalf("groupedRows = %+v, want %+v", rows, want)
+	}
+	if total := rowsCount(rows); total != 5 {
+		t.Fatalf("rowsCount = %d, want 5, the sum of the rows", total)
 	}
 }

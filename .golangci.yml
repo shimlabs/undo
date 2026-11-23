@@ -44,9 +44,10 @@ linters:
       statements: 40
     goconst:
       min-occurrences: 4
-      # Command names, which the tests spell out as a user types them.
+      # Command names, which help text and tests spell out as a user types
+      # them.
       ignore-string-values:
-        - ^(list|hook)$
+        - ^(list|hook|undo)$
     gosec:
       excludes:
         # errcheck reports unchecked errors, with Close excluded on purpose.

@@ -34,6 +34,10 @@ type Changes struct {
 	// or that are locked, directories that hold such paths, and existing
 	// paths that the exclude rules leave out now but not at the checkpoint.
 	Kept []string
+	// KeepReasons says why each kept path was kept.
+	KeepReasons map[string]KeepReason
+	// Dirs marks the written and removed paths that are directories.
+	Dirs map[string]bool
 	// Unstable are files that kept changing while the checkpoint saved them,
 	// so their restored content may be a mix of two writes.
 	Unstable []string
@@ -41,6 +45,25 @@ type Changes struct {
 	// copies can be after a power cut.
 	Lost []string
 }
+
+// KeepReason says why a restore left a path as it is.
+type KeepReason int
+
+const (
+	// KeptUnreadable means undo cannot read the path now, so the safety
+	// checkpoint could not save it.
+	KeptUnreadable KeepReason = iota + 1
+	// KeptLocked means the path, or the directory that holds it, is locked,
+	// as Finder's Locked checkbox does.
+	KeptLocked
+	// KeptExcluded means today's exclude rules leave the path out, but the
+	// checkpoint's did not.
+	KeptExcluded
+	// KeptInTheWay means something the restore must not touch stands where
+	// the checkpoint had another kind of entry, such as a directory holding
+	// excluded files where a file was.
+	KeptInTheWay
+)
 
 // Len returns the number of paths the restore writes or removes.
 func (c Changes) Len() int {
@@ -135,6 +158,8 @@ type restorePlan struct {
 	// unchanged holds the paths an earlier restore to the same checkpoint
 	// wrote and nothing changed since, so they still match the target.
 	unchanged tree.Listing
+	// keepReasons says why each path the restore leaves as it is was kept.
+	keepReasons map[string]KeepReason
 	// cloned holds the paths written as part of a whole directory cloned
 	// from the base, which keeps the lock flags they had at the checkpoint.
 	cloned map[string]bool
@@ -207,7 +232,8 @@ func loadRestoreInputs(projectStore *store.Store, id int) (restoreInputs, error)
 func (p *restorePlan) planChanges(inputs restoreInputs) {
 	lost := p.lostPaths()
 	p.drop(lost)
-	kept, untracked := p.dropUnsaved(inputs.matcherThen, inputs.matcherNow, inputs.manifest.Unreadable, inputs.skipped.Unreadable)
+	p.keepReasons = map[string]KeepReason{}
+	untracked := p.dropUnsaved(inputs.matcherThen, inputs.matcherNow, inputs.manifest.Unreadable, inputs.skipped.Unreadable)
 	written, removed := tree.Changed(p.current, p.targetListing())
 	// Paths that still match are left alone, so they need none of the checks
 	// below.
@@ -221,25 +247,30 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	// restore must not change it either.
 	unreadable := p.unreadableFiles(slices.Concat(written, removed))
 	p.drop(unreadable)
+	p.keep(KeptUnreadable, unreadable)
 	// A locked file cannot be replaced or removed, so it is kept as it is.
 	locked := p.lockedPaths(slices.Concat(written, removed))
 	p.drop(locked)
+	p.keep(KeptLocked, locked)
 	// A directory that holds paths the restore must not touch, at any
 	// depth, cannot be replaced by a file either.
 	blocked := p.dirsHoldingUntracked(written, slices.Concat(untracked, unreadable, locked, inputs.skipped.Excluded, inputs.skipped.Unreadable))
 	p.drop(blocked)
-	if left := slices.Concat(unreadable, locked, blocked); len(left) > 0 {
-		kept = append(kept, left...)
+	p.keep(KeptInTheWay, blocked)
+	if len(unreadable)+len(locked)+len(blocked) > 0 {
 		written, removed = tree.Changed(p.current, p.targetListing())
 	}
+	kept := slices.Sorted(maps.Keys(p.keepReasons))
 	written = slices.DeleteFunc(written, isInsideAny(kept))
 	written = slices.DeleteFunc(written, isUnchanged)
 	removed = slices.DeleteFunc(removed, isInsideAny(kept))
 	// A checkpoint of a project that was missing has no root, but removing
 	// the project folder itself would act outside it, so it stays, empty.
 	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
-	slices.Sort(kept)
-	p.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: inputs.manifest.Unstable, Lost: lost}
+	p.changes = Changes{
+		Written: written, Removed: removed, Kept: kept, KeepReasons: p.keepReasons, Dirs: p.dirsAmong(written, removed),
+		Unstable: inputs.manifest.Unstable, Lost: lost,
+	}
 }
 
 // unchangedEntries returns the entries of the paths in written that an
@@ -260,7 +291,7 @@ func unchangedEntries(restored, current tree.Listing, written []string) tree.Lis
 // or now. It returns the existing paths that the restore keeps as they are,
 // because only today's rules exclude them or they cannot be read now, and
 // the paths it dropped from the project's current state.
-func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unreadableThen, unreadableNow []string) (kept, untracked []string) {
+func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unreadableThen, unreadableNow []string) (untracked []string) {
 	unreadable := slices.Concat(unreadableThen, unreadableNow)
 	isUnsaved := func(rel string, isDir bool) bool {
 		return matcherThen.Excludes(rel, isDir) || isAtOrInside(rel, unreadable)
@@ -277,14 +308,38 @@ func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unre
 		case isUnsaved(rel, isDir):
 			delete(p.target, rel)
 			if slices.Contains(unreadableNow, rel) {
-				kept = append(kept, rel)
+				p.keep(KeptUnreadable, []string{rel})
 			}
 		case matcherNow.Excludes(rel, isDir) && exists(p.path(rel)):
 			delete(p.target, rel)
-			kept = append(kept, rel)
+			p.keep(KeptExcluded, []string{rel})
 		}
 	}
-	return kept, untracked
+	return untracked
+}
+
+// keep records paths as kept for reason.
+func (p *restorePlan) keep(reason KeepReason, paths []string) {
+	for _, rel := range paths {
+		p.keepReasons[rel] = reason
+	}
+}
+
+// dirsAmong returns the written and removed paths that are directories: in
+// the target for a written path, and in the project for a removed one.
+func (p *restorePlan) dirsAmong(written, removed []string) map[string]bool {
+	dirs := map[string]bool{}
+	for _, rel := range written {
+		if p.target[rel].Entry.Kind == tree.Dir {
+			dirs[rel] = true
+		}
+	}
+	for _, rel := range removed {
+		if p.current[rel].Kind == tree.Dir {
+			dirs[rel] = true
+		}
+	}
+	return dirs
 }
 
 // lostPaths returns the paths the target holds whose stored copy is gone,
@@ -591,6 +646,9 @@ func (p *restorePlan) keepOccupied(occupied []string) {
 	p.changes.Written = slices.DeleteFunc(p.changes.Written, func(rel string) bool { return isAtOrInside(rel, occupied) })
 	p.changes.Kept = append(p.changes.Kept, occupied...)
 	slices.Sort(p.changes.Kept)
+	for _, rel := range occupied {
+		p.changes.KeepReasons[rel] = KeptInTheWay
+	}
 }
 
 // writeFiles writes files from the store in parallel. A file whose stored

@@ -49,7 +49,7 @@ func TestUsageErrors(t *testing.T) {
 
 func TestUsageErrorShowsCommandUsage(t *testing.T) {
 	_, out := run(t, t.TempDir(), "", "to")
-	want := "Error: undo to needs a checkpoint id; undo list shows them\nUsage: undo to <id> [flags]\nRun undo help to for more.\n"
+	want := "Error: undo to needs a checkpoint id, which undo list shows.\nUsage: undo to <id> [flags]\nRun undo help to for more.\n"
 	if out != want {
 		t.Fatalf("output = %q, want %q", out, want)
 	}
