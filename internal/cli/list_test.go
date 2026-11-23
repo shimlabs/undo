@@ -22,3 +22,9 @@ func TestPrintCheckpointsEscapesStoredText(t *testing.T) {
 		t.Fatalf("list printed a raw escape sequence:\n%q", out.String())
 	}
 }
+
+func TestShellPathEscapesControlCharacters(t *testing.T) {
+	if shown := shellPath("/tmp/q\x1b]0;title\a"); strings.ContainsAny(shown, "\x1b\a") {
+		t.Fatalf("shellPath printed control characters raw: %q", shown)
+	}
+}

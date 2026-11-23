@@ -218,5 +218,7 @@ func shellPath(path string) string {
 	if shown := displayPath(path); strings.HasPrefix(shown, "~/") && shell.Join([]string{shown[2:]}) == shown[2:] {
 		return shown
 	}
-	return shell.Join([]string{path})
+	// The path is typed by the user, but control characters in it would
+	// still rewrite what the terminal shows.
+	return terminal.Printable(shell.Join([]string{path}))
 }
