@@ -15,7 +15,9 @@ type Limits struct {
 
 // DefaultLimits keeps a week of checkpoints, at most 2,000 of them, using at
 // most 5 GB of disk that is not shared with the project.
-var DefaultLimits = Limits{MaxAge: 7 * 24 * time.Hour, MaxCount: 2000, MaxBytes: 5_000_000_000}
+func DefaultLimits() Limits {
+	return Limits{MaxAge: 7 * 24 * time.Hour, MaxCount: 2000, MaxBytes: 5_000_000_000}
+}
 
 // pruneInterval is how often PruneIfDue prunes. Pruning measures the whole
 // store, which is too slow to do after every checkpoint.

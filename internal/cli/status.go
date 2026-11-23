@@ -53,7 +53,7 @@ func printStore(out io.Writer, env Env, projectStore *store.Store) error {
 	if err != nil {
 		return err
 	}
-	watcher, err := watch.Status(projectStore)
+	watcher, err := env.watcher().Status(projectStore)
 	if err != nil {
 		return err
 	}
@@ -66,10 +66,13 @@ func printStore(out io.Writer, env Env, projectStore *store.Store) error {
 	} else {
 		fmt.Fprintln(out, "Storage      clones that share data with the project")
 	}
-	fmt.Fprintf(out, "Disk used    %s not shared with the project, limit %s\n", formatBytes(diskUsage), formatBytes(store.DefaultLimits.MaxBytes))
-	if watcher.IsRunning {
+	fmt.Fprintf(out, "Disk used    %s not shared with the project, limit %s\n", formatBytes(diskUsage), formatBytes(store.DefaultLimits().MaxBytes))
+	switch reason, isRecent := watch.StartFailure(projectStore); {
+	case watcher.IsRunning:
 		fmt.Fprintf(out, "Watcher      running, %d checkpoints since it started\n", watcher.CheckpointCount)
-	} else {
+	case isRecent:
+		fmt.Fprintf(out, "Watcher      could not start, so checkpoints scan the project: %s\n", printable(reason))
+	default:
 		fmt.Fprintln(out, "Watcher      not running, so checkpoints scan the project")
 	}
 	if line := projectStore.LastError(); line != "" {

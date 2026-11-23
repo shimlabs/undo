@@ -199,6 +199,12 @@ func (s *Store) Root() string { return s.root }
 // Dir returns the store's directory.
 func (s *Store) Dir() string { return s.dir }
 
+// FilePath returns the path of a file the store keeps for another part of
+// undo, such as the watcher's markers.
+func (s *Store) FilePath(name string) string {
+	return filepath.Join(s.dir, name)
+}
+
 // IsCopyMode reports whether the store keeps full copies instead of clones.
 func (s *Store) IsCopyMode() bool { return s.config.IsCopyMode }
 

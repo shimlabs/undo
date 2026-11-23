@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"sync"
@@ -27,12 +28,12 @@ const (
 	operationStatus     = "status"
 )
 
-type request struct {
-	Operation string                  `json:"op"`
+type serverRequest struct {
+	Operation string                  `json:"operation"`
 	Options   store.CheckpointOptions `json:"options"`
 }
 
-type response struct {
+type serverResponse struct {
 	Checkpoint      store.Checkpoint `json:"checkpoint"`
 	CheckpointCount int              `json:"checkpoint_count"`
 	Error           string           `json:"error,omitempty"`
@@ -40,6 +41,8 @@ type response struct {
 
 // Options configure Serve.
 type Options struct {
+	// SocketDir is where the server's socket goes.
+	SocketDir string
 	// IdleTimeout is how long the server waits for a request before it exits.
 	IdleTimeout time.Duration
 	// Limits bound the history the server keeps when it prunes the store.
@@ -55,11 +58,11 @@ type Options struct {
 // is canceled or no request arrives for options.IdleTimeout. After
 // checkpoints, once it has been quiet for options.PruneQuietPeriod, it prunes
 // the store in the background if pruning is due.
-func Serve(ctx context.Context, s *store.Store, options Options) error {
+func Serve(ctx context.Context, projectStore *store.Store, options Options) error {
 	if options.PruneQuietPeriod == 0 {
 		options.PruneQuietPeriod = defaultPruneQuietPeriod
 	}
-	listener, err := listen(s)
+	listener, err := listen(options.SocketDir, projectStore)
 	if err != nil {
 		return err
 	}
@@ -67,7 +70,7 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
 
-	tracker, err := NewTracker(s)
+	tracker, err := NewTracker(projectStore)
 	if err != nil {
 		return err
 	}
@@ -75,7 +78,7 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 	if options.Ready != nil {
 		options.Ready()
 	}
-	pruner := startPruner(s, options.Limits)
+	pruner := startPruner(projectStore, options.Limits)
 	defer pruner.stop()
 
 	server := server{listener: listener, tracker: tracker, pruner: pruner, options: options}
@@ -88,8 +91,8 @@ func Serve(ctx context.Context, s *store.Store, options Options) error {
 
 // listen opens the project's socket, unless another server already answers
 // on it.
-func listen(s *store.Store) (*net.UnixListener, error) {
-	path, err := socketPath(s)
+func listen(socketDir string, projectStore *store.Store) (*net.UnixListener, error) {
+	path, err := socketPath(socketDir, projectStore)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +100,7 @@ func listen(s *store.Store) (*net.UnixListener, error) {
 		conn.Close()
 		return nil, ErrRunning
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -118,12 +121,12 @@ type pruner struct {
 	running  sync.WaitGroup
 }
 
-func startPruner(s *store.Store, limits store.Limits) *pruner {
+func startPruner(projectStore *store.Store, limits store.Limits) *pruner {
 	p := &pruner{requests: make(chan struct{}, 1)}
 	p.running.Go(func() {
 		for range p.requests {
-			if _, err := s.PruneIfDue(time.Now(), limits); err != nil {
-				s.LogError(fmt.Errorf("pruning failed: %w", err))
+			if _, err := projectStore.PruneIfDue(time.Now(), limits); err != nil {
+				projectStore.LogError(fmt.Errorf("pruning failed: %w", err))
 			}
 		}
 	})
@@ -187,28 +190,28 @@ func (s *server) handleConn(conn net.Conn) bool {
 	if checkPeer(conn) != nil || conn.SetDeadline(time.Now().Add(requestTimeout)) != nil {
 		return false
 	}
-	var req request
-	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+	var request serverRequest
+	if err := json.NewDecoder(conn).Decode(&request); err != nil {
 		return false
 	}
-	var resp response
+	var reply serverResponse
 	isCheckpointed := false
-	switch req.Operation {
+	switch request.Operation {
 	case operationCheckpoint:
-		cp, err := s.tracker.Checkpoint(req.Options)
+		checkpoint, err := s.tracker.Checkpoint(request.Options)
 		if err != nil {
-			resp.Error = err.Error()
+			reply.Error = err.Error()
 		} else {
-			resp.Checkpoint = cp
+			reply.Checkpoint = checkpoint
 			s.checkpointCount++
 			isCheckpointed = true
 		}
 	case operationStatus:
 	default:
-		resp.Error = "unknown request " + req.Operation
+		reply.Error = "unknown request " + request.Operation
 	}
-	resp.CheckpointCount = s.checkpointCount
+	reply.CheckpointCount = s.checkpointCount
 	// A client that does not get the reply scans the project instead.
-	_ = json.NewEncoder(conn).Encode(resp)
+	_ = json.NewEncoder(conn).Encode(reply)
 	return isCheckpointed
 }

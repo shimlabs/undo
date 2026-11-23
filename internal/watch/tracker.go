@@ -50,7 +50,7 @@ type Tracker struct {
 // NewTracker starts watching the project of s. Its first checkpoint compares
 // the whole project, because changes made before it started are not known.
 func NewTracker(s *store.Store) (*Tracker, error) {
-	markerDir := filepath.Join(s.Dir(), "markers")
+	markerDir := s.FilePath("markers")
 	if err := os.MkdirAll(markerDir, 0o700); err != nil {
 		return nil, err
 	}

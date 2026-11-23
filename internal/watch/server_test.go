@@ -13,45 +13,57 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-func newServerProject(t *testing.T) (*store.Store, string) {
+// newServerProject returns a project, its store and a socket directory.
+func newServerProject(t *testing.T) (*store.Store, string, string) {
 	t.Helper()
+	// Socket paths are limited to about 100 bytes, and the test's own
+	// temporary directory can be longer than that.
 	socketDir, err := os.MkdirTemp("/tmp", "undo-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(socketDir) })
-	t.Setenv("UNDO_SOCKET_DIR", socketDir)
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	writeFile(t, filepath.Join(root, "main.go"), "package main")
 	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, root
+	return s, root, socketDir
 }
 
-// runServer runs Serve until the test ends and returns the channel that
-// receives its result. It returns once the server accepts connections, or
-// fails the test if it stops first.
-func runServer(t *testing.T, s *store.Store, options Options) chan error {
+// runServer runs Serve until the test ends, then stops it and waits for it to
+// exit before the test's directories are removed. It returns once the server
+// accepts connections, with a channel that receives Serve's result and a
+// function that stops the server early.
+func runServer(t *testing.T, s *store.Store, options Options) (done chan error, stop func()) {
 	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
 	ready := make(chan struct{})
 	options.Ready = func() { close(ready) }
-	done := make(chan error, 1)
-	go func() { done <- Serve(t.Context(), s, options) }()
+	result := make(chan error, 1)
+	exited := make(chan struct{})
+	go func() {
+		result <- Serve(ctx, s, options)
+		close(exited)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-exited
+	})
 	select {
 	case <-ready:
-	case err := <-done:
+	case err := <-result:
 		t.Fatalf("server stopped early: %v", err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not start")
 	}
-	return done
+	return result, cancel
 }
 
-func checkpointCount(t *testing.T, s *store.Store) int {
+func checkpointCount(t *testing.T, client Client, s *store.Store) int {
 	t.Helper()
-	status, err := Status(s)
+	status, err := client.Status(s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,37 +74,38 @@ func waitForCheckpointCount(t *testing.T, s *store.Store, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		list, err := s.List()
+		checkpoints, err := s.List()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(list) == want {
+		if len(checkpoints) == want {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("store has %d checkpoints, want %d", len(list), want)
+			t.Fatalf("store has %d checkpoints, want %d", len(checkpoints), want)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func takeEdits(t *testing.T, s *store.Store, root string, count int) {
+func takeEdits(t *testing.T, client Client, s *store.Store, root string, count int) {
 	t.Helper()
 	for i := range count {
 		writeFile(t, filepath.Join(root, "main.go"), fmt.Sprintf("package main // %d", i))
-		if _, err := Checkpoint(s, store.CheckpointOptions{Label: "edit", Dir: root}, nil); err != nil {
+		if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
 func TestCheckpointUsesRunningServer(t *testing.T) {
-	s, root := newServerProject(t)
-	runServer(t, s, Options{IdleTimeout: time.Minute})
+	s, root, socketDir := newServerProject(t)
+	runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
+	client := Client{SocketDir: socketDir}
 
-	takeEdits(t, s, root, 2)
+	takeEdits(t, client, s, root, 2)
 
-	if count := checkpointCount(t, s); count != 2 {
+	if count := checkpointCount(t, client, s); count != 2 {
 		t.Fatalf("the server took %d checkpoints, want 2", count)
 	}
 	latest, _, _ := s.Latest()
@@ -103,66 +116,73 @@ func TestCheckpointUsesRunningServer(t *testing.T) {
 }
 
 func TestCheckpointFallsBackWithoutServer(t *testing.T) {
-	s, root := newServerProject(t)
+	s, root, socketDir := newServerProject(t)
 
-	cp, err := Checkpoint(s, store.CheckpointOptions{Label: "no server", Dir: root}, nil)
+	checkpoint, err := Client{SocketDir: socketDir}.Checkpoint(s, store.CheckpointOptions{Label: "no server", Dir: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cp.ID != 1 {
-		t.Fatalf("id = %d, want 1", cp.ID)
+	if checkpoint.ID != 1 {
+		t.Fatalf("id = %d, want 1", checkpoint.ID)
 	}
 }
 
 func TestCheckpointStartsServer(t *testing.T) {
-	s, root := newServerProject(t)
+	s, root, socketDir := newServerProject(t)
 	isStarted := false
-	start := func() (<-chan error, error) {
+	client := Client{SocketDir: socketDir, Start: func(string) (<-chan error, error) {
 		isStarted = true
-		go Serve(t.Context(), s, Options{IdleTimeout: time.Minute})
+		runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 		return nil, nil
-	}
+	}}
 
-	if _, err := Checkpoint(s, store.CheckpointOptions{Label: "first", Dir: root}, start); err != nil {
+	if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	if !isStarted {
-		t.Fatal("start was not called")
+		t.Fatal("Start was not called")
 	}
-	if count := checkpointCount(t, s); count != 1 {
+	if count := checkpointCount(t, client, s); count != 1 {
 		t.Fatalf("the started server took %d checkpoints, want 1", count)
 	}
 }
 
-func TestCheckpointStopsWaitingWhenServerExits(t *testing.T) {
-	s, root := newServerProject(t)
-	start := func() (<-chan error, error) {
+func TestCheckpointRemembersFailedStart(t *testing.T) {
+	s, root, socketDir := newServerProject(t)
+	starts := 0
+	client := Client{SocketDir: socketDir, Start: func(string) (<-chan error, error) {
+		starts++
 		exited := make(chan error, 1)
-		exited <- errors.New("bind failed")
+		exited <- errors.New("inotify watch limit reached")
 		return exited, nil
-	}
+	}}
 
 	began := time.Now()
-	if _, err := Checkpoint(s, store.CheckpointOptions{Label: "first", Dir: root}, start); err != nil {
-		t.Fatal(err)
+	for range 3 {
+		if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if waited := time.Since(began); waited > time.Second {
+	if waited := time.Since(began); waited > 2*time.Second {
 		t.Fatalf("waited %v for a watcher that had already exited", waited)
 	}
-	if !strings.Contains(s.LastError(), "bind failed") {
-		t.Fatalf("last error = %q, want why the watcher exited", s.LastError())
+	if starts != 1 {
+		t.Fatalf("the watcher was started %d times, want once until the failure is old", starts)
+	}
+	if reason, isRecent := StartFailure(s); !isRecent || !strings.Contains(reason, "watch limit") {
+		t.Fatalf("StartFailure = %q, %v", reason, isRecent)
 	}
 }
 
 func TestCheckpointLogsWhyItScanned(t *testing.T) {
-	s, root := newServerProject(t)
+	s, root, _ := newServerProject(t)
 	shared := t.TempDir()
 	if err := os.Chmod(shared, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("UNDO_SOCKET_DIR", shared)
+	client := Client{SocketDir: shared, Start: func(string) (<-chan error, error) { return nil, nil }}
 
-	if _, err := Checkpoint(s, store.CheckpointOptions{Label: "first", Dir: root}, func() (<-chan error, error) { return nil, nil }); err != nil {
+	if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	if last := s.LastError(); !strings.Contains(last, "private") {
@@ -171,21 +191,19 @@ func TestCheckpointLogsWhyItScanned(t *testing.T) {
 }
 
 func TestSocketDirRefusesSymlink(t *testing.T) {
-	target := t.TempDir()
 	link := filepath.Join(t.TempDir(), "undo")
-	if err := os.Symlink(target, link); err != nil {
+	if err := os.Symlink(t.TempDir(), link); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("UNDO_SOCKET_DIR", link)
 
-	if _, err := socketDir(); err == nil {
-		t.Fatal("socketDir accepted a symlink")
+	if err := checkSocketDir(link); err == nil {
+		t.Fatal("checkSocketDir accepted a symlink")
 	}
 }
 
 func TestServeStopsWhenIdle(t *testing.T) {
-	s, _ := newServerProject(t)
-	done := runServer(t, s, Options{IdleTimeout: 200 * time.Millisecond})
+	s, _, socketDir := newServerProject(t)
+	done, _ := runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: 200 * time.Millisecond})
 
 	select {
 	case err := <-done:
@@ -198,14 +216,10 @@ func TestServeStopsWhenIdle(t *testing.T) {
 }
 
 func TestServeStopsWhenCanceled(t *testing.T) {
-	s, _ := newServerProject(t)
-	ctx, cancel := context.WithCancel(t.Context())
-	ready := make(chan struct{})
-	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, s, Options{IdleTimeout: time.Minute, Ready: func() { close(ready) }}) }()
-	<-ready
+	s, _, socketDir := newServerProject(t)
+	done, stop := runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 
-	cancel()
+	stop()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -214,29 +228,29 @@ func TestServeStopsWhenCanceled(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("server kept running after its context was canceled")
 	}
-	if status, _ := Status(s); status.IsRunning {
+	if status, _ := (Client{SocketDir: socketDir}).Status(s); status.IsRunning {
 		t.Fatal("server still answers after stopping")
 	}
 }
 
 func TestSecondServerExits(t *testing.T) {
-	s, _ := newServerProject(t)
-	runServer(t, s, Options{IdleTimeout: time.Minute})
+	s, _, socketDir := newServerProject(t)
+	runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 
-	if err := Serve(t.Context(), s, Options{IdleTimeout: time.Minute}); !errors.Is(err, ErrRunning) {
+	if err := Serve(t.Context(), s, Options{SocketDir: socketDir, IdleTimeout: time.Minute}); !errors.Is(err, ErrRunning) {
 		t.Fatalf("second Serve = %v, want ErrRunning", err)
 	}
 }
 
 func TestServerPrunesWhenQuiet(t *testing.T) {
-	s, root := newServerProject(t)
+	s, root, socketDir := newServerProject(t)
 	keepOne := store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
-	runServer(t, s, Options{IdleTimeout: time.Minute, Limits: keepOne, PruneQuietPeriod: 500 * time.Millisecond})
+	runServer(t, s, Options{SocketDir: socketDir, IdleTimeout: time.Minute, Limits: keepOne, PruneQuietPeriod: 500 * time.Millisecond})
 
-	takeEdits(t, s, root, 3)
+	takeEdits(t, Client{SocketDir: socketDir}, s, root, 3)
 
-	if list, _ := s.List(); len(list) != 3 {
-		t.Fatalf("checkpoints = %d right after the last request, want 3 until the server is quiet", len(list))
+	if checkpoints, _ := s.List(); len(checkpoints) != 3 {
+		t.Fatalf("checkpoints = %d right after the last request, want 3 until the server is quiet", len(checkpoints))
 	}
 	waitForCheckpointCount(t, s, 1)
 }

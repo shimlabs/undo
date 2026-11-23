@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/watch"
 )
 
 func newProject(t *testing.T) string {
@@ -62,6 +63,7 @@ func run(t *testing.T, dir string, stdin string, args ...string) (int, string) {
 		Stdout:     &out,
 		Stderr:     &out,
 		StoreHome:  storeHome,
+		SocketDir:  watch.DefaultSocketDir(),
 		Executable: privateBinary(t),
 	})
 	return code, out.String()

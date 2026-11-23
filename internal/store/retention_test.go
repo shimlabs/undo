@@ -100,7 +100,7 @@ func TestPruneByAgeKeepsLatest(t *testing.T) {
 	s, root := newProject(t)
 	history(t, s, root)
 
-	if _, err := s.Prune(time.Now().Add(8*24*time.Hour), store.DefaultLimits); err != nil {
+	if _, err := s.Prune(time.Now().Add(8*24*time.Hour), store.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
 	list, _ := s.List()

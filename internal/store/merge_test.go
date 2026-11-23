@@ -93,7 +93,7 @@ func TestPruneWaitsForReaders(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		s.Prune(time.Now(), DefaultLimits)
+		s.Prune(time.Now(), DefaultLimits())
 		close(done)
 	}()
 	select {

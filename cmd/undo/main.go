@@ -11,6 +11,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/cli"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/watch"
 )
 
 func main() {
@@ -33,13 +34,16 @@ func main() {
 		os.Exit(1)
 	}
 	os.Exit(cli.Run(os.Args[1:], cli.Env{
-		Dir:          dir,
-		Stdin:        os.Stdin,
-		Stdout:       os.Stdout,
-		Stderr:       os.Stderr,
-		StoreHome:    storeHome,
-		Executable:   executable,
-		StartWatcher: startWatcher,
+		Dir:        dir,
+		Stdin:      os.Stdin,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		StoreHome:  storeHome,
+		SocketDir:  watch.DefaultSocketDir(),
+		Executable: executable,
+		StartWatcher: func(root string) (<-chan error, error) {
+			return startWatcher(executable, root)
+		},
 	}))
 }
 
@@ -47,12 +51,8 @@ func main() {
 // running after the command that started it exits. The returned channel
 // receives the watcher's error if it exits while this process still runs,
 // so a watcher that cannot start is noticed at once.
-func startWatcher(root string) (<-chan error, error) {
-	binary, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command(binary, "watch")
+func startWatcher(executable, root string) (<-chan error, error) {
+	cmd := exec.Command(executable, "watch")
 	cmd.Dir = root
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {

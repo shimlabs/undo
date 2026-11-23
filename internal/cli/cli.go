@@ -51,6 +51,8 @@ type Env struct {
 	Stderr io.Writer
 	// StoreHome holds the stores of all projects.
 	StoreHome string
+	// SocketDir holds the watchers' sockets.
+	SocketDir string
 	// Executable is the path of the undo binary, which installed hooks run.
 	Executable string
 	// StartWatcher starts a background watcher for the project at root and
@@ -59,17 +61,15 @@ type Env struct {
 	StartWatcher func(root string) (exited <-chan error, err error)
 }
 
+// watcher returns the client for the projects' watchers.
+func (env Env) watcher() watch.Client {
+	return watch.Client{SocketDir: env.SocketDir, Start: env.StartWatcher}
+}
+
 // checkpointer takes checkpoints through the project's watcher when one can
 // be started, and by scanning the project otherwise.
 func (env Env) checkpointer() store.Checkpointer {
-	return func(projectStore *store.Store, options store.CheckpointOptions) (store.Checkpoint, error) {
-		if env.StartWatcher == nil {
-			return projectStore.Take(options)
-		}
-		return watch.Checkpoint(projectStore, options, func() (<-chan error, error) {
-			return env.StartWatcher(projectStore.Root())
-		})
-	}
+	return env.watcher().Checkpoint
 }
 
 type usageError struct{ message string }
