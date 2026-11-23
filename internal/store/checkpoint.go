@@ -5,9 +5,9 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -272,7 +272,7 @@ func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
 			plan.children[path.Dir(rel)] = append(plan.children[path.Dir(rel)], rel)
 		}
 	}
-	if err := s.cloneInto(".", base, &plan); err != nil {
+	if err := s.cloneInto(".", &plan); err != nil {
 		return nil, errors.Join(toCloneError(err), s.removeAll(base))
 	}
 	// The listing records each directory's mode. In the base, read-only
@@ -344,34 +344,144 @@ func (p *basePlan) markAncestors(rel string) {
 	}
 }
 
-// cloneInto clones rel to dst. A directory that cannot be cloned in one call
-// because something inside it is unreadable is cloned child by child, and the
-// unreadable files are left out of the listing.
-func (s *Store) cloneInto(rel, dst string, plan *basePlan) error {
-	if !plan.hasSkippedDescendant[rel] {
-		err := s.cloneIntoStore(rel, dst)
-		switch {
-		case err == nil || errors.Is(err, fs.ErrNotExist):
-			return nil
-		case !errors.Is(err, fs.ErrPermission):
-			return err
-		case plan.listing[rel].Kind != tree.Dir:
-			delete(plan.listing, rel)
+// cloneInto clones rel into the base. A directory with a skipped path below
+// it, excluded or unreadable, is created, and everything else below it is
+// cloned whole, many at a time. A directory that turns out to hold something
+// unreadable is cloned again child by child, and the unreadable files are
+// left out of the listing.
+func (s *Store) cloneInto(rel string, plan *basePlan) error {
+	if rel == "." && !plan.hasSkippedDescendant[rel] {
+		err := s.cloneIntoStore(rel, s.basePath(rel))
+		if err == nil || errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
-		if err := s.removeAll(dst); err != nil {
+		if !errors.Is(err, fs.ErrPermission) {
 			return err
 		}
+		if err := s.removeAll(s.basePath(rel)); err != nil {
+			return err
+		}
+		plan.hasSkippedDescendant[rel] = true
 	}
-	if err := s.mkdirAll(dst); err != nil {
+	whole, err := s.makeBaseDirs(rel, plan)
+	if err != nil {
 		return err
 	}
-	for _, child := range plan.children[rel] {
-		if err := s.cloneInto(child, filepath.Join(dst, path.Base(child)), plan); err != nil {
+	unreadable, err := s.cloneWhole(whole)
+	if err != nil {
+		return err
+	}
+	for _, child := range unreadable {
+		if plan.listing[child].Kind != tree.Dir {
+			delete(plan.listing, child)
+			continue
+		}
+		if err := s.removeAll(s.basePath(child)); err != nil {
+			return err
+		}
+		plan.hasSkippedDescendant[child] = true
+		if err := s.cloneInto(child, plan); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// makeBaseDirs creates rel in the base, and every directory below it that
+// has a skipped path below it, and returns the paths to clone whole.
+func (s *Store) makeBaseDirs(rel string, plan *basePlan) ([]string, error) {
+	if !plan.hasSkippedDescendant[rel] {
+		return []string{rel}, nil
+	}
+	if err := s.mkdirAll(s.basePath(rel)); err != nil {
+		return nil, err
+	}
+	var whole []string
+	for _, child := range plan.children[rel] {
+		childWhole, err := s.makeBaseDirs(child, plan)
+		if err != nil {
+			return nil, err
+		}
+		whole = append(whole, childWhole...)
+	}
+	return whole, nil
+}
+
+// cloneWhole clones each path into the base in one call, in batches of at
+// most maxOpenDirs parent directories, and returns the paths it could not
+// read.
+func (s *Store) cloneWhole(paths []string) ([]string, error) {
+	var mu sync.Mutex
+	var unreadable []string
+	for _, batch := range batchByDir(paths, maxOpenDirs) {
+		err := s.cloneWholeBatch(paths, batch, func(rel string) {
+			mu.Lock()
+			defer mu.Unlock()
+			unreadable = append(unreadable, rel)
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return unreadable, nil
+}
+
+// cloneWholeBatch clones paths[i] for each i in batch, opening each parent
+// once in the project and in the base, and calls onUnreadable for a path it
+// has no permission to read.
+func (s *Store) cloneWholeBatch(paths []string, batch []int, onUnreadable func(rel string)) error {
+	dirs := map[string]dirPair{}
+	defer func() {
+		for _, pair := range dirs {
+			pair.project.Close()
+			pair.stored.Close()
+		}
+	}()
+	for _, i := range batch {
+		dir := path.Dir(paths[i])
+		if _, isOpen := dirs[dir]; isOpen {
+			continue
+		}
+		pair, err := s.openBasePair(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		dirs[dir] = pair
+	}
+	return parallel.For(len(batch), func(j int) error {
+		rel := paths[batch[j]]
+		pair, isOpen := dirs[path.Dir(rel)]
+		if !isOpen {
+			return nil
+		}
+		err := s.cloneAt(pair.project, path.Base(rel), pair.stored, path.Base(rel))
+		switch {
+		case errors.Is(err, fs.ErrPermission):
+			onUnreadable(rel)
+			return nil
+		case errors.Is(err, fs.ErrNotExist):
+			return nil
+		}
+		return err
+	})
+}
+
+// openBasePair opens the directory dir in the project, one name at a time,
+// and in the base. A project directory gone since the scan matches
+// fs.ErrNotExist.
+func (s *Store) openBasePair(dir string) (dirPair, error) {
+	projectDir, err := tree.OpenDir(s.root, dir)
+	if err != nil {
+		return dirPair{}, err
+	}
+	baseDir, err := s.open(s.basePath(dir))
+	if err != nil {
+		return dirPair{}, errors.Join(err, projectDir.Close())
+	}
+	return dirPair{project: projectDir, stored: baseDir}, nil
 }
 
 // cloneChanged copies each changed file and symlink into the layer for id.
@@ -431,7 +541,7 @@ func (s *Store) cloneBatch(layer *os.Root, files []string, batch []int, listing 
 		for _, pair := range dirs {
 			if pair.project != nil {
 				pair.project.Close()
-				pair.layer.Close()
+				pair.stored.Close()
 			}
 		}
 	}()
@@ -538,7 +648,8 @@ func (s *Store) openLayer(id int) (*os.Root, error) {
 // dirPair is one directory open in the project and in a layer.
 type dirPair struct {
 	project *os.File
-	layer   *os.File
+	// stored is the directory in the store, in a layer or in the base.
+	stored *os.File
 }
 
 // openDirPair creates the directory dir in layer and opens it there and in
@@ -555,7 +666,7 @@ func (s *Store) openDirPair(layer *os.Root, dir string) (dirPair, error) {
 	if err != nil {
 		return dirPair{}, errors.Join(err, projectDir.Close())
 	}
-	return dirPair{project: projectDir, layer: layerDir}, nil
+	return dirPair{project: projectDir, stored: layerDir}, nil
 }
 
 // cloneStable clones rel from the project into the layer, through the
@@ -567,11 +678,11 @@ func (s *Store) cloneStable(dirs dirPair, rel string, entry tree.Entry) (tree.En
 		// The layer starts empty, so only a retry has an earlier clone to
 		// remove.
 		if attempt > 1 {
-			if err := unix.Unlinkat(int(dirs.layer.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+			if err := unix.Unlinkat(int(dirs.stored.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
 				return entry, false, &os.PathError{Op: "unlinkat", Path: name, Err: err}
 			}
 		}
-		if err := s.cloneAt(dirs.project, name, dirs.layer, name); err != nil {
+		if err := s.cloneAt(dirs.project, name, dirs.stored, name); err != nil {
 			return entry, false, err
 		}
 		after, err := tree.StatAt(dirs.project, name)
