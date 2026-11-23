@@ -25,7 +25,7 @@ var gemini = Agent{
 			"name": "undo",
 			"type": "command",
 			// Gemini CLI counts hook timeouts in milliseconds.
-			"timeout": 30000,
+			"timeout": hookTimeout.Milliseconds(),
 		},
 	},
 }

@@ -54,11 +54,11 @@ export const UndoPlugin = async ({ directory }) => ({
         stdout: "ignore",
         stderr: "ignore",
       })
-      const timer = setTimeout(() => child.kill(), 30_000)
+      const timer = setTimeout(() => child.kill(), %d)
       await child.exited
       clearTimeout(timer)
     } catch {}
   },
 })
-`, pluginHeader, quoted)
+`, pluginHeader, quoted, hookTimeout.Milliseconds())
 }

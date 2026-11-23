@@ -22,6 +22,6 @@ var codex = Agent{
 		// Codex reports shell commands as Bash and makes file edits with
 		// apply_patch.
 		matcher: "Bash|apply_patch",
-		handler: map[string]any{"type": "command", "timeout": 30},
+		handler: map[string]any{"type": "command", "timeout": hookTimeout.Seconds()},
 	},
 }

@@ -15,7 +15,7 @@ var cursor = Agent{
 			// Cursor matches with an unanchored regex, and a bare Write would
 			// also match WriteShellStdin.
 			"matcher": "^(Shell|Write|Delete)$",
-			"timeout": 30,
+			"timeout": hookTimeout.Seconds(),
 		},
 		defaults: map[string]any{"version": 1},
 	},

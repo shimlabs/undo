@@ -19,7 +19,7 @@ var claude = Agent{
 	installer: hookGroups{
 		event:   "PreToolUse",
 		matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit",
-		handler: map[string]any{"type": "command", "timeout": 30},
+		handler: map[string]any{"type": "command", "timeout": hookTimeout.Seconds()},
 	},
 	// Cursor also runs Claude Code's hooks. When undo's Cursor hook is
 	// installed, it covers the event, and a second checkpoint would only

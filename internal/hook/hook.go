@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
@@ -32,6 +33,11 @@ type Agent struct {
 	// a checkpoint for event.
 	isHandledElsewhere func(event hookEvent) bool
 }
+
+// hookTimeout is how long an agent waits for undo's hook before it gives up
+// and runs the tool anyway. A first checkpoint of a large project takes a few
+// seconds.
+const hookTimeout = 30 * time.Second
 
 // Agents returns every agent undo supports.
 func Agents() []Agent {
