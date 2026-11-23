@@ -78,8 +78,8 @@ func diffCommand(args []string, env Env) error {
 		return nil
 	}
 	printChanges(out, changes)
-	out.Println("")
-	out.Printf("Run %s to change these %s.\n", out.Bold(fmt.Sprintf("undo to %d", checkpoint.ID)), countOf(changes.Len(), "path"))
+	out.Println()
+	out.Printf("Run %s to change these %s.\n", out.Bold(fmt.Sprintf("undo to %d", checkpoint.ID)), pluralize(changes.Len(), "path"))
 	return nil
 }
 
@@ -127,7 +127,7 @@ func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root
 		if checkpoint.Agent != "" {
 			details = append(details, checkpoint.Agent)
 		}
-		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), printable(checkpoint.Label))
+		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), terminal.Printable(checkpoint.Label))
 		if len(details) > 0 {
 			line += "  " + out.Cyan(strings.Join(details, " · "))
 		}
@@ -162,7 +162,7 @@ func printNoCheckpoints(env Env, parsed flags) {
 			continue
 		}
 		if latest, hasLatest, err := other.Latest(); err == nil && hasLatest {
-			if shown := printable(root); shown != root {
+			if shown := terminal.Printable(root); shown != root {
 				// A path with control characters cannot be shown both readably
 				// and safe to paste, so the command is described instead.
 				out.Warning("%s was deleted. Bring it back with undo to %d and --project set to that path.", shown, latest.ID)
@@ -206,8 +206,8 @@ func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, 
 			return nil
 		}
 		printChanges(out, changes)
-		out.Println("")
-		if !confirm(env, out.Bold(fmt.Sprintf("Restore %s?", countOf(changes.Len(), "path")))+" [y/N] ") {
+		out.Println()
+		if !confirm(env, out.Bold(fmt.Sprintf("Restore %s?", pluralize(changes.Len(), "path")))+" [y/N] ") {
 			return errDeclined
 		}
 	}
@@ -217,12 +217,12 @@ func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, 
 	}
 	if isConfirmed {
 		printChanges(out, applied)
-		out.Println("")
+		out.Println()
 	}
 	if printNotRestored(out, applied) {
-		out.Println("")
+		out.Println()
 	}
-	out.Success("Restored %s. Run %s again to put them back.", countOf(applied.Len(), "path"), out.Bold("undo"))
+	out.Success("Restored %s. Run %s again to put them back.", pluralize(applied.Len(), "path"), out.Bold("undo"))
 	return nil
 }
 
@@ -231,12 +231,12 @@ func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, 
 func printCheckpointHeading(out *terminal.Writer, checkpoint store.Checkpoint, root string) {
 	out.Heading("Checkpoint %d · %s", checkpoint.ID, timeAgo(checkpoint.Time))
 	if checkpoint.Label != "" {
-		out.Printf("    %s %s\n", out.Dim("before"), printable(checkpoint.Label))
+		out.Printf("    %s %s\n", out.Dim("before"), terminal.Printable(checkpoint.Label))
 	}
 	if checkpoint.Dir != "" && checkpoint.Dir != root {
 		out.Printf("    %s %s\n", out.Dim("in"), displayPath(checkpoint.Dir))
 	}
-	out.Println("")
+	out.Println()
 }
 
 // changeRow is one line of a list of changes: what happens to a path, the
@@ -247,6 +247,10 @@ type changeRow struct {
 	detail string
 }
 
+// maxPathColumnWidth keeps one long path from pushing every detail far to
+// the right.
+const maxPathColumnWidth = 48
+
 // printRows writes rows as aligned columns.
 func printRows(out *terminal.Writer, rows []changeRow, colorAction func(string) string) {
 	actionWidth, pathWidth := 0, 0
@@ -254,7 +258,7 @@ func printRows(out *terminal.Writer, rows []changeRow, colorAction func(string) 
 		actionWidth = max(actionWidth, len(row.action))
 		pathWidth = max(pathWidth, len(row.path))
 	}
-	pathWidth = min(pathWidth, 48)
+	pathWidth = min(pathWidth, maxPathColumnWidth)
 	for _, row := range rows {
 		line := fmt.Sprintf("  %s  %s", colorAction(fmt.Sprintf("%-*s", actionWidth, row.action)), row.path)
 		if row.detail != "" {
@@ -282,7 +286,7 @@ func printNotRestored(out *terminal.Writer, applied restore.Changes) bool {
 	for _, group := range groups {
 		var rows []changeRow
 		for _, rel := range group.paths {
-			rows = append(rows, changeRow{action: group.action, path: printable(rel), detail: group.reason})
+			rows = append(rows, changeRow{action: group.action, path: terminal.Printable(rel), detail: group.reason})
 		}
 		if len(rows) > 0 {
 			printRows(out, rows, group.color)
@@ -316,10 +320,10 @@ func groupedRows(action string, paths []string) []changeRow {
 	for _, top := range order {
 		members := groups[top]
 		if len(members) == 1 {
-			rows = append(rows, changeRow{action: action, path: printable(members[0])})
+			rows = append(rows, changeRow{action: action, path: terminal.Printable(members[0])})
 			continue
 		}
-		rows = append(rows, changeRow{action: action, path: printable(top) + "/", detail: countOf(len(members), "path")})
+		rows = append(rows, changeRow{action: action, path: terminal.Printable(top) + "/", detail: pluralize(len(members), "path")})
 	}
 	return rows
 }

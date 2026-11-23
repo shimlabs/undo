@@ -9,9 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
@@ -122,13 +120,13 @@ func Run(args []string, env Env) int {
 	switch {
 	case errors.Is(err, errDeclined):
 	case errors.Is(err, store.ErrCloneUnsupported):
-		errOut.Error("%s, so undo cannot protect this project cheaply.", printable(err.Error()))
+		errOut.Error("%s, so undo cannot protect this project cheaply.", terminal.Printable(err.Error()))
 		errOut.Printf("Run %s once to keep full copies instead. They take as much disk as the project.\n", errOut.Bold("undo checkpoint --copy"))
 	case errors.Is(err, project.ErrNotProject):
-		errOut.Error("%s.", printable(err.Error()))
+		errOut.Error("%s.", terminal.Printable(err.Error()))
 		errOut.Println("Run undo, or start your agent, inside a project folder.")
 	default:
-		errOut.Error("%s", printable(err.Error()))
+		errOut.Error("%s", terminal.Printable(err.Error()))
 	}
 	return 1
 }
@@ -257,15 +255,4 @@ func deletedOrExistingRoot(path, dir string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(parent, filepath.Base(path)), nil
-}
-
-// printable returns text safe to print to a terminal. Labels and paths come
-// from agents and projects, and control characters in them could rewrite what
-// the terminal shows.
-func printable(text string) string {
-	isPlain := utf8.ValidString(text) && strings.IndexFunc(text, func(r rune) bool { return !strconv.IsPrint(r) }) < 0
-	if isPlain {
-		return text
-	}
-	return strconv.Quote(text)
 }

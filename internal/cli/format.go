@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shimlabs/undo/internal/terminal"
 )
 
-// formatCount writes n with thousands separators, such as 2,469.
+// formatCount returns n with thousands separators, such as 2,469.
 func formatCount(n int) string {
 	digits := strconv.Itoa(n)
 	var formatted strings.Builder
@@ -22,8 +24,8 @@ func formatCount(n int) string {
 	return formatted.String()
 }
 
-// countOf returns n and noun, in the plural unless n is 1.
-func countOf(n int, noun string) string {
+// pluralize returns n and noun, in the plural unless n is 1.
+func pluralize(n int, noun string) string {
 	if n == 1 {
 		return "1 " + noun
 	}
@@ -51,13 +53,13 @@ func timeAgo(moment time.Time) string {
 	case elapsed < 5*time.Second:
 		return "just now"
 	case elapsed < time.Minute:
-		return countOf(int(elapsed.Seconds()), "second") + " ago"
+		return pluralize(int(elapsed.Seconds()), "second") + " ago"
 	case elapsed < time.Hour:
-		return countOf(int(elapsed.Minutes()), "minute") + " ago"
+		return pluralize(int(elapsed.Minutes()), "minute") + " ago"
 	case elapsed < 24*time.Hour:
-		return countOf(int(elapsed.Hours()), "hour") + " ago"
+		return pluralize(int(elapsed.Hours()), "hour") + " ago"
 	case elapsed < 30*24*time.Hour:
-		return countOf(int(elapsed.Hours()/24), "day") + " ago"
+		return pluralize(int(elapsed.Hours()/24), "day") + " ago"
 	default:
 		return moment.Format("Jan 2, 2006")
 	}
@@ -66,12 +68,12 @@ func timeAgo(moment time.Time) string {
 // displayPath shortens path for reading, with ~ for the home directory.
 func displayPath(path string) string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if rel, err := filepath.Rel(home, path); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+		if rel, err := filepath.Rel(home, path); err == nil && filepath.IsLocal(rel) {
 			if rel == "." {
 				return "~"
 			}
-			return printable("~/" + rel)
+			return terminal.Printable("~/" + rel)
 		}
 	}
-	return printable(path)
+	return terminal.Printable(path)
 }

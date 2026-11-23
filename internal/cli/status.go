@@ -41,7 +41,7 @@ func statusCommand(args []string, env Env) error {
 	} else {
 		printField(out, "Hooks", out.Yellow("none yet")+", run: "+out.Bold("undo install <agent>"))
 	}
-	printField(out, "Excluded", printable(strings.Join(matcher.Patterns(), ", ")))
+	printField(out, "Excluded", terminal.Printable(strings.Join(matcher.Patterns(), ", ")))
 	printField(out, "Not covered", "anything outside this folder: databases, git push, API calls")
 	return nil
 }
@@ -73,14 +73,14 @@ func printStore(out *terminal.Writer, env Env, projectStore *store.Store) error 
 	printField(out, "Disk used", fmt.Sprintf("about %s not shared with the project, limit %s", formatBytes(diskUsage), formatBytes(store.DefaultLimits().MaxBytes)))
 	switch reason, isRecent := watch.StartFailure(projectStore); {
 	case watcher.IsRunning:
-		printField(out, "Watcher", out.Green("running")+fmt.Sprintf(", %s since it started", countOf(watcher.CheckpointCount, "checkpoint")))
+		printField(out, "Watcher", out.Green("running")+fmt.Sprintf(", %s since it started", pluralize(watcher.CheckpointCount, "checkpoint")))
 	case isRecent:
-		printField(out, "Watcher", out.Red("could not start")+", so checkpoints scan the project: "+printable(reason))
+		printField(out, "Watcher", out.Red("could not start")+", so checkpoints scan the project: "+terminal.Printable(reason))
 	default:
 		printField(out, "Watcher", out.Yellow("not running")+", so checkpoints scan the project")
 	}
 	if line := projectStore.LastError(); line != "" {
-		printField(out, "Last error", out.Red(printable(line)))
+		printField(out, "Last error", out.Red(terminal.Printable(line)))
 	}
 	return nil
 }
@@ -109,10 +109,10 @@ func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store) err
 		return err
 	}
 	if len(latest.Unreadable) > 0 {
-		printField(out, "Unreadable", out.Yellow(printable(strings.Join(latest.Unreadable, ", ")))+" (undo has no permission to read these, so they are not covered)")
+		printField(out, "Unreadable", out.Yellow(terminal.Printable(strings.Join(latest.Unreadable, ", ")))+" (undo has no permission to read these, so they are not covered)")
 	}
 	if unstableCount > 0 {
-		printField(out, "Changing", out.Yellow(countOf(unstableCount, "checkpoint"))+" hold files that changed while they were saved; a restore lists them")
+		printField(out, "Changing", out.Yellow(pluralize(unstableCount, "checkpoint"))+" hold files that changed while they were saved; a restore lists them")
 	}
 	return nil
 }

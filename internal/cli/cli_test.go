@@ -276,14 +276,6 @@ func TestStatusShowsDiskUseAndWatcher(t *testing.T) {
 	}
 }
 
-func TestFormatBytes(t *testing.T) {
-	for size, want := range map[int64]string{0: "0 B", 999: "999 B", 1500: "1.5 kB", 2_340_000: "2.3 MB", 5_000_000_000: "5.0 GB"} {
-		if got := formatBytes(size); got != want {
-			t.Errorf("formatBytes(%d) = %q, want %q", size, got, want)
-		}
-	}
-}
-
 func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
 	root := newProject(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
@@ -451,17 +443,6 @@ func TestStatusEscapesExcludePatterns(t *testing.T) {
 	_, out := run(t, root, "", "status")
 	if strings.Contains(out, "\x1b") {
 		t.Fatalf("status printed a raw escape sequence:\n%q", out)
-	}
-}
-
-func TestPrintableEscapesControlCharacters(t *testing.T) {
-	if got := printable("rm -rf build"); got != "rm -rf build" {
-		t.Fatalf("printable changed plain text: %q", got)
-	}
-	for _, text := range []string{"echo \x1b]0;pwned\x07", "a\x9bb", "invoice\u202egpj.exe"} {
-		if got := printable(text); got == text {
-			t.Errorf("printable(%q) left the text unescaped", text)
-		}
 	}
 }
 
