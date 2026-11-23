@@ -312,24 +312,10 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 
 	var changed, deleted []string
 	if !shouldRescan {
-		for _, rel := range t.unsavedFiles {
-			markDirty(dirty, t.path(rel))
-		}
-		// A write through a name outside the project has no event here, but
-		// a stat of the project's name shows it.
-		for rel := range t.hardLinked {
-			if entry, err := tree.Stat(t.path(rel)); err != nil || entry != t.listing[rel] {
-				markDirty(dirty, t.path(rel))
-			}
-		}
-		changed, deleted, err = t.applyDirty(dirty)
-		if errors.Is(err, fs.ErrPermission) {
-			shouldRescan = true
-		} else if err != nil {
+		changed, deleted, shouldRescan, err = t.applyEvents(dirty)
+		if err != nil {
 			return store.Checkpoint{}, err
 		}
-		t.unreadable = slices.DeleteFunc(t.unreadable, t.isReadableOrGone)
-		t.updateHardLinked(changed, deleted)
 	}
 	if shouldRescan {
 		current, skipped, err := tree.Scan(t.root, t.matcher.Load())
@@ -362,6 +348,37 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		return isListed
 	})
 	return checkpoint, nil
+}
+
+// applyEvents updates the listing with the paths in dirty, and the files
+// whose last change could not be saved or that have names outside the
+// project. It reports whether a full scan is needed instead.
+func (t *tracker) applyEvents(dirty map[string]bool) (changed, deleted []string, shouldRescan bool, err error) {
+	for _, rel := range t.unsavedFiles {
+		markDirty(dirty, t.path(rel))
+	}
+	t.markChangedHardLinks(dirty)
+	changed, deleted, err = t.applyDirty(dirty)
+	if errors.Is(err, fs.ErrPermission) {
+		return nil, nil, true, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
+	}
+	t.unreadable = slices.DeleteFunc(t.unreadable, t.isReadableOrGone)
+	t.updateHardLinked(changed, deleted)
+	return changed, deleted, false, nil
+}
+
+// markChangedHardLinks marks the listed files with several names whose stat
+// changed. A write through a name outside the project has no event here, but
+// a stat of the project's name shows it.
+func (t *tracker) markChangedHardLinks(dirty map[string]bool) {
+	for rel := range t.hardLinked {
+		if entry, err := tree.Stat(t.path(rel)); err != nil || entry != t.listing[rel] {
+			markDirty(dirty, t.path(rel))
+		}
+	}
 }
 
 // hardLinkedFiles returns the files in listing with more than one name.
