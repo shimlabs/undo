@@ -1,25 +1,91 @@
 version: "2"
 
 linters:
-  enable:
-    - errorlint
-    - gocritic
-    - misspell
-    - nolintlint
-    - revive
-    - unconvert
-    - usestdlibvars
+  default: all
+  disable:
+    # Whitespace and line-length rules that fight gofmt-formatted Go.
+    - lll
+    - nlreturn
+    - wsl
+    - wsl_v5
+    # Forbids `if err := f(); err != nil`, the standard Go form.
+    - noinlineerr
+    # Forbids the short names Go uses for ids, loop indexes and receivers.
+    - varnamelen
+    # Named results document what a function returns.
+    - nonamedreturns
+    # Tests reach package internals, and many change the environment,
+    # rlimits or lock flags, so they cannot run in parallel.
+    - paralleltest
+    - testpackage
+    # Errors already carry the path or operation that failed; wrapping each
+    # one again adds noise, not context.
+    - wrapcheck
+    # Zero values are meaningful in this codebase's structs.
+    - exhaustruct
+    - exhaustruct_v5
+    # File modes and limits are clearer as literals than as named constants.
+    - mnd
+    # The JSON field names are part of the on-disk format and agent settings.
+    - tagliatelle
+    # Only golang.org/x/sys and golang.org/x/term are imported, both reviewed.
+    - depguard
   settings:
+    cyclop:
+      max-complexity: 15
+    dupword:
+      # Repeated words that are C, in cgo preambles.
+      ignore:
+        - NULL
+        - NULL,
+        - long
+    funlen:
+      lines: -1
+      statements: 40
+    goconst:
+      min-occurrences: 4
+      # Command names, which the tests spell out as a user types them.
+      ignore-string-values:
+        - ^(list|hook)$
+    gosec:
+      excludes:
+        # errcheck reports unchecked errors, with Close excluded on purpose.
+        - G104
+    ireturn:
+      allow:
+        - error
+        - empty
+        - stdlib
+        - generic
     misspell:
       locale: US
+    nilnil:
+      # A nil map or channel is a valid empty value, not a missing one.
+      checked-types:
+        - ptr
+        - func
+        - iface
+        - uintptr
+        - unsafeptr
+    nolintlint:
+      require-explanation: true
+      require-specific: true
   exclusions:
     presets:
       - common-false-positives
       - std-error-handling
     rules:
-      - path: _test\.go
+      - path: (_test\.go|internal/testutil/)
         linters:
-          - errcheck
+          - cyclop
+          - err113
+          - funlen
+          - goconst
+          - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 
 formatters:
   enable:
