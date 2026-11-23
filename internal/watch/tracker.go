@@ -487,7 +487,7 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 // addUnder adds everything inside a new directory to the listing, in case some
 // of its files were created before their events arrived.
 func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir string) error {
-	return filepath.WalkDir(dir, func(fullPath string, entry fs.DirEntry, err error) error {
+	return filepath.WalkDir(dir, func(fullPath string, dirEntry fs.DirEntry, err error) error {
 		if err != nil || fullPath == dir {
 			return nil
 		}
@@ -496,17 +496,17 @@ func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir str
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if matcher.Match(rel, entry.IsDir()) {
-			if entry.IsDir() {
+		if matcher.Match(rel, dirEntry.IsDir()) {
+			if dirEntry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		treeEntry, err := tree.Stat(fullPath)
+		entry, err := tree.Stat(fullPath)
 		if err != nil {
 			return nil
 		}
-		changes.update(rel, treeEntry)
+		changes.update(rel, entry)
 		return nil
 	})
 }
