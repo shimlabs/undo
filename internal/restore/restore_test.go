@@ -779,3 +779,47 @@ func TestRestoreReportsStoredFilesThatAreGone(t *testing.T) {
 		t.Fatalf("src/main.go = %q; the restore stopped at the missing copy", data)
 	}
 }
+
+// "cache" was a file at checkpoint 1. It is now a directory that holds a file
+// undo cannot read, which the restore must keep, so the directory stays.
+func TestRestoreKeepsDirectoryWithUnreadableFileWhereFileWas(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "cache"), "file")
+	take(t, projectStore, "1")
+	os.Remove(filepath.Join(root, "cache"))
+	testutil.WriteFile(t, filepath.Join(root, "cache", "secret"), "s")
+	os.Chmod(filepath.Join(root, "cache", "secret"), 0)
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, "cache", "secret"), 0o644) })
+	os.Remove(filepath.Join(root, "README.md"))
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
+	take(t, projectStore, "2")
+
+	changes, err := Apply(projectStore, 1, (*store.Store).Take)
+	readme, _ := os.ReadFile(filepath.Join(root, "README.md"))
+	main, _ := os.ReadFile(filepath.Join(root, "src", "main.go"))
+	if err != nil {
+		t.Fatalf("restore failed: %v; README.md=%q src/main.go=%q kept=%v", err, readme, main, changes.Kept)
+	}
+	if string(main) != "package main\n" {
+		t.Fatalf("src/main.go = %q", main)
+	}
+}
+
+// Same, with a symlink target.
+func TestRestoreKeepsDirectoryWithExcludedContentWhereSymlinkWas(t *testing.T) {
+	projectStore, root := newProject(t)
+	os.Symlink("src", filepath.Join(root, "cache"))
+	take(t, projectStore, "1")
+	os.Remove(filepath.Join(root, "cache"))
+	testutil.WriteFile(t, filepath.Join(root, "cache", "node_modules", "x.js"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
+	take(t, projectStore, "2")
+	changes, err := Apply(projectStore, 1, (*store.Store).Take)
+	main, _ := os.ReadFile(filepath.Join(root, "src", "main.go"))
+	if err != nil || string(main) != "package main\n" {
+		t.Fatalf("restore: %v; src/main.go=%q kept=%v", err, main, changes.Kept)
+	}
+}

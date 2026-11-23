@@ -169,9 +169,12 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	// A directory that holds paths the restore must not touch cannot be
 	// replaced by a file either.
 	unreadable := plan.unreadableFiles(slices.Concat(written, removed))
+	plan.drop(unreadable)
+	// Only now does a directory holding an unreadable file hold something
+	// the plan does not track.
 	blocked := plan.dirsHoldingUntracked(written)
+	plan.drop(blocked)
 	if left := slices.Concat(unreadable, blocked); len(left) > 0 {
-		plan.drop(left)
 		kept = append(kept, left...)
 		written, removed = tree.Changed(current, plan.targetListing())
 	}
