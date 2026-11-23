@@ -38,12 +38,14 @@ type Checkpointer func(s *Store, options CheckpointOptions) (Checkpoint, error)
 // Manifest is what a layer recorded: the state of every path that changed
 // since the previous checkpoint and the paths that were deleted. Unstable
 // files kept changing while they were cloned, and unreadable paths could not
-// be saved at all.
+// be saved at all. ExcludePatterns are the exclude rules the checkpoint was
+// taken with, so a restore leaves alone what that checkpoint never saw.
 type Manifest struct {
-	Changed    map[string]tree.Entry `json:"changed"`
-	Deleted    []string              `json:"deleted"`
-	Unstable   []string              `json:"unstable,omitempty"`
-	Unreadable []string              `json:"unreadable,omitempty"`
+	Changed         map[string]tree.Entry `json:"changed"`
+	Deleted         []string              `json:"deleted"`
+	Unstable        []string              `json:"unstable,omitempty"`
+	Unreadable      []string              `json:"unreadable,omitempty"`
+	ExcludePatterns []string              `json:"exclude_patterns"`
 }
 
 // Changes are what a caller that tracks the project itself found since the
@@ -56,6 +58,8 @@ type Changes struct {
 	Deleted []string
 	// Unreadable are directories the caller could not list.
 	Unreadable []string
+	// ExcludePatterns are the exclude rules the changes were found with.
+	ExcludePatterns []string
 }
 
 // ErrStale means another checkpoint was taken after the one the changes were
@@ -100,7 +104,13 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 		return Checkpoint{}, err
 	}
 	changed, deleted := tree.Changed(previous, current)
-	cp, err := s.commit(latest.ID, options, Changes{Listing: current, Changed: changed, Deleted: deleted, Unreadable: skipped.Unreadable})
+	cp, err := s.commit(latest.ID, options, Changes{
+		Listing:         current,
+		Changed:         changed,
+		Deleted:         deleted,
+		Unreadable:      skipped.Unreadable,
+		ExcludePatterns: matcher.Patterns(),
+	})
 	if err != nil {
 		return Checkpoint{}, err
 	}
@@ -127,6 +137,12 @@ func (s *Store) Commit(after int, options CheckpointOptions, changes Changes) (C
 	return s.commit(after, options, changes)
 }
 
+// commit writes layer latestID+1 and then appends it to the index, so a
+// checkpoint is only listed once its layer is complete. The manifest and the
+// index line are flushed to disk; the cloned files are not, since flushing
+// every file would make checkpoints far slower. After a power loss, the
+// newest checkpoint's files can therefore be incomplete, while older
+// checkpoints are unaffected.
 func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes) (Checkpoint, error) {
 	id := latestID + 1
 	// A layer left behind by an interrupted checkpoint would mix old files
@@ -270,7 +286,12 @@ func (s *Store) cloneInto(rel, dst string, plan *basePlan) error {
 
 // cloneChanged copies each changed file and symlink into the layer for id.
 func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
-	manifest := Manifest{Changed: map[string]tree.Entry{}, Deleted: changes.Deleted, Unreadable: changes.Unreadable}
+	manifest := Manifest{
+		Changed:         map[string]tree.Entry{},
+		Deleted:         changes.Deleted,
+		Unreadable:      changes.Unreadable,
+		ExcludePatterns: changes.ExcludePatterns,
+	}
 	if manifest.Deleted == nil {
 		manifest.Deleted = []string{}
 	}

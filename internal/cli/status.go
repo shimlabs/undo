@@ -78,8 +78,9 @@ func printStore(out io.Writer, env Env, projectStore *store.Store) error {
 	return nil
 }
 
-// printCheckpoints prints how many checkpoints there are and what the latest
-// one could not save.
+// printCheckpoints prints how many checkpoints there are, what the latest one
+// could not save, and how many hold files that were changing while they were
+// saved.
 func printCheckpoints(out io.Writer, projectStore *store.Store) error {
 	checkpoints, err := projectStore.List()
 	if err != nil {
@@ -90,15 +91,21 @@ func printCheckpoints(out io.Writer, projectStore *store.Store) error {
 		return nil
 	}
 	fmt.Fprintf(out, "Checkpoints  %d (oldest %s)\n", len(checkpoints), timeAgo(checkpoints[0].Time))
-	manifest, err := projectStore.Manifest(checkpoints[len(checkpoints)-1].ID)
+	var unstableCount int
+	for _, checkpoint := range checkpoints {
+		if manifest, err := projectStore.Manifest(checkpoint.ID); err == nil && len(manifest.Unstable) > 0 {
+			unstableCount++
+		}
+	}
+	latest, err := projectStore.Manifest(checkpoints[len(checkpoints)-1].ID)
 	if err != nil {
 		return err
 	}
-	if len(manifest.Unreadable) > 0 {
-		fmt.Fprintf(out, "Unreadable   %s (undo has no permission to read these, so they are not covered)\n", printable(strings.Join(manifest.Unreadable, ", ")))
+	if len(latest.Unreadable) > 0 {
+		fmt.Fprintf(out, "Unreadable   %s (undo has no permission to read these, so they are not covered)\n", printable(strings.Join(latest.Unreadable, ", ")))
 	}
-	if len(manifest.Unstable) > 0 {
-		fmt.Fprintf(out, "Changing     %s (kept changing while they were saved, so the saved copy may be mid-write)\n", printable(strings.Join(manifest.Unstable, ", ")))
+	if unstableCount > 0 {
+		fmt.Fprintf(out, "Changing     %d checkpoints hold files that changed while they were saved; a restore lists them\n", unstableCount)
 	}
 	return nil
 }

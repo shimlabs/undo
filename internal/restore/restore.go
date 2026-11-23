@@ -14,18 +14,27 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/tree"
 )
 
-// Changes lists what a restore writes, removes and cannot restore, as paths
+// Changes lists what a restore writes, removes and leaves alone, as paths
 // relative to the project root.
 type Changes struct {
 	Written []string
 	Removed []string
 	// Skipped are sockets and devices, which a restore cannot recreate.
 	Skipped []string
+	// Kept are paths the restore leaves as they are because they were never
+	// saved: files undo cannot read, and existing paths that the exclude
+	// rules leave out now but not at the checkpoint.
+	Kept []string
+	// Unstable are files that kept changing while the checkpoint saved them,
+	// so their restored content may be a mix of two writes.
+	Unstable []string
 }
 
 // Len returns the number of paths the restore writes or removes.
@@ -115,26 +124,54 @@ type projectRestore struct {
 	changes Changes
 }
 
-// compare plans a restore of checkpoint id. Paths the current exclude rules
-// exclude, and paths inside directories that cannot be read, are left out of
-// both sides, so the restore never touches them.
+// compare plans a restore of checkpoint id. It never touches a path the
+// checkpoint did not save: paths its exclude rules left out, paths in
+// directories that could not be read then or now, and files that cannot be
+// read now. A path that only today's rules exclude is written back if it is
+// missing, but never overwritten.
 func compare(projectStore *store.Store, id int) (projectRestore, error) {
 	root := projectStore.Root()
-	matcher, err := exclude.New(root)
+	matcherNow, err := exclude.New(root)
 	if err != nil {
 		return projectRestore{}, err
+	}
+	manifest, err := projectStore.Manifest(id)
+	if err != nil {
+		return projectRestore{}, err
+	}
+	matcherThen := matcherNow
+	if manifest.ExcludePatterns != nil {
+		matcherThen = exclude.FromPatterns(manifest.ExcludePatterns)
 	}
 	target, err := projectStore.State(id)
 	if err != nil {
 		return projectRestore{}, err
 	}
-	current, skipped, err := tree.ScanWithSkipped(root, matcher)
+	current, skipped, err := tree.ScanWithSkipped(root, matcherNow)
 	if err != nil {
 		return projectRestore{}, err
 	}
+	unreadable := slices.Concat(manifest.Unreadable, skipped.Unreadable)
+	isUnsaved := func(rel string, isDir bool) bool {
+		return matcherThen.Excludes(rel, isDir) || isAtOrInside(rel, unreadable)
+	}
+	var kept []string
+	for rel, entry := range current {
+		if isUnsaved(rel, entry.Kind == tree.Dir) {
+			delete(current, rel)
+		} else if _, inTarget := target[rel]; !inTarget && entry.Kind == tree.File && !isReadable(filepath.Join(root, filepath.FromSlash(rel))) {
+			delete(current, rel)
+			kept = append(kept, rel)
+		}
+	}
 	for rel, source := range target {
-		if matcher.Excludes(rel, source.Entry.Kind == tree.Dir) || isInside(rel, skipped.Unreadable) {
+		isDir := source.Entry.Kind == tree.Dir
+		switch {
+		case isUnsaved(rel, isDir):
 			delete(target, rel)
+		case matcherNow.Excludes(rel, isDir) && exists(filepath.Join(root, filepath.FromSlash(rel))):
+			delete(target, rel)
+			kept = append(kept, rel)
 		}
 	}
 	targetListing := make(tree.Listing, len(target))
@@ -142,13 +179,25 @@ func compare(projectStore *store.Store, id int) (projectRestore, error) {
 		targetListing[rel] = source.Entry
 	}
 	written, removed := tree.Changed(current, targetListing)
-	return projectRestore{root: root, target: target, current: current, changes: Changes{Written: written, Removed: removed}}, nil
+	slices.Sort(kept)
+	changes := Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable}
+	return projectRestore{root: root, target: target, current: current, changes: changes}, nil
 }
 
-func isInside(rel string, dirs []string) bool {
+// isAtOrInside reports whether rel is one of dirs or inside one of them.
+func isAtOrInside(rel string, dirs []string) bool {
 	return slices.ContainsFunc(dirs, func(dir string) bool {
-		return strings.HasPrefix(rel, dir+"/")
+		return rel == dir || strings.HasPrefix(rel, dir+"/")
 	})
+}
+
+func isReadable(path string) bool {
+	return unix.Access(path, unix.R_OK) == nil
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 func (p *projectRestore) apply(projectStore *store.Store) error {

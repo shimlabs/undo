@@ -198,7 +198,13 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		return store.Checkpoint{}, err
 	}
 
-	cp, err := t.store.Commit(latest.ID, options, store.Changes{Listing: t.listing, Changed: changed, Deleted: deleted, Unreadable: t.unreadable})
+	cp, err := t.store.Commit(latest.ID, options, store.Changes{
+		Listing:         t.listing,
+		Changed:         changed,
+		Deleted:         deleted,
+		Unreadable:      t.unreadable,
+		ExcludePatterns: t.matcher.Load().Patterns(),
+	})
 	if errors.Is(err, store.ErrStale) {
 		t.listing = nil
 		return t.checkpoint(options, nil, true)

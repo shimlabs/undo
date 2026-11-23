@@ -1,10 +1,12 @@
 package restore
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -42,6 +44,13 @@ func newProject(t *testing.T) (*store.Store, string) {
 		t.Fatal(err)
 	}
 	return s, root
+}
+
+func take(t *testing.T, projectStore *store.Store, label string) {
+	t.Helper()
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: projectStore.Root()}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {
@@ -411,5 +420,145 @@ func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
 	os.Chmod(filepath.Join(root, "pgdata"), 0o755)
 	if data, _ := os.ReadFile(filepath.Join(root, "pgdata", "rows")); string(data) != "data" {
 		t.Fatalf("restore removed a directory it could not read")
+	}
+}
+
+func TestRestoreKeepsUnreadableFiles(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every file")
+	}
+	s, root := newProject(t)
+	writeFile(t, filepath.Join(root, "secret.key"), "key")
+	os.Chmod(filepath.Join(root, "secret.key"), 0o000)
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, "secret.key"), 0o644) })
+	take(t, s, "first")
+	writeFile(t, filepath.Join(root, "later.key"), "key made after the checkpoint")
+	os.Chmod(filepath.Join(root, "later.key"), 0o000)
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, "later.key"), 0o644) })
+	writeFile(t, filepath.Join(root, "README.md"), "damaged")
+
+	changes, err := Apply(s, 1, (*store.Store).Take)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"secret.key", "later.key"} {
+		if _, err := os.Lstat(filepath.Join(root, name)); err != nil {
+			t.Errorf("restore deleted %s, a file it could not read: %v (removed %v)", name, err, changes.Removed)
+		}
+	}
+}
+
+func TestRestoreLeavesDirectoryUnreadableAtCheckpoint(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every directory")
+	}
+	s, root := newProject(t)
+	writeFile(t, filepath.Join(root, "pgdata", "rows"), "data")
+	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
+	take(t, s, "pgdata unreadable")
+	os.Chmod(filepath.Join(root, "pgdata"), 0o755)
+
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "pgdata", "rows")); string(data) != "data" {
+		t.Fatal("restore removed files the checkpoint could not read")
+	}
+}
+
+func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
+	s, root := newProject(t)
+	take(t, s, "first")
+	writeFile(t, filepath.Join(root, ".undoignore"), "src/\n")
+	os.RemoveAll(filepath.Join(root, "src"))
+
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package main\n" {
+		t.Fatal("restore did not bring back a folder excluded only after the checkpoint")
+	}
+}
+
+// runIn runs a command in dir and fails the test if it fails.
+func runIn(t *testing.T, dir string, name string, args ...string) {
+	t.Helper()
+	command := exec.Command(name, args...)
+	command.Dir = dir
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
+	}
+}
+
+func newGitProject(t *testing.T) (*store.Store, string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	s, root := newProject(t)
+	os.RemoveAll(filepath.Join(root, ".git"))
+	runIn(t, root, "git", "init", "-q")
+	runIn(t, root, "git", "-c", "user.name=test", "-c", "user.email=test@example.com", "add", "-A")
+	runIn(t, root, "git", "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "initial")
+	return s, root
+}
+
+func TestRestoreAfterGitResetHard(t *testing.T) {
+	s, root := newGitProject(t)
+	writeFile(t, filepath.Join(root, "src", "main.go"), "package main // uncommitted work\n")
+	want := snapshot(t, root)
+	take(t, s, "before reset")
+
+	runIn(t, root, "git", "reset", "-q", "--hard")
+
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	requireSame(t, want, snapshot(t, root))
+}
+
+func TestRestoreAfterGitCleanFdx(t *testing.T) {
+	s, root := newGitProject(t)
+	writeFile(t, filepath.Join(root, "notes.txt"), "untracked notes\n")
+	writeFile(t, filepath.Join(root, "config.local.json"), "{}\n")
+	want := snapshot(t, root)
+	take(t, s, "before clean")
+
+	runIn(t, root, "git", "clean", "-q", "-fdx")
+
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	requireSame(t, want, snapshot(t, root))
+}
+
+func TestRestoreAfterXargsDeletion(t *testing.T) {
+	s, root := newProject(t)
+	want := snapshot(t, root)
+	take(t, s, "before xargs")
+
+	runIn(t, root, "sh", "-c", "find . -name '*.go' -print0 | xargs -0 rm -f")
+
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	requireSame(t, want, snapshot(t, root))
+}
+
+func TestRestoreReportsUnstableFiles(t *testing.T) {
+	s, root := newProject(t)
+	take(t, s, "first")
+	manifest, _ := s.Manifest(1)
+	manifest.Unstable = []string{"README.md"}
+	data, _ := json.Marshal(manifest)
+	os.WriteFile(filepath.Join(s.Dir(), "layers", "1", "manifest.json"), data, 0o600)
+	writeFile(t, filepath.Join(root, "README.md"), "damaged")
+
+	changes, err := Apply(s, 1, (*store.Store).Take)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(changes.Unstable, "README.md") {
+		t.Fatalf("unstable = %v, want README.md reported", changes.Unstable)
 	}
 }

@@ -53,6 +53,12 @@ func New(root string) (*Matcher, error) {
 	return &Matcher{patterns: patterns}, scanner.Err()
 }
 
+// FromPatterns returns a Matcher for patterns that a Matcher returned
+// earlier, such as the rules recorded with a checkpoint.
+func FromPatterns(patterns []string) *Matcher {
+	return &Matcher{patterns: slices.Clone(patterns)}
+}
+
 // Match reports whether rel is excluded. rel is a slash-separated path
 // relative to the project root. A pattern that ends in "/" only matches
 // directories. A pattern that contains "/" is matched against the whole path,

@@ -182,11 +182,22 @@ func restoreTo(projectStore *store.Store, checkpoint store.Checkpoint, isConfirm
 	if isConfirmed {
 		printChanges(env.Stdout, applied)
 	}
-	for _, rel := range applied.Skipped {
-		fmt.Fprintf(env.Stdout, "  skipped  %s  (sockets and devices cannot be restored)\n", printable(rel))
-	}
+	printNotRestored(env.Stdout, applied)
 	fmt.Fprintf(env.Stdout, "Restored %d paths. Run undo again to put them back.\n", applied.Len())
 	return nil
+}
+
+// printNotRestored lists what the restore left alone and why.
+func printNotRestored(writer io.Writer, applied restore.Changes) {
+	for _, rel := range applied.Skipped {
+		fmt.Fprintf(writer, "  skipped  %s  (sockets and devices cannot be restored)\n", printable(rel))
+	}
+	for _, rel := range applied.Kept {
+		fmt.Fprintf(writer, "  kept     %s  (never saved: unreadable, or excluded since the checkpoint)\n", printable(rel))
+	}
+	for _, rel := range applied.Unstable {
+		fmt.Fprintf(writer, "  check    %s  (it was changing while it was saved)\n", printable(rel))
+	}
 }
 
 func printChanges(writer io.Writer, changes restore.Changes) {
