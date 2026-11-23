@@ -9,13 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/fsnotify"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/testutil"
 	"github.com/shimlabs/undo/internal/tree"
 )
 
@@ -33,31 +32,35 @@ func newTrackerWithFiles(t *testing.T) (*tracker, *store.Store, string) {
 	return startTracker(t, root)
 }
 
-func startTracker(t *testing.T, root string) (*tracker, *store.Store, string) {
+func startTracker(t testing.TB, root string) (*tracker, *store.Store, string) {
 	t.Helper()
 	projectStore, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracker, err := newTracker(projectStore)
+	projectTracker, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(tracker.Close)
-	return tracker, projectStore, root
+	t.Cleanup(projectTracker.Close)
+	return projectTracker, projectStore, root
 }
 
 func damage(t *testing.T, root string) {
 	t.Helper()
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# changed")
-	os.RemoveAll(filepath.Join(root, "src"))
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, filepath.Join(root, "new", "deep", "file.txt"), "new")
-	os.Rename(filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "docs", "moved.md"))
+	if err := os.Rename(filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "docs", "moved.md")); err != nil {
+		t.Fatal(err)
+	}
 }
 
-func takeCheckpoint(t *testing.T, tracker *tracker, label string) store.Checkpoint {
+func takeCheckpoint(t testing.TB, projectTracker *tracker, label string) store.Checkpoint {
 	t.Helper()
-	checkpoint, err := tracker.Checkpoint(store.CheckpointOptions{Label: label, Dir: tracker.root})
+	checkpoint, err := projectTracker.Checkpoint(store.CheckpointOptions{Label: label, Dir: projectTracker.root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,29 +84,29 @@ func checkMatchesScan(t *testing.T, projectStore *store.Store, root string, id i
 	}
 }
 
-func checkpointThroughTracker(tracker *tracker) store.Checkpointer {
+func checkpointThroughTracker(projectTracker *tracker) store.Checkpointer {
 	return func(_ *store.Store, options store.CheckpointOptions) (store.Checkpoint, error) {
-		return tracker.Checkpoint(options)
+		return projectTracker.Checkpoint(options)
 	}
 }
 
 func TestTrackerMatchesFullScan(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
 	damage(t, root)
 
-	checkpoint := takeCheckpoint(t, tracker, "second")
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
 
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 func TestTrackerCheckpointsRestoreExactly(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	before := testutil.Fingerprint(t, root)
-	takeCheckpoint(t, tracker, "first")
-	takeCheckpoint(t, tracker, "second")
+	takeCheckpoint(t, projectTracker, "first")
+	takeCheckpoint(t, projectTracker, "second")
 	damage(t, root)
-	takeCheckpoint(t, tracker, "third")
+	takeCheckpoint(t, projectTracker, "third")
 
 	if _, err := restore.Apply(projectStore, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
@@ -114,14 +117,14 @@ func TestTrackerCheckpointsRestoreExactly(t *testing.T) {
 }
 
 func TestTrackerSeesChangeRightBeforeCheckpoint(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
-	takeCheckpoint(t, tracker, "warm")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
+	takeCheckpoint(t, projectTracker, "warm")
 
 	for i := range 20 {
 		name := fmt.Sprintf("f%d.txt", i)
 		testutil.WriteFile(t, filepath.Join(root, name), "x")
-		checkpoint := takeCheckpoint(t, tracker, "after write")
+		checkpoint := takeCheckpoint(t, projectTracker, "after write")
 		manifest, _ := projectStore.Manifest(checkpoint.ID)
 		if _, ok := manifest.Changed[name]; !ok {
 			t.Fatalf("round %d: checkpoint missed %s written just before it", i, name)
@@ -130,17 +133,17 @@ func TestTrackerSeesChangeRightBeforeCheckpoint(t *testing.T) {
 }
 
 func TestTrackerRecoversAfterOutsideCheckpoint(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	before := testutil.Fingerprint(t, root)
-	takeCheckpoint(t, tracker, "first")
-	takeCheckpoint(t, tracker, "second")
+	takeCheckpoint(t, projectTracker, "first")
+	takeCheckpoint(t, projectTracker, "second")
 
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# outside")
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: "taken without the tracker", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	damage(t, root)
-	takeCheckpoint(t, tracker, "after outside")
+	takeCheckpoint(t, projectTracker, "after outside")
 
 	if _, err := restore.Apply(projectStore, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
@@ -151,44 +154,50 @@ func TestTrackerRecoversAfterOutsideCheckpoint(t *testing.T) {
 }
 
 func TestTrackerFollowsMovedDirectories(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
 
-	os.Rename(filepath.Join(root, "src"), filepath.Join(root, "moved"))
-	takeCheckpoint(t, tracker, "after move")
+	if err := os.Rename(filepath.Join(root, "src"), filepath.Join(root, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	takeCheckpoint(t, projectTracker, "after move")
 	testutil.WriteFile(t, filepath.Join(root, "moved", "lib", "util.go"), "package lib // edited")
 	testutil.WriteFile(t, filepath.Join(root, "moved", "lib", "new.go"), "package lib")
 
-	checkpoint := takeCheckpoint(t, tracker, "after edit")
+	checkpoint := takeCheckpoint(t, projectTracker, "after edit")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 func TestTrackerSeesRecreatedProject(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
 
-	os.RemoveAll(root)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# recreated")
-	takeCheckpoint(t, tracker, "after recreate")
+	takeCheckpoint(t, projectTracker, "after recreate")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# edited again")
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main")
 
-	checkpoint := takeCheckpoint(t, tracker, "after edit")
+	checkpoint := takeCheckpoint(t, projectTracker, "after edit")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 func TestTrackerFollowsExcludeRuleChanges(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "data\n")
 	testutil.WriteFile(t, filepath.Join(root, "data", "important.db"), "precious")
-	takeCheckpoint(t, tracker, "data excluded")
+	takeCheckpoint(t, projectTracker, "data excluded")
 
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "# protect data now\n")
-	checkpoint := takeCheckpoint(t, tracker, "data included")
+	checkpoint := takeCheckpoint(t, projectTracker, "data included")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 
-	os.Remove(filepath.Join(root, "README.md"))
-	if _, err := restore.Apply(projectStore, checkpoint.ID, checkpointThroughTracker(tracker)); err != nil {
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restore.Apply(projectStore, checkpoint.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "data", "important.db")); string(data) != "precious" {
@@ -197,20 +206,22 @@ func TestTrackerFollowsExcludeRuleChanges(t *testing.T) {
 }
 
 func TestTrackerAppliesDirectoryPatterns(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "build/\n")
-	takeCheckpoint(t, tracker, "first")
+	takeCheckpoint(t, projectTracker, "first")
 
 	testutil.WriteFile(t, filepath.Join(root, "build", "out.bin"), "old build")
-	checkpoint := takeCheckpoint(t, tracker, "second")
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
 	state, _ := projectStore.State(checkpoint.ID)
 	if _, ok := state["build/out.bin"]; ok {
 		t.Fatal("the tracker recorded a path that build/ excludes")
 	}
 
 	testutil.WriteFile(t, filepath.Join(root, "build", "out.bin"), "new build")
-	os.Remove(filepath.Join(root, "README.md"))
-	if _, err := restore.Apply(projectStore, checkpoint.ID, checkpointThroughTracker(tracker)); err != nil {
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restore.Apply(projectStore, checkpoint.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "build", "out.bin")); string(data) != "new build" {
@@ -230,11 +241,11 @@ func TestTrackerWithRootTypedInOtherCase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracker, projectStore, _ := startTracker(t, root)
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, _ := startTracker(t, root)
+	takeCheckpoint(t, projectTracker, "first")
 
 	testutil.WriteFile(t, filepath.Join(stored, "a.txt"), "v2 edited")
-	checkpoint := takeCheckpoint(t, tracker, "second")
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
 
 	checkMatchesScan(t, projectStore, stored, checkpoint.ID)
 }
@@ -243,36 +254,42 @@ func TestTrackerRecordsDirectoryThatBecomesReadable(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read every directory")
 	}
-	tracker, projectStore, root := newTrackerWithFiles(t)
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, "data", "rows"), "data")
-	os.Chmod(filepath.Join(root, "data"), 0o000)
+	if err := os.Chmod(filepath.Join(root, "data"), 0o000); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "data"), 0o755) })
-	takeCheckpoint(t, tracker, "unreadable")
+	takeCheckpoint(t, projectTracker, "unreadable")
 
-	os.Chmod(filepath.Join(root, "data"), 0o755)
-	checkpoint := takeCheckpoint(t, tracker, "readable")
+	if err := os.Chmod(filepath.Join(root, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := takeCheckpoint(t, projectTracker, "readable")
 
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 func TestTrackerFollowsHardLinks(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	os.Link(filepath.Join(root, "README.md"), filepath.Join(root, "docs", "README.link"))
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	if err := os.Link(filepath.Join(root, "README.md"), filepath.Join(root, "docs", "README.link")); err != nil {
+		t.Fatal(err)
+	}
+	takeCheckpoint(t, projectTracker, "first")
 
 	testutil.WriteFile(t, filepath.Join(root, "docs", "README.link"), "# written through the link")
-	checkpoint := takeCheckpoint(t, tracker, "second")
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
 
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 func TestTrackerSavesListingWhenClosed(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# edited")
-	checkpoint := takeCheckpoint(t, tracker, "second")
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
 
-	tracker.Close()
+	projectTracker.Close()
 
 	data, err := os.ReadFile(filepath.Join(projectStore.Dir(), "listing.gob"))
 	if err != nil || len(data) == 0 {
@@ -282,46 +299,56 @@ func TestTrackerSavesListingWhenClosed(t *testing.T) {
 }
 
 func TestTrackerRescansAfterDroppedEvents(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
 	testutil.WriteFile(t, filepath.Join(root, "missed.txt"), "created while events were dropped")
-	takeCheckpoint(t, tracker, "second")
-	delete(tracker.listing, "missed.txt")
+	takeCheckpoint(t, projectTracker, "second")
+	delete(projectTracker.listing, "missed.txt")
 
-	tracker.handleEvents([]fsnotify.Event{{Path: root, ShouldRescan: true}})
-	checkpoint := takeCheckpoint(t, tracker, "after dropped events")
+	projectTracker.handleEvents([]fsnotify.Event{{Path: root, ShouldRescan: true}})
+	checkpoint := takeCheckpoint(t, projectTracker, "after dropped events")
 
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 func TestTrackerSeesDirectoryReplacedByAnother(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
 	testutil.WriteFile(t, filepath.Join(root, "staging", "new.md"), "fresh docs")
-	os.RemoveAll(filepath.Join(root, "docs"))
+	if err := os.RemoveAll(filepath.Join(root, "docs")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Rename(filepath.Join(root, "staging"), filepath.Join(root, "docs")); err != nil {
 		t.Fatal(err)
 	}
 
-	checkpoint := takeCheckpoint(t, tracker, "after swap")
+	checkpoint := takeCheckpoint(t, projectTracker, "after swap")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 func TestTrackerSeesRenamesThatOnlyChangeCase(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, "notes.md"), "v1")
-	takeCheckpoint(t, tracker, "first")
-	os.Rename(filepath.Join(root, "notes.md"), filepath.Join(root, "Notes.md"))
-	os.Rename(filepath.Join(root, "src"), filepath.Join(root, "Src"))
-	checkpoint := takeCheckpoint(t, tracker, "renamed")
+	takeCheckpoint(t, projectTracker, "first")
+	if err := os.Rename(filepath.Join(root, "notes.md"), filepath.Join(root, "Notes.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, "src"), filepath.Join(root, "Src")); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := takeCheckpoint(t, projectTracker, "renamed")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 
 	testutil.WriteFile(t, filepath.Join(root, "Notes.md"), "v3")
-	edited := takeCheckpoint(t, tracker, "edited")
-	os.Remove(filepath.Join(root, "Notes.md"))
-	os.RemoveAll(filepath.Join(root, "Src"))
-	takeCheckpoint(t, tracker, "deleted")
-	if _, err := restore.Apply(projectStore, edited.ID, checkpointThroughTracker(tracker)); err != nil {
+	edited := takeCheckpoint(t, projectTracker, "edited")
+	if err := os.Remove(filepath.Join(root, "Notes.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "Src")); err != nil {
+		t.Fatal(err)
+	}
+	takeCheckpoint(t, projectTracker, "deleted")
+	if _, err := restore.Apply(projectStore, edited.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "Notes.md")); string(data) != "v3" {
@@ -333,13 +360,15 @@ func TestTrackerSeesRenamesThatOnlyChangeCase(t *testing.T) {
 }
 
 func TestTrackerSeesRenamesThatOnlyChangeUnicodeForm(t *testing.T) {
-	tracker, projectStore, root := newTrackerWithFiles(t)
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	composed, decomposed := "café.txt", "café.txt"
 	testutil.WriteFile(t, filepath.Join(root, composed), "v1")
-	takeCheckpoint(t, tracker, "first")
-	os.Rename(filepath.Join(root, composed), filepath.Join(root, decomposed))
+	takeCheckpoint(t, projectTracker, "first")
+	if err := os.Rename(filepath.Join(root, composed), filepath.Join(root, decomposed)); err != nil {
+		t.Fatal(err)
+	}
 
-	checkpoint := takeCheckpoint(t, tracker, "renamed")
+	checkpoint := takeCheckpoint(t, projectTracker, "renamed")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
@@ -347,11 +376,13 @@ func TestTrackerResumesWhereThePreviousOneStopped(t *testing.T) {
 	if !fsnotify.CanResume {
 		t.Skip("this system keeps no event history")
 	}
-	tracker, projectStore, root := newTrackerWithFiles(t)
-	takeCheckpoint(t, tracker, "first")
-	tracker.Close()
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
+	projectTracker.Close()
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# edited while no watcher ran")
-	os.RemoveAll(filepath.Join(root, "src"))
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, filepath.Join(root, "new", "file.txt"), "new")
 
 	resumed, err := newTracker(projectStore)
@@ -400,6 +431,22 @@ func TestTrackerKeepsUnreadableDirectoriesUntilReadable(t *testing.T) {
 		t.Fatalf("checkpoint %d still calls locked unreadable after chmod 755", readable.ID)
 	}
 	checkMatchesScan(t, projectStore, root, readable.ID)
+}
+
+// BenchmarkTrackerCheckpoint measures a checkpoint after one file changed in
+// a project of 10,000 files, the common case for an agent command.
+func BenchmarkTrackerCheckpoint(b *testing.B) {
+	root := testutil.TempDir(b)
+	for i := range 10_000 {
+		testutil.WriteFile(b, filepath.Join(root, fmt.Sprintf("dir%03d", i%200), fmt.Sprintf("file%05d.go", i)), "package main")
+	}
+	projectTracker, _, _ := startTracker(b, root)
+	takeCheckpoint(b, projectTracker, "first")
+	changed := filepath.Join(root, "dir000", "file00000.go")
+	for i := 0; b.Loop(); i++ {
+		testutil.WriteFile(b, changed, fmt.Sprint("package main // ", i))
+		takeCheckpoint(b, projectTracker, "edit")
+	}
 }
 
 func TestTrackerNeverActsThroughSymlinkedParent(t *testing.T) {

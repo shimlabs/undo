@@ -1,18 +1,15 @@
 package store_test
 
 import (
-	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func newEmptyProject(t *testing.T) (*store.Store, string) {
@@ -29,24 +26,11 @@ func newEmptyProject(t *testing.T) (*store.Store, string) {
 // project's fingerprint at each of them.
 func history(t *testing.T, projectStore *store.Store, root string) []map[string]string {
 	t.Helper()
-	var states []map[string]string
-	steps := []func(){
-		func() { testutil.WriteFile(t, filepath.Join(root, "a.txt"), "one") },
-		func() { testutil.WriteFile(t, filepath.Join(root, "dir", "b.txt"), "two") },
-		func() { os.Remove(filepath.Join(root, "a.txt")) },
-		func() {
-			os.RemoveAll(filepath.Join(root, "dir"))
-			testutil.WriteFile(t, filepath.Join(root, "dir"), "now a file")
-		},
-	}
-	for i, step := range steps {
-		step()
-		states = append(states, testutil.Fingerprint(t, root))
-		if _, err := projectStore.Take(store.CheckpointOptions{Label: fmt.Sprintf("step %d", i+1), Dir: root}); err != nil {
+	return testutil.History(t, root, func(label string) {
+		if _, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: root}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	return states
+	})
 }
 
 func TestPruneMergesOldestIntoBase(t *testing.T) {

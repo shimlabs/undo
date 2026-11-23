@@ -7,10 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func TestCopyModeRestoresExactly(t *testing.T) {
@@ -23,7 +22,9 @@ func TestCopyModeRestoresExactly(t *testing.T) {
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(filepath.Join(root, "src"))
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := restore.Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
@@ -82,7 +83,9 @@ func TestCopyModeWorksWithoutClones(t *testing.T) {
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(filepath.Join(root, "main.go"))
+	if err := os.Remove(filepath.Join(root, "main.go")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := restore.Apply(projectStore, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +96,9 @@ func TestCopyModeWorksWithoutClones(t *testing.T) {
 
 func TestTakeRefusesWhenFilesAppearLater(t *testing.T) {
 	projectStore, root := plainProject(t)
-	os.Remove(filepath.Join(root, "main.go"))
+	if err := os.Remove(filepath.Join(root, "main.go")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: "empty", Dir: root}); err != nil {
 		t.Fatal(err)
 	}

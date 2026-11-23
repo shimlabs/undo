@@ -33,24 +33,7 @@ func stateHashes(t *testing.T, projectStore *Store, id int) map[string][32]byte 
 
 func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	projectStore, root := newProject(t, nil)
-	steps := []func(){
-		func() { os.WriteFile(filepath.Join(root, "a.txt"), []byte("one"), 0o644) },
-		func() {
-			os.Mkdir(filepath.Join(root, "dir"), 0o755)
-			os.WriteFile(filepath.Join(root, "dir", "b.txt"), []byte("two"), 0o644)
-		},
-		func() { os.Remove(filepath.Join(root, "a.txt")) },
-		func() {
-			os.RemoveAll(filepath.Join(root, "dir"))
-			os.WriteFile(filepath.Join(root, "dir"), []byte("now a file"), 0o644)
-		},
-	}
-	for _, step := range steps {
-		step()
-		if _, err := projectStore.Take(CheckpointOptions{Label: "step", Dir: root}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	testutil.History(t, root, func(label string) { take(t, projectStore, label) })
 	wantAtThird, wantAtFourth := stateHashes(t, projectStore, 3), stateHashes(t, projectStore, 4)
 
 	base, err := projectStore.baseListing()
@@ -116,19 +99,19 @@ func TestFinishMergeNeverRemovesThroughBaseSymlink(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a/x": "project"})
 	outside := t.TempDir()
 	testutil.WriteFile(t, filepath.Join(outside, "x"), "outside")
-	if _, err := projectStore.Take(CheckpointOptions{Label: "first"}); err != nil {
+	take(t, projectStore, "first")
+	if err := os.RemoveAll(filepath.Join(root, "a")); err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(filepath.Join(root, "a"))
 	if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectStore.Take(CheckpointOptions{Label: "second"}); err != nil {
-		t.Fatal(err)
-	}
+	take(t, projectStore, "second")
 	// An interrupted merge can leave the base half updated: here layer 2
 	// already turned a into a symlink, and the record says to replay it.
-	os.RemoveAll(projectStore.basePath("a"))
+	if err := os.RemoveAll(projectStore.basePath("a")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(outside, projectStore.basePath("a")); err != nil {
 		t.Fatal(err)
 	}
@@ -148,10 +131,8 @@ func TestFinishMergeNeverRemovesThroughBaseSymlink(t *testing.T) {
 }
 
 func TestRemoveUnlistedLeavesOnlyListedPathsInBase(t *testing.T) {
-	projectStore, root := newProject(t, map[string]string{"main.go": "package main", ".git/HEAD": "ref"})
-	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
-		t.Fatal(err)
-	}
+	projectStore, _ := newProject(t, map[string]string{"main.go": "package main", ".git/HEAD": "ref"})
+	take(t, projectStore, "first")
 	// A file created and removed while the base was cloned is in the base
 	// but in no listing.
 	testutil.WriteFile(t, projectStore.basePath(".git/index.lock"), "")
@@ -178,9 +159,7 @@ func TestFinishMergeRemovesFilesLeftByInterruptedMerge(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"dir/a.txt": "one"})
 	for _, content := range []string{"two", "three"} {
 		testutil.WriteFile(t, filepath.Join(root, "dir", "a.txt"), content)
-		if _, err := projectStore.Take(CheckpointOptions{Label: content, Dir: root}); err != nil {
-			t.Fatal(err)
-		}
+		take(t, projectStore, content)
 	}
 	leftover := projectStore.basePath("dir/.a.txt.undo-0123456789ab")
 	testutil.WriteFile(t, leftover, "half written")

@@ -90,3 +90,33 @@ func PrivateBinary(t testing.TB, dirName string) string {
 	}
 	return filepath.Join(dir, "undo")
 }
+
+// History makes four changes to the project at root, calling checkpoint
+// after each, and returns the project's fingerprint at each checkpoint. The
+// changes add, delete and replace files and turn a directory into a file.
+func History(t testing.TB, root string, checkpoint func(label string)) []map[string]string {
+	t.Helper()
+	steps := []func(){
+		func() { WriteFile(t, filepath.Join(root, "a.txt"), "one") },
+		func() { WriteFile(t, filepath.Join(root, "dir", "b.txt"), "two") },
+		func() { removeAll(t, filepath.Join(root, "a.txt")) },
+		func() {
+			removeAll(t, filepath.Join(root, "dir"))
+			WriteFile(t, filepath.Join(root, "dir"), "now a file")
+		},
+	}
+	var states []map[string]string
+	for i, step := range steps {
+		step()
+		states = append(states, Fingerprint(t, root))
+		checkpoint(fmt.Sprintf("step %d", i+1))
+	}
+	return states
+}
+
+func removeAll(t testing.TB, path string) {
+	t.Helper()
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/tree"
 )
 
@@ -52,15 +51,12 @@ func readFile(t *testing.T, path string) string {
 func TestFirstTakeClonesBase(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha"})
 
-	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	checkpoint := take(t, projectStore, "first")
 
 	if checkpoint.ID != 1 {
 		t.Fatalf("first checkpoint id = %d, want 1", checkpoint.ID)
 	}
-	if got := readFile(t, filepath.Join(projectStore.Dir(), "base", "a.txt")); got != "alpha" {
+	if got := readFile(t, projectStore.basePath("a.txt")); got != "alpha" {
 		t.Fatalf("base a.txt = %q", got)
 	}
 	checkpoints, err := projectStore.List()
@@ -74,9 +70,7 @@ func TestFirstTakeClonesBase(t *testing.T) {
 
 func TestTakeRecordsChangedAndDeleted(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
-	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
-		t.Fatal(err)
-	}
+	take(t, projectStore, "first")
 
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
 	if err := os.Remove(filepath.Join(root, "b.txt")); err != nil {
@@ -84,10 +78,7 @@ func TestTakeRecordsChangedAndDeleted(t *testing.T) {
 	}
 	testutil.WriteFile(t, filepath.Join(root, "c", "d.txt"), "delta")
 
-	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	checkpoint := take(t, projectStore, "second")
 	manifest, err := projectStore.Manifest(checkpoint.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -101,25 +92,20 @@ func TestTakeRecordsChangedAndDeleted(t *testing.T) {
 	if !slices.Equal(manifest.Deleted, []string{"b.txt"}) {
 		t.Errorf("deleted = %v, want [b.txt]", manifest.Deleted)
 	}
-	if got := readFile(t, filepath.Join(projectStore.Dir(), "layers", "2", "files", "a.txt")); got != "alpha two" {
+	if got := readFile(t, projectStore.layerFile(2, "a.txt")); got != "alpha two" {
 		t.Errorf("layer a.txt = %q", got)
 	}
 }
 
 func TestTakeIgnoresExcluded(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"node_modules/pkg/index.js": "v1", "main.js": "x"})
-	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(projectStore.Dir(), "base", "node_modules")); !errors.Is(err, fs.ErrNotExist) {
+	take(t, projectStore, "first")
+	if _, err := os.Stat(projectStore.basePath("node_modules")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("node_modules was cloned into the base")
 	}
 
 	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "v2")
-	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	checkpoint := take(t, projectStore, "second")
 	manifest, err := projectStore.Manifest(checkpoint.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -131,9 +117,7 @@ func TestTakeIgnoresExcluded(t *testing.T) {
 
 func TestTakeLockedConcurrently(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha"})
-	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
-		t.Fatal(err)
-	}
+	take(t, projectStore, "first")
 
 	var wg sync.WaitGroup
 	ids := make([]int, 2)
@@ -172,7 +156,7 @@ func TestFirstTakeNeverReadsExcluded(t *testing.T) {
 	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatalf("first checkpoint read an excluded directory: %v", err)
 	}
-	if got := readFile(t, filepath.Join(projectStore.Dir(), "base", "lib", "util.js")); got != "u" {
+	if got := readFile(t, projectStore.basePath("lib/util.js")); got != "u" {
 		t.Fatalf("base lib/util.js = %q", got)
 	}
 }
@@ -181,17 +165,16 @@ func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
 	take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
-	os.Remove(filepath.Join(root, "b.txt"))
-	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
-	if err != nil {
+	if err := os.Remove(filepath.Join(root, "b.txt")); err != nil {
 		t.Fatal(err)
 	}
+	checkpoint := take(t, projectStore, "second")
 	saved, err := projectStore.ListingAt(checkpoint.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.Remove(filepath.Join(projectStore.Dir(), "listing.gob")); err != nil {
+	if err := os.Remove(projectStore.listingPath()); err != nil {
 		t.Fatal(err)
 	}
 	rebuilt, err := projectStore.ListingAt(checkpoint.ID)
@@ -213,7 +196,9 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
 	first := take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
-	os.Remove(filepath.Join(root, "b.txt"))
+	if err := os.Remove(filepath.Join(root, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
 
 	current, err := projectStore.ListingAt(first.ID)
 	if err != nil {
@@ -252,7 +237,9 @@ func TestTakeSkipsUnreadableDirectories(t *testing.T) {
 		t.Skip("root can read every directory")
 	}
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a", "pgdata/base/1": "rows"})
-	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
+	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
 
 	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
@@ -266,12 +253,9 @@ func TestTakeSkipsUnreadableDirectories(t *testing.T) {
 }
 
 func TestTakeProtectsFilesNamedLikeExcludedDirectories(t *testing.T) {
-	projectStore, root := newProject(t, map[string]string{"target": "important", ".cache": "x"})
+	projectStore, _ := newProject(t, map[string]string{"target": "important", ".cache": "x"})
 
-	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	checkpoint := take(t, projectStore, "first")
 	state, _ := projectStore.State(checkpoint.ID)
 	if _, ok := state["target"]; !ok {
 		t.Fatal("a regular file named target is not protected")
@@ -279,13 +263,10 @@ func TestTakeProtectsFilesNamedLikeExcludedDirectories(t *testing.T) {
 }
 
 func TestTakeShortensLongLabels(t *testing.T) {
-	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+	projectStore, _ := newProject(t, map[string]string{"a.txt": "a"})
 	heredoc := "cat > big.txt <<EOF\n" + strings.Repeat("line\n", 1000) + "EOF"
 
-	checkpoint, err := projectStore.Take(CheckpointOptions{Label: heredoc, Dir: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	checkpoint := take(t, projectStore, heredoc)
 	if checkpoint.Label != "cat > big.txt <<EOF …" {
 		t.Fatalf("label = %q", checkpoint.Label)
 	}
@@ -300,17 +281,14 @@ func TestTakeClearsLeftoverLayer(t *testing.T) {
 	testutil.WriteFile(t, projectStore.layerFile(2, "stale.txt"), "left by a crash")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
 
-	checkpoint, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	checkpoint := take(t, projectStore, "second")
 	if _, err := os.Stat(projectStore.layerFile(checkpoint.ID, "stale.txt")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("a file from an interrupted checkpoint was kept in the new layer")
 	}
 }
 
 func TestLatestIgnoresLineCutOffByCrash(t *testing.T) {
-	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+	projectStore, _ := newProject(t, map[string]string{"a.txt": "a"})
 	first := take(t, projectStore, "first")
 	file, _ := os.OpenFile(projectStore.indexPath(), os.O_APPEND|os.O_WRONLY, 0)
 	file.WriteString(`{"id":2,"time":"2026-`)
@@ -325,9 +303,7 @@ func TestLatestIgnoresLineCutOffByCrash(t *testing.T) {
 	}
 
 	for _, label := range []string{"second", "third"} {
-		if _, err := projectStore.Take(CheckpointOptions{Label: label, Dir: root}); err != nil {
-			t.Fatal(err)
-		}
+		take(t, projectStore, label)
 	}
 	checkpoints, err := projectStore.List()
 	if err != nil || len(checkpoints) != 3 || checkpoints[2].ID != 3 {
@@ -337,19 +313,19 @@ func TestLatestIgnoresLineCutOffByCrash(t *testing.T) {
 
 func TestMergeIntoReadOnlyDirectory(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"ro/f.txt": "v1"})
-	os.Chmod(filepath.Join(root, "ro"), 0o555)
+	if err := os.Chmod(filepath.Join(root, "ro"), 0o555); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "ro"), 0o755) })
 	for _, content := range []string{"v1", "v2", "v3"} {
-		os.WriteFile(filepath.Join(root, "ro", "f.txt"), []byte(content), 0o644)
-		if _, err := projectStore.Take(CheckpointOptions{Label: content, Dir: root}); err != nil {
-			t.Fatal(err)
-		}
+		testutil.WriteFile(t, filepath.Join(root, "ro", "f.txt"), content)
+		take(t, projectStore, content)
 	}
 
 	if _, err := projectStore.Prune(time.Now(), Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
 		t.Fatalf("Prune into a read-only directory: %v", err)
 	}
-	os.WriteFile(filepath.Join(root, "ro", "f.txt"), []byte("v4"), 0o644)
+	testutil.WriteFile(t, filepath.Join(root, "ro", "f.txt"), "v4")
 	if _, err := projectStore.Take(CheckpointOptions{Label: "v4", Dir: root}); err != nil {
 		t.Fatalf("checkpoint after the merge: %v", err)
 	}
@@ -361,7 +337,9 @@ func TestFailedMergeKeepsCheckpointsWorking(t *testing.T) {
 	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(filepath.Join(projectStore.layerDir(1), "manifest.json"))
+	if err := os.Remove(projectStore.manifestPath(1)); err != nil {
+		t.Fatal(err)
+	}
 
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
 	if _, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root}); err != nil {
@@ -427,10 +405,7 @@ func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
 			continue
 		}
 
-		settled, err := projectStore.Take(CheckpointOptions{Label: "settled", Dir: root})
-		if err != nil {
-			t.Fatal(err)
-		}
+		settled := take(t, projectStore, "settled")
 		state, err := projectStore.State(settled.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -449,16 +424,13 @@ func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
 
 func TestListingAtBuildsForwardFromOlderSavedListing(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a", "dir/b.txt": "b"})
-	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
-		t.Fatal(err)
-	}
+	take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
-	os.RemoveAll(filepath.Join(root, "dir"))
-	testutil.WriteFile(t, filepath.Join(root, "new", "c.txt"), "c")
-	latest, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
-	if err != nil {
+	if err := os.RemoveAll(filepath.Join(root, "dir")); err != nil {
 		t.Fatal(err)
 	}
+	testutil.WriteFile(t, filepath.Join(root, "new", "c.txt"), "c")
+	latest := take(t, projectStore, "second")
 	if id, _ := projectStore.savedListingID(); id != 1 {
 		t.Fatalf("saved listing is at checkpoint %d, want it left at 1 until the chain is long", id)
 	}

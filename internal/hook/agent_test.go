@@ -103,7 +103,9 @@ func TestReinstallUpdatesInPlace(t *testing.T) {
 			}
 			settings := readJSONFile(t, path)
 			setHookEntries(settings, settingsEvent(tc.agent), append(hookEntries(settings, settingsEvent(tc.agent)), map[string]any{"matcher": "later"}))
-			writeSettings(path, settings)
+			if err := writeSettings(path, settings); err != nil {
+				t.Fatal(err)
+			}
 
 			updated := testutil.PrivateBinary(t, "new-bin")
 			if _, err := tc.agent.Install(updated); err != nil {
@@ -307,7 +309,9 @@ func TestInstallKeepsSymlinkedSettings(t *testing.T) {
 	dotfiles := filepath.Join(t.TempDir(), "settings.json")
 	testutil.WriteFile(t, dotfiles, `{"model": "opus"}`)
 	link := filepath.Join(home, ".claude", "settings.json")
-	os.MkdirAll(filepath.Dir(link), 0o755)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(dotfiles, link); err != nil {
 		t.Fatal(err)
 	}
@@ -320,5 +324,13 @@ func TestInstallKeepsSymlinkedSettings(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(dotfiles); !strings.Contains(string(data), "hook claude") {
 		t.Fatalf("the hook was not written through the symlink:\n%s", data)
+	}
+}
+
+func TestEveryAgentIsComplete(t *testing.T) {
+	for _, agent := range Agents() {
+		if agent.Name == "" || agent.Title == "" || agent.parseEvent == nil || agent.configPath == nil || agent.installer == nil {
+			t.Errorf("agent %q is missing a name, title, event parser, config path or installer", agent.Name)
+		}
 	}
 }

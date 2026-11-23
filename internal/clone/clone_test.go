@@ -35,12 +35,20 @@ func sourceTree(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(src, "a"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(src, "a", "f.txt"), []byte("hello"), 0o600)
-	os.WriteFile(filepath.Join(src, "run.sh"), []byte("#!/bin/sh"), 0o755)
-	os.Symlink("/etc/hosts", filepath.Join(src, "link"))
+	if err := os.WriteFile(filepath.Join(src, "a", "f.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "run.sh"), []byte("#!/bin/sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/hosts", filepath.Join(src, "link")); err != nil {
+		t.Fatal(err)
+	}
 	old := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 	for _, rel := range []string{"a/f.txt", "run.sh", "a", "."} {
-		os.Chtimes(filepath.Join(src, rel), old, old)
+		if err := os.Chtimes(filepath.Join(src, rel), old, old); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return src
 }

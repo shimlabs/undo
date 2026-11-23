@@ -7,9 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/project"
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func TestCreateMakesStoreUnderHome(t *testing.T) {
@@ -25,7 +24,7 @@ func TestCreateMakesStoreUnderHome(t *testing.T) {
 	if projectStore.Dir() != want {
 		t.Fatalf("Dir() = %q, want %q", projectStore.Dir(), want)
 	}
-	info, err := os.Stat(filepath.Join(want, "layers"))
+	info, err := os.Stat(projectStore.layersDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +59,17 @@ func TestCreatePutsStoreNextToProjectWhenHomeIsInside(t *testing.T) {
 func TestOpenFindsStoreNextToDeletedProject(t *testing.T) {
 	parent := testutil.TempDir(t)
 	root := filepath.Join(parent, "app")
-	os.Mkdir(root, 0o755)
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	home := filepath.Join(root, "Library", "undo")
 	created, err := Create(home, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(root)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
 
 	opened, err := Open(home, root)
 	if err != nil {
@@ -102,7 +105,9 @@ func TestOpenRefusesNewerFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(projectStore.configPath(), config{Format: format + 1, Root: root})
+	if err := writeJSON(projectStore.configPath(), config{Format: format + 1, Root: root}); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := Open(home, root); !errors.Is(err, ErrNewerFormat) {
 		t.Fatalf("Open = %v, want ErrNewerFormat", err)
@@ -112,11 +117,15 @@ func TestOpenRefusesNewerFormat(t *testing.T) {
 func TestStoresUnderFindsDeletedProjects(t *testing.T) {
 	home, parent := t.TempDir(), t.TempDir()
 	root := filepath.Join(parent, "app")
-	os.Mkdir(root, 0o755)
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Create(home, root); err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(root)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
 
 	stores, err := StoresUnder(home, parent)
 	if err != nil {
@@ -132,13 +141,21 @@ func TestCreateRefusesPlantedStoreNextToProject(t *testing.T) {
 		t.Run(plant, func(t *testing.T) {
 			parent := testutil.TempDir(t)
 			root := filepath.Join(parent, "proj")
-			os.Mkdir(root, 0o755)
+			if err := os.Mkdir(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
 			planted := filepath.Join(parent, ".undo-"+project.ID(root))
 			if plant == "symlink" {
-				os.Symlink(t.TempDir(), planted)
+				if err := os.Symlink(t.TempDir(), planted); err != nil {
+					t.Fatal(err)
+				}
 			} else {
-				os.Mkdir(planted, 0o777)
-				os.Chmod(planted, 0o777)
+				if err := os.Mkdir(planted, 0o777); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(planted, 0o777); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			if projectStore, err := Create(filepath.Join(root, "Library", "undo"), root); err == nil {
@@ -167,12 +184,16 @@ func TestStoredPathsCannotLeaveProject(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(outside, "precious"), "data")
 	take(t, projectStore, "first")
 	escape, _ := filepath.Rel(projectStore.baseDir(), outside)
-	writeJSON(filepath.Join(projectStore.layerDir(1), "manifest.json"), Manifest{Deleted: []string{escape}})
+	if err := writeJSON(projectStore.manifestPath(1), Manifest{Deleted: []string{escape}}); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := projectStore.State(1); err == nil {
 		t.Fatal("State accepted a stored path outside the project")
 	}
-	writeJSON(projectStore.mergePath(), pendingMerge{Through: 1})
+	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
+		t.Fatal(err)
+	}
 	take(t, projectStore, "second")
 	if _, err := os.Stat(filepath.Join(outside, "precious")); err != nil {
 		t.Fatalf("a planted merge deleted a file outside the store: %v", err)

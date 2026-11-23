@@ -5,19 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
-func resolved(t *testing.T, path string) string {
-	t.Helper()
-	path, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
 func TestRootFindsGitRoot(t *testing.T) {
-	dir := resolved(t, t.TempDir())
+	dir := testutil.TempDir(t)
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +29,7 @@ func TestRootFindsGitRoot(t *testing.T) {
 }
 
 func TestRootWithoutGit(t *testing.T) {
-	dir := resolved(t, t.TempDir())
+	dir := testutil.TempDir(t)
 
 	root, err := Root(dir)
 	if err != nil {
@@ -61,7 +54,7 @@ func TestIDStable(t *testing.T) {
 }
 
 func TestRootUsesStoredSpelling(t *testing.T) {
-	parent := resolved(t, t.TempDir())
+	parent := testutil.TempDir(t)
 	stored := filepath.Join(parent, "MyProj")
 	if err := os.Mkdir(stored, 0o755); err != nil {
 		t.Fatal(err)
@@ -81,11 +74,15 @@ func TestRootUsesStoredSpelling(t *testing.T) {
 }
 
 func TestRootStopsBelowHome(t *testing.T) {
-	home := resolved(t, t.TempDir())
+	home := testutil.TempDir(t)
 	t.Setenv("HOME", home)
-	os.Mkdir(filepath.Join(home, ".git"), 0o755)
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(home, "notes")
-	os.Mkdir(dir, 0o755)
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	root, err := Root(dir)
 	if err != nil {
@@ -97,7 +94,7 @@ func TestRootStopsBelowHome(t *testing.T) {
 }
 
 func TestRootRefusesHomeAndDiskRoot(t *testing.T) {
-	home := resolved(t, t.TempDir())
+	home := testutil.TempDir(t)
 	t.Setenv("HOME", home)
 	for _, dir := range []string{home, "/"} {
 		if _, err := Root(dir); !errors.Is(err, ErrNotProject) {

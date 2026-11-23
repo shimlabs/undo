@@ -77,7 +77,9 @@ func TestOpenCodePluginIgnoresReadOnlyTools(t *testing.T) {
 	testutil.AgentHome(t)
 	received := filepath.Join(t.TempDir(), "event.json")
 	fake := filepath.Join(t.TempDir(), "undo")
-	os.WriteFile(fake, []byte("#!/bin/sh\ncat > '"+received+"'\n"), 0o755)
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncat > '"+received+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	plugin := installPlugin(t, fake)
 
 	runPlugin(t, plugin, t.TempDir(), "read", `{"filePath":"/a.go"}`)

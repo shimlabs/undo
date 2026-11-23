@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
-// newServerProject returns a project, its store and a socket directory.
-func newServerProject(t *testing.T) (*store.Store, string, string) {
+// newServerProject returns a project's store, its root and a socket
+// directory.
+func newServerProject(t *testing.T) (projectStore *store.Store, root, socketDir string) {
 	t.Helper()
 	// Socket paths are limited to about 100 bytes, and the test's own
 	// temporary directory can be longer than that.
@@ -25,10 +25,9 @@ func newServerProject(t *testing.T) (*store.Store, string, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(socketDir) })
-	root := testutil.TempDir(t)
+	root = testutil.TempDir(t)
 	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
-	projectStore, err := store.Create(t.TempDir(), root)
-	if err != nil {
+	if projectStore, err = store.Create(t.TempDir(), root); err != nil {
 		t.Fatal(err)
 	}
 	return projectStore, root, socketDir

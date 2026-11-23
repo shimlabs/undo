@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,7 +18,7 @@ func TestLogErrorStaysSmall(t *testing.T) {
 
 	projectStore.LogError(errors.New("disk full"))
 
-	info, err := os.Stat(filepath.Join(projectStore.Dir(), "errors.log"))
+	info, err := os.Stat(projectStore.logPath())
 	if err != nil {
 		t.Fatal(err)
 	}

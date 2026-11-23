@@ -8,9 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 // newProject returns a project folder and a store home for its checkpoints.
@@ -128,7 +127,9 @@ func TestHandleUsesSessionProject(t *testing.T) {
 	testutil.AgentHome(t)
 	root, storeHome := newProject(t)
 	subdir := filepath.Join(root, "web")
-	os.Mkdir(subdir, 0o755)
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("CLAUDE_PROJECT_DIR", root)
 	event := `{"cwd":"` + subdir + `","tool_name":"Bash","tool_input":{"command":"npm test"}}`
 

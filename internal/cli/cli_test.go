@@ -35,6 +35,16 @@ func defaultStoreHome(t *testing.T) string {
 	return storeHome
 }
 
+// mustRun runs undo like run and fails the test if it exits with an error.
+func mustRun(t *testing.T, dir string, stdin string, args ...string) string {
+	t.Helper()
+	code, out := run(t, dir, stdin, args...)
+	if code != 0 {
+		t.Fatalf("undo %v: exit %d: %s", args, code, out)
+	}
+	return out
+}
+
 // run runs undo with args in dir, with the store home and socket directory
 // taken from the environment, as the binary does.
 func run(t *testing.T, dir string, stdin string, args ...string) (int, string) {
@@ -86,7 +96,9 @@ func TestUndoRestoresLatest(t *testing.T) {
 	if code, out := run(t, root, "", "checkpoint", "--label", "rm f.txt"); code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	os.Remove(filepath.Join(root, "f.txt"))
+	if err := os.Remove(filepath.Join(root, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
 
 	code, out := run(t, root, "y\n")
 	if code != 0 {
@@ -99,8 +111,10 @@ func TestUndoRestoresLatest(t *testing.T) {
 
 func TestUndoAsksBeforeRestoring(t *testing.T) {
 	root := newProject(t)
-	run(t, root, "", "checkpoint")
-	os.Remove(filepath.Join(root, "f.txt"))
+	mustRun(t, root, "", "checkpoint")
+	if err := os.Remove(filepath.Join(root, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
 
 	code, out := run(t, root, "n\n")
 	if code != 1 {
@@ -113,8 +127,10 @@ func TestUndoAsksBeforeRestoring(t *testing.T) {
 
 func TestDiffListsPaths(t *testing.T) {
 	root := newProject(t)
-	run(t, root, "", "checkpoint")
-	os.Remove(filepath.Join(root, "f.txt"))
+	mustRun(t, root, "", "checkpoint")
+	if err := os.Remove(filepath.Join(root, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
 
 	code, out := run(t, root, "", "diff", "1")
 	if code != 0 || !strings.Contains(out, "f.txt") {
@@ -124,7 +140,7 @@ func TestDiffListsPaths(t *testing.T) {
 
 func TestListShowsLabels(t *testing.T) {
 	root := newProject(t)
-	run(t, root, "", "checkpoint", "--label", "npm run build")
+	mustRun(t, root, "", "checkpoint", "--label", "npm run build")
 
 	code, out := run(t, root, "", "list")
 	if code != 0 || !strings.Contains(out, "npm run build") {
@@ -146,12 +162,18 @@ func TestDiffGroupsDirectories(t *testing.T) {
 	root := newProject(t)
 	for i := range 30 {
 		path := filepath.Join(root, "big", "pkg", "f"+strconv.Itoa(i)+".txt")
-		os.MkdirAll(filepath.Dir(path), 0o755)
-		os.WriteFile(path, []byte("x"), 0o644)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		testutil.WriteFile(t, path, "x")
 	}
-	run(t, root, "", "checkpoint")
-	os.RemoveAll(filepath.Join(root, "big"))
-	os.Remove(filepath.Join(root, "f.txt"))
+	mustRun(t, root, "", "checkpoint")
+	if err := os.RemoveAll(filepath.Join(root, "big")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
 
 	_, out := run(t, root, "", "diff", "1")
 
@@ -325,7 +347,7 @@ func TestRefusalExplainsCopyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
-	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 
 	code, out := run(t, root, "", "checkpoint")
 	if code != 1 || !strings.Contains(out, "undo checkpoint --copy") {
@@ -358,12 +380,16 @@ func TestUndoFindsDeletedProject(t *testing.T) {
 	t.Setenv("UNDO_HOME", t.TempDir())
 	parent := testutil.TempDir(t)
 	root := filepath.Join(parent, "app")
-	os.MkdirAll(root, 0o755)
-	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	if code, out := run(t, root, "", "checkpoint"); code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	os.RemoveAll(root)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
 
 	_, out := run(t, parent, "", "list")
 	if !strings.Contains(out, "was deleted. Bring it back with: undo to 1 --project") {
@@ -385,7 +411,9 @@ func TestDeletedProjectHintIsQuotedForTheShell(t *testing.T) {
 	if code, out := run(t, root, "", "checkpoint"); code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	os.RemoveAll(root)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
 
 	_, out := run(t, parent, "", "list")
 	want := "--project '" + strings.ReplaceAll(root, "'", `'\''`) + "'"
@@ -440,10 +468,14 @@ func TestStatusShowsUnreadableDirectories(t *testing.T) {
 	}
 	root := newProject(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
-	os.MkdirAll(filepath.Join(root, "pgdata"), 0o755)
-	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
+	if err := os.MkdirAll(filepath.Join(root, "pgdata"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
-	run(t, root, "", "checkpoint")
+	mustRun(t, root, "", "checkpoint")
 
 	_, out := run(t, root, "", "status")
 	if !strings.Contains(out, "Unreadable   pgdata") {
@@ -465,12 +497,16 @@ func TestListInHomeFindsDeletedProject(t *testing.T) {
 	t.Setenv("UNDO_HOME", t.TempDir())
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
 	root := filepath.Join(home, "app")
-	os.MkdirAll(root, 0o755)
-	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	if code, out := run(t, root, "", "checkpoint"); code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	os.RemoveAll(root)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
 
 	code, out := run(t, home, "", "list")
 	if code != 0 || !strings.Contains(out, "was deleted. Bring it back with: undo to 1 --project") {

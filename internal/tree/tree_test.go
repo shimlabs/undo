@@ -11,9 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shimlabs/undo/internal/testutil"
-
 	"github.com/shimlabs/undo/internal/exclude"
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func scan(t *testing.T, root string) Listing {
@@ -118,10 +117,14 @@ func buildTree(tb testing.TB, dirs, files int) string {
 		if err := os.MkdirAll(filepath.Join(dir, "node_modules", "dep"), 0o755); err != nil {
 			tb.Fatal(err)
 		}
-		os.WriteFile(filepath.Join(dir, "node_modules", "dep", "index.js"), nil, 0o644)
-		os.Symlink("../shared", filepath.Join(dir, "link"))
+		if err := os.WriteFile(filepath.Join(dir, "node_modules", "dep", "index.js"), nil, 0o644); err != nil {
+			tb.Fatal(err)
+		}
+		if err := os.Symlink("../shared", filepath.Join(dir, "link")); err != nil {
+			tb.Fatal(err)
+		}
 		for j := range files {
-			os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.go", j)), []byte("package x"), 0o644)
+			testutil.WriteFile(tb, filepath.Join(dir, fmt.Sprintf("f%d.go", j)), "package x")
 		}
 	}
 	return root
@@ -155,7 +158,7 @@ func walkScan(t *testing.T, root string, matcher *exclude.Matcher) (Listing, []s
 	return listing, excluded
 }
 
-func TestScanWithSkippedMatchesWalkDir(t *testing.T) {
+func TestScanMatchesWalkDir(t *testing.T) {
 	root := buildTree(t, 60, 20)
 	matcher, err := exclude.New(root)
 	if err != nil {
@@ -230,7 +233,9 @@ func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a")
 	testutil.WriteFile(t, filepath.Join(root, "noexec", "f"), "x")
-	os.Chmod(filepath.Join(root, "noexec"), 0o644)
+	if err := os.Chmod(filepath.Join(root, "noexec"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "noexec"), 0o755) })
 	matcher, _ := exclude.New(root)
 

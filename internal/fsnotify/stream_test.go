@@ -80,12 +80,16 @@ func TestStreamDeliversWritesBeforeLaterMarker(t *testing.T) {
 func TestStreamDeliversDeletesBeforeLaterMarker(t *testing.T) {
 	root := testutil.TempDir(t)
 	nested := filepath.Join(root, "src", "lib", "x.go")
-	os.MkdirAll(filepath.Dir(nested), 0o755)
-	os.WriteFile(nested, []byte("x"), 0o644)
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, nested, "x")
 	collected := startCollecting(t, root)
 	collected.waitFor(t, filepath.Join(root, "ready"))
 
-	os.RemoveAll(filepath.Join(root, "src"))
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
 
 	before := collected.waitFor(t, filepath.Join(root, "marker"))
 	if !slices.Contains(before, nested) || !slices.Contains(before, filepath.Join(root, "src")) {
@@ -101,7 +105,9 @@ func TestStreamCloseWhileEventsArrive(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := range 20 {
-			os.WriteFile(filepath.Join(root, "f"+string(rune('a'+i))), []byte{byte(round)}, 0o644)
+			if err := os.WriteFile(filepath.Join(root, "f"+string(rune('a'+i))), []byte{byte(round)}, 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 		stream.Close()
 	}
@@ -115,10 +121,12 @@ func TestStreamSeesFilesInNewDirectories(t *testing.T) {
 	collected := startCollecting(t, root)
 
 	nested := filepath.Join(root, "a", "b", "c", "f.txt")
-	os.MkdirAll(filepath.Dir(nested), 0o755)
-	os.WriteFile(nested, []byte("x"), 0o644)
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, nested, "x")
 	collected.waitFor(t, filepath.Join(root, "ready"))
-	os.WriteFile(nested, []byte("changed"), 0o644)
+	testutil.WriteFile(t, nested, "changed")
 
 	if before := collected.waitFor(t, filepath.Join(root, "marker")); !slices.Contains(before, nested) {
 		t.Fatalf("events before marker = %v, want %s", before, nested)
@@ -135,12 +143,16 @@ func TestStreamWatchesRecreatedRoot(t *testing.T) {
 	}
 	t.Cleanup(stream.Close)
 
-	os.RemoveAll(root)
-	os.Mkdir(root, 0o755)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	collected.waitFor(t, filepath.Join(markers, "recreated"))
 
 	path := filepath.Join(root, "a.txt")
-	os.WriteFile(path, []byte("x"), 0o644)
+	testutil.WriteFile(t, path, "x")
 	if before := collected.waitFor(t, filepath.Join(markers, "written")); !slices.Contains(before, path) {
 		t.Fatalf("events before marker = %v, want %s", before, path)
 	}
