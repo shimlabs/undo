@@ -39,10 +39,13 @@ type fiemapRequest struct {
 // files stored inline report a whole block, so the total is capped at the
 // file's size.
 func privateSize(path string) (int64, error) {
-	file, err := os.Open(path)
+	// A file swapped for a named pipe since it was listed would block a
+	// plain open.
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return 0, err
+		return 0, &os.PathError{Op: "open", Path: path, Err: err}
 	}
+	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
