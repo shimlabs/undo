@@ -5,7 +5,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,27 +12,25 @@ import (
 
 	"github.com/shimlabs/undo/internal/cli"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/terminal"
 	"github.com/shimlabs/undo/internal/watch"
 )
 
 func main() {
 	dir, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "undo:", err)
-		os.Exit(1)
+		exitWithError(err)
 	}
 	executable, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "undo:", err)
-		os.Exit(1)
+		exitWithError(err)
 	}
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
 	storeHome, err := store.DefaultHome()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "undo:", err)
-		os.Exit(1)
+		exitWithError(err)
 	}
 	os.Exit(cli.Run(os.Args[1:], cli.Env{
 		Dir:        dir,
@@ -47,6 +44,11 @@ func main() {
 			return startWatcher(executable, root)
 		},
 	}))
+}
+
+func exitWithError(err error) {
+	terminal.NewWriter(os.Stderr).Error("%s", terminal.Printable(err.Error()))
+	os.Exit(1)
 }
 
 // startWatcher runs "undo watch" for root in its own session, so it keeps
