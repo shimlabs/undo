@@ -231,6 +231,12 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 			isExcludedDir[parent] = isExcluded
 		}
 		if isExcluded {
+			// A new name in an excluded directory for a file the project
+			// lists changes that file's link count, and later writes through
+			// it change its content, with no event for the listed name.
+			if event.IsHardLink {
+				t.dirty[event.Path] = t.dirty[event.Path] || event.IsRenamed
+			}
 			continue
 		}
 		if t.isInRoot(event.Path) {
@@ -329,7 +335,13 @@ func (t *tracker) applyEvents(dirty map[string]bool) (changed, deleted []string,
 	}
 	t.markChangedHardLinks(dirty)
 	changed, deleted, err = t.applyDirty(dirty)
-	if errors.Is(err, fs.ErrPermission) {
+	if errors.Is(err, fs.ErrPermission) || errors.Is(err, errNeedsFullComparison) {
+		// applyDirty changed the listing in place, and a full comparison
+		// must start from the listing of the last checkpoint, or what it
+		// already applied would not count as changed.
+		if err := t.loadListing(t.lastID); err != nil {
+			return nil, nil, false, err
+		}
 		return nil, nil, true, nil
 	}
 	if err != nil {
@@ -436,18 +448,22 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 			return nil, nil, err
 		}
 	}
+	if changes.hasLinkCountChange {
+		return nil, nil, errNeedsFullComparison
+	}
 	changes.finish()
 	return slices.Sorted(maps.Keys(changes.changed)), slices.Sorted(maps.Keys(changes.deleted)), nil
 }
 
-// withHardLinks adds the other names of every dirty file that has several.
+// withHardLinks adds the other names of every dirty file, named pipe or
+// symlink that has several.
 // A write through one name changes the content of all of them, but the
 // event names only the one that was written.
 func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 	var inodes map[uint64]bool
 	for fullPath := range dirty {
 		info, err := os.Lstat(fullPath)
-		if err != nil || !info.Mode().IsRegular() {
+		if err != nil || info.IsDir() {
 			continue
 		}
 		if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
@@ -468,7 +484,7 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 		return dirty
 	}
 	for rel, entry := range t.listing {
-		if entry.Kind == tree.File && inodes[entry.Inode] {
+		if entry.Kind != tree.Dir && inodes[entry.Inode] {
 			markDirty(dirty, t.path(rel))
 		}
 	}
@@ -510,11 +526,19 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 	if isReplaced {
 		changes.replaceUnder(rel)
 	}
+	if wasTracked && hasLinkCountChange(previous, entry) {
+		changes.hasLinkCountChange = true
+	}
 	changes.update(rel, entry)
 	if mayHoldUnseenFiles(entry, previous, wasDir, isReplaced) {
 		return t.addUnder(changes, matcher, fullPath)
 	}
 	return nil
+}
+
+// hasLinkCountChange reports whether the same file gained or lost a name.
+func hasLinkCountChange(previous, entry tree.Entry) bool {
+	return entry.Kind != tree.Dir && entry.Inode == previous.Inode && entry.LinkCount != previous.LinkCount
 }
 
 // mayHoldUnseenFiles reports whether a directory can hold files that never
@@ -523,6 +547,10 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 func mayHoldUnseenFiles(entry, previous tree.Entry, wasDir, isReplaced bool) bool {
 	return entry.Kind == tree.Dir && (!wasDir || isReplaced || previous.Mode != entry.Mode)
 }
+
+// errNeedsFullComparison reports that events cannot tell what changed, as
+// when a listed file gained a name the events did not report.
+var errNeedsFullComparison = errors.New("a full comparison is needed")
 
 // errPathGone reports that a path is no longer in the project.
 var errPathGone = errors.New("path is gone")

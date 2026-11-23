@@ -41,14 +41,14 @@ func statAt(dirFd int, name string) (Entry, fileID, error) {
 		ChangeTime: stat.Ctim.Nano(),
 		Inode:      stat.Ino,
 	}
+	// Only a count above one is recorded, so an entry with a single name
+	// compares equal to listings saved before the count existed.
+	if !mode.IsDir() && stat.Nlink > 1 {
+		entry.LinkCount = toUint64(stat.Nlink)
+	}
 	switch {
 	case mode.IsRegular():
 		entry.Kind = File
-		// Only a count above one is recorded, so a file with a single name
-		// compares equal to listings saved before the count existed.
-		if stat.Nlink > 1 {
-			entry.LinkCount = toUint64(stat.Nlink)
-		}
 	case mode.IsDir():
 		entry.Kind = Dir
 		entry.Size = 0

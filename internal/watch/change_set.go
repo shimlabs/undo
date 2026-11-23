@@ -18,6 +18,9 @@ type changeSet struct {
 	// found again in the directory that replaced them.
 	goneDirs     map[string]bool
 	replacedDirs map[string]bool
+	// hasLinkCountChange is set when a listed path gained or lost a name.
+	// The other name can be anywhere, and only a full comparison finds it.
+	hasLinkCountChange bool
 }
 
 func newChangeSet(listing tree.Listing) *changeSet {

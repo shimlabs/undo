@@ -11,6 +11,9 @@ type Event struct {
 	// directory moved into place brings files that have no events of their
 	// own. It is only set on macOS; inotify reports those files itself.
 	IsRenamed bool
+	// IsHardLink is set when Path is a file with more than one name. It is
+	// only set on macOS.
+	IsHardLink bool
 	// ShouldRescan is set when the system lost track of changes under Path or
 	// dropped events. Everything under Path has to be compared in full.
 	ShouldRescan bool
