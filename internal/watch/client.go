@@ -17,9 +17,6 @@ const (
 	// starting the server again after it failed to start. Starting it walks
 	// the project, and at the Linux watch limit it fails every time.
 	startBackoff = 10 * time.Minute
-	// startFailureFile records in the store why the server last failed to
-	// start.
-	startFailureFile = "watcher-failure"
 )
 
 // ServerStatus describes the server for a project.
@@ -95,7 +92,7 @@ func (c Client) startFor(projectStore *store.Store) startFunc {
 // StartFailure returns why the project's server last failed to start, and
 // whether that was recent enough that checkpoints still scan instead.
 func StartFailure(projectStore *store.Store) (reason string, isRecent bool) {
-	path := projectStore.FilePath(startFailureFile)
+	path := projectStore.WatcherFailurePath()
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", false
@@ -111,7 +108,7 @@ func recordStartFailure(projectStore *store.Store, failure error) {
 	if failure == nil {
 		failure = errors.New("exit status 0")
 	}
-	if err := os.WriteFile(projectStore.FilePath(startFailureFile), []byte(failure.Error()), 0o600); err != nil {
+	if err := os.WriteFile(projectStore.WatcherFailurePath(), []byte(failure.Error()), 0o600); err != nil {
 		projectStore.LogError(err)
 	}
 }

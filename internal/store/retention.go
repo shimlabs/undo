@@ -2,7 +2,6 @@ package store
 
 import (
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -26,7 +25,7 @@ const pruneInterval = time.Hour
 // PruneIfDue prunes the store if it has not been pruned for pruneInterval. It
 // is cheap to call after every checkpoint.
 func (s *Store) PruneIfDue(now time.Time, limits Limits) (int, error) {
-	marker := filepath.Join(s.dir, "last-prune")
+	marker := s.pruneMarkerPath()
 	if info, err := os.Stat(marker); err == nil && now.Sub(info.ModTime()) < pruneInterval {
 		return 0, nil
 	}

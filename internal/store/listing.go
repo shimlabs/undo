@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"path/filepath"
 	"slices"
 
 	"github.com/shimlabs/undo/internal/tree"
@@ -61,12 +60,4 @@ func (s *Store) SaveListing(id int, listing tree.Listing) error {
 
 func (s *Store) saveListing(id int, listing tree.Listing) error {
 	return writeGob(s.listingPath(), savedListing{ID: id, Listing: listing})
-}
-
-func (s *Store) baseListingPath() string {
-	return filepath.Join(s.dir, "base.gob")
-}
-
-func (s *Store) listingPath() string {
-	return filepath.Join(s.dir, "listing.gob")
 }

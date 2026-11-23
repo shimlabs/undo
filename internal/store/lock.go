@@ -3,7 +3,6 @@ package store
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"golang.org/x/sys/unix"
 )
@@ -29,7 +28,7 @@ func (s *Store) RLock() (unlock func(), err error) {
 }
 
 func (s *Store) flock(operation int) (unlock func(), err error) {
-	file, err := os.OpenFile(filepath.Join(s.dir, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(s.lockPath(), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}

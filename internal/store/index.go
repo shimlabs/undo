@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
@@ -122,8 +121,4 @@ func (s *Store) writeIndex(checkpoints []Checkpoint) error {
 		buf.Write(append(line, '\n'))
 	}
 	return writeFileAtomic(s.indexPath(), buf.Bytes())
-}
-
-func (s *Store) indexPath() string {
-	return filepath.Join(s.dir, "index.jsonl")
 }

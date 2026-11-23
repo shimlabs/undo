@@ -24,7 +24,7 @@ func (s *Store) LogError(failure error) {
 // could be opened, in the log under home.
 func LogHomeError(home string, failure error) {
 	if os.MkdirAll(home, 0o700) == nil {
-		appendLog(filepath.Join(home, "errors.log"), failure)
+		appendLog(filepath.Join(home, logFile), failure)
 	}
 }
 
@@ -50,8 +50,4 @@ func (s *Store) LastError() string {
 	}
 	text := strings.TrimSpace(string(data))
 	return text[strings.LastIndexByte(text, '\n')+1:]
-}
-
-func (s *Store) logPath() string {
-	return filepath.Join(s.dir, "errors.log")
 }

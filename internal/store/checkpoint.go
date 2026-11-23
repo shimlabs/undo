@@ -158,7 +158,7 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 	if err := os.MkdirAll(s.layerDir(id), 0o700); err != nil {
 		return Checkpoint{}, err
 	}
-	if err := writeJSON(filepath.Join(s.layerDir(id), "manifest.json"), manifest); err != nil {
+	if err := writeJSON(s.manifestPath(id), manifest); err != nil {
 		return Checkpoint{}, err
 	}
 	options.Label = shortLabel(options.Label)

@@ -15,10 +15,6 @@ type pendingMerge struct {
 	Through int `json:"through"`
 }
 
-func (s *Store) mergePath() string {
-	return filepath.Join(s.dir, "merge.json")
-}
-
 // merge folds every checkpoint up to through into the base and returns the
 // bytes it freed. The merge is recorded first, so if it is interrupted, the
 // next lock finishes it.
@@ -79,7 +75,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 }
 
 func (s *Store) removeLayersThrough(through int) error {
-	layers, err := os.ReadDir(filepath.Join(s.dir, "layers"))
+	layers, err := os.ReadDir(s.layersDir())
 	if err != nil {
 		return err
 	}

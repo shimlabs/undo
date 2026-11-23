@@ -9,7 +9,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"strconv"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/tree"
@@ -69,7 +68,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 // Manifest returns the manifest of checkpoint id.
 func (s *Store) Manifest(id int) (Manifest, error) {
 	var manifest Manifest
-	if err := readJSON(filepath.Join(s.layerDir(id), "manifest.json"), &manifest); err != nil {
+	if err := readJSON(s.manifestPath(id), &manifest); err != nil {
 		return Manifest{}, err
 	}
 	paths := slices.Concat(manifest.Deleted, manifest.Unstable, manifest.Unreadable, slices.Collect(maps.Keys(manifest.Changed)))
@@ -156,23 +155,4 @@ func (s *Store) UnchangedDirs(state map[string]Source, dirs []string) (map[strin
 		}
 	}
 	return unchanged, nil
-}
-
-func (s *Store) baseDir() string {
-	return filepath.Join(s.dir, "base")
-}
-
-func (s *Store) basePath(rel string) string {
-	if rel == "." {
-		return s.baseDir()
-	}
-	return filepath.Join(s.baseDir(), filepath.FromSlash(rel))
-}
-
-func (s *Store) layerDir(id int) string {
-	return filepath.Join(s.dir, "layers", strconv.Itoa(id))
-}
-
-func (s *Store) layerFile(id int, rel string) string {
-	return filepath.Join(s.layerDir(id), "files", filepath.FromSlash(rel))
 }

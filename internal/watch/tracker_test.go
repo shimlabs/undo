@@ -276,7 +276,7 @@ func TestTrackerSavesListingWhenClosed(t *testing.T) {
 
 	tracker.Close()
 
-	data, err := os.ReadFile(projectStore.FilePath("listing.gob"))
+	data, err := os.ReadFile(filepath.Join(projectStore.Dir(), "listing.gob"))
 	if err != nil || len(data) == 0 {
 		t.Fatalf("no listing saved: %v", err)
 	}

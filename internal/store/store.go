@@ -74,7 +74,7 @@ func DefaultHome() (string, error) {
 // fs.ErrNotExist if the project has no store yet, and never creates one.
 func Open(home, root string) (*Store, error) {
 	for _, dir := range []string{filepath.Join(home, project.ID(root)), nextToProject(root)} {
-		if _, err := os.Stat(filepath.Join(dir, "config.json")); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, configFile)); err != nil {
 			continue
 		}
 		if err := checkPrivateDir(dir); err != nil {
@@ -100,7 +100,7 @@ func Create(home, root string) (*Store, error) {
 // openAt opens the store in dir for the project at root, writing its
 // settings if the store is new.
 func openAt(dir, root string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Join(dir, "layers"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, layersDirName), 0o700); err != nil {
 		return nil, err
 	}
 	s := &Store{root: root, dir: dir}
@@ -199,12 +199,6 @@ func (s *Store) Root() string { return s.root }
 // Dir returns the store's directory.
 func (s *Store) Dir() string { return s.dir }
 
-// FilePath returns the path of a file the store keeps for another part of
-// undo, such as the watcher's markers.
-func (s *Store) FilePath(name string) string {
-	return filepath.Join(s.dir, name)
-}
-
 // IsCopyMode reports whether the store keeps full copies instead of clones.
 func (s *Store) IsCopyMode() bool { return s.config.IsCopyMode }
 
@@ -232,10 +226,6 @@ func (s *Store) loadConfig() error {
 		return err
 	}
 	return nil
-}
-
-func (s *Store) configPath() string {
-	return filepath.Join(s.dir, "config.json")
 }
 
 // StoresUnder returns the stores of projects whose folders are directly
