@@ -789,37 +789,45 @@ func TestRestoreKeepsDirectoryWithUnreadableFileWhereFileWas(t *testing.T) {
 	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "cache"), "file")
 	take(t, projectStore, "1")
-	os.Remove(filepath.Join(root, "cache"))
+	if err := os.Remove(filepath.Join(root, "cache")); err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, filepath.Join(root, "cache", "secret"), "s")
-	os.Chmod(filepath.Join(root, "cache", "secret"), 0)
+	if err := os.Chmod(filepath.Join(root, "cache", "secret"), 0); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "cache", "secret"), 0o644) })
-	os.Remove(filepath.Join(root, "README.md"))
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
 	take(t, projectStore, "2")
 
-	changes, err := Apply(projectStore, 1, (*store.Store).Take)
-	readme, _ := os.ReadFile(filepath.Join(root, "README.md"))
-	main, _ := os.ReadFile(filepath.Join(root, "src", "main.go"))
-	if err != nil {
-		t.Fatalf("restore failed: %v; README.md=%q src/main.go=%q kept=%v", err, readme, main, changes.Kept)
+	changes := apply(t, projectStore, 1)
+	if _, err := os.Stat(filepath.Join(root, "README.md")); err != nil {
+		t.Errorf("README.md was not restored: %v", err)
 	}
-	if string(main) != "package main\n" {
-		t.Fatalf("src/main.go = %q", main)
+	if mainContent, err := os.ReadFile(filepath.Join(root, "src", "main.go")); err != nil || string(mainContent) != "package main\n" {
+		t.Errorf("src/main.go = %q, %v; kept %v", mainContent, err, changes.Kept)
 	}
 }
 
-// Same, with a symlink target.
+// cache was a symlink at checkpoint 1. It is now a directory that holds
+// excluded content, which the restore must keep.
 func TestRestoreKeepsDirectoryWithExcludedContentWhereSymlinkWas(t *testing.T) {
 	projectStore, root := newProject(t)
-	os.Symlink("src", filepath.Join(root, "cache"))
+	if err := os.Symlink("src", filepath.Join(root, "cache")); err != nil {
+		t.Fatal(err)
+	}
 	take(t, projectStore, "1")
-	os.Remove(filepath.Join(root, "cache"))
+	if err := os.Remove(filepath.Join(root, "cache")); err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, filepath.Join(root, "cache", "node_modules", "x.js"), "x")
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
 	take(t, projectStore, "2")
-	changes, err := Apply(projectStore, 1, (*store.Store).Take)
-	main, _ := os.ReadFile(filepath.Join(root, "src", "main.go"))
-	if err != nil || string(main) != "package main\n" {
-		t.Fatalf("restore: %v; src/main.go=%q kept=%v", err, main, changes.Kept)
+	changes := apply(t, projectStore, 1)
+	if mainContent, err := os.ReadFile(filepath.Join(root, "src", "main.go")); err != nil || string(mainContent) != "package main\n" {
+		t.Errorf("src/main.go = %q, %v; kept %v", mainContent, err, changes.Kept)
 	}
 }

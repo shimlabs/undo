@@ -51,7 +51,7 @@ func TestCreatePutsStoreNextToProjectWhenHomeIsInside(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(filepath.Dir(root), ".undo-"+project.ID(root)); projectStore.Dir() != want {
+	if want := filepath.Join(filepath.Dir(root), storeDirPrefix+project.ID(root)); projectStore.Dir() != want {
 		t.Fatalf("store = %s, want %s", projectStore.Dir(), want)
 	}
 }
@@ -149,7 +149,7 @@ func TestCreateRefusesPlantedStoreNextToProject(t *testing.T) {
 			if err := os.Mkdir(root, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			planted := filepath.Join(parent, ".undo-"+project.ID(root))
+			planted := filepath.Join(parent, storeDirPrefix+project.ID(root))
 			if plant == "symlink" {
 				if err := os.Symlink(t.TempDir(), planted); err != nil {
 					t.Fatal(err)
@@ -216,11 +216,11 @@ func TestOpenIgnoresStoreNextToProjectThatHomeDidNotCreate(t *testing.T) {
 	}
 	// A private store with valid settings, unpacked from an archive or
 	// written by an agent, is still not one this user's undo created.
-	planted := filepath.Join(parent, ".undo-"+project.ID(root))
+	planted := filepath.Join(parent, storeDirPrefix+project.ID(root))
 	if err := os.Mkdir(planted, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(filepath.Join(planted, "config.json"), config{Format: format, Root: root}); err != nil {
+	if err := writeJSON(filepath.Join(planted, configFile), config{Format: format, Root: root}); err != nil {
 		t.Fatal(err)
 	}
 	home := t.TempDir()

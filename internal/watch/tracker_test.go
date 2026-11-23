@@ -533,27 +533,20 @@ func TestScanDoesNotRestoreOldContentOfUnreadableFile(t *testing.T) {
 	_, projectStore, root := newTrackerWithFiles(t)
 	secret := filepath.Join(root, "secret.txt")
 	testutil.WriteFile(t, secret, "v1")
-	take := func(label string) store.Checkpoint {
-		checkpoint, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: root})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return checkpoint
-	}
-	take("1")
+	takeScan(t, projectStore, "1")
 	testutil.WriteFile(t, secret, "v2")
 	if err := os.Chmod(secret, 0); err != nil {
 		t.Fatal(err)
 	}
-	take("2")
-	third := take("3")
+	takeScan(t, projectStore, "2")
+	third := takeScan(t, projectStore, "3")
 	if err := os.Chmod(secret, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(secret); err != nil {
 		t.Fatal(err)
 	}
-	take("4")
+	takeScan(t, projectStore, "4")
 	if _, err := restore.Apply(projectStore, third.ID, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
@@ -784,19 +777,26 @@ func TestTrackerKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
 	testutil.WriteFile(t, secret, "v1")
 	takeCheckpoint(t, projectTracker, "1")
 	testutil.WriteFile(t, secret, "v2")
-	os.Chmod(secret, 0)
+	if err := os.Chmod(secret, 0); err != nil {
+		t.Fatal(err)
+	}
 	takeCheckpoint(t, projectTracker, "2")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "other")
 	third := takeCheckpoint(t, projectTracker, "3")
-	m3, _ := projectStore.Manifest(third.ID)
-	os.Chmod(secret, 0o644)
+	thirdManifest, err := projectStore.Manifest(third.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(secret, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	takeCheckpoint(t, projectTracker, "4")
 	changes, err := restore.Apply(projectStore, third.ID, checkpointThroughTracker(projectTracker))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(secret); err != nil {
-		t.Fatalf("restoring checkpoint 3 removed secret.txt, which existed then (removed %v, kept %v, manifest 3 unreadable %v)", changes.Removed, changes.Kept, m3.Unreadable)
+		t.Fatalf("restoring checkpoint 3 removed secret.txt, which existed then (removed %v, kept %v, manifest 3 unreadable %v)", changes.Removed, changes.Kept, thirdManifest.Unreadable)
 	}
 }
 
@@ -806,22 +806,19 @@ func TestScanKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
 	}
 	_, projectStore, root := newTrackerWithFiles(t)
 	secret := filepath.Join(root, "secret.txt")
-	take := func() store.Checkpoint {
-		c, err := projectStore.Take(store.CheckpointOptions{Label: "x", Dir: root})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c
-	}
 	testutil.WriteFile(t, secret, "v1")
-	take()
+	takeScan(t, projectStore, "1")
 	testutil.WriteFile(t, secret, "v2")
-	os.Chmod(secret, 0)
-	take()
+	if err := os.Chmod(secret, 0); err != nil {
+		t.Fatal(err)
+	}
+	takeScan(t, projectStore, "2")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "other")
-	third := take()
-	os.Chmod(secret, 0o644)
-	take()
+	third := takeScan(t, projectStore, "3")
+	if err := os.Chmod(secret, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	takeScan(t, projectStore, "4")
 	changes, err := restore.Apply(projectStore, third.ID, (*store.Store).Take)
 	if err != nil {
 		t.Fatal(err)
@@ -848,22 +845,31 @@ func TestRestoreNeverDeletesFileWhoseCopyWasLostAndMerged(t *testing.T) {
 		takeCheckpoint(t, projectTracker, "later")
 	}
 	projectTracker.Close()
-	tracker2, err := newTracker(projectStore)
+	resumed, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(tracker2.Close)
+	t.Cleanup(resumed.Close)
 	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40}); err != nil {
 		t.Fatal(err)
 	}
-	latest, _, _ := projectStore.Latest()
-	if _, err := restore.Apply(projectStore, latest.ID, checkpointThroughTracker(tracker2)); err != nil {
+	latest, _, err := projectStore.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restore.Apply(projectStore, latest.ID, checkpointThroughTracker(resumed)); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "docs", "guide.md"))
 	if err != nil {
-		after, _, _ := projectStore.Latest()
-		state, _ := projectStore.State(after.ID)
+		after, _, err := projectStore.Latest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := projectStore.State(after.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
 		_, inSafety := state["docs/guide.md"]
 		t.Fatalf("restoring the latest checkpoint (unchanged project) removed docs/guide.md; safety checkpoint %d holds it: %v", after.ID, inSafety)
 	}
@@ -886,7 +892,9 @@ func TestTrackerSeesFilesClonedIntoProject(t *testing.T) {
 	checkMatchesScan(t, projectStore, root, second.ID)
 	testutil.WriteFile(t, filepath.Join(root, "other.md"), "other content")
 	takeCheckpoint(t, projectTracker, "3")
-	os.Remove(filepath.Join(root, "other.md"))
+	if err := os.Remove(filepath.Join(root, "other.md")); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := exec.Command("cp", "-c", filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "other.md")).CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
@@ -906,12 +914,12 @@ func TestTrackerResumesAfterProjectRecreated(t *testing.T) {
 	}
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# other project")
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package other")
-	tracker2, err := newTracker(projectStore)
+	resumed, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(tracker2.Close)
-	third := takeCheckpoint(t, tracker2, "3")
+	t.Cleanup(resumed.Close)
+	third := takeCheckpoint(t, resumed, "3")
 	checkMatchesScan(t, projectStore, root, third.ID)
 }
 
@@ -921,15 +929,20 @@ func TestTrackerResumesAfterDirectorySwapped(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
 	projectTracker.Close()
-	os.Rename(filepath.Join(root, "docs"), filepath.Join(root, "..", filepath.Base(root)+"-docs"))
-	testutil.WriteFile(t, filepath.Join(root, "..", filepath.Base(root)+"-docs", "added.md"), "added outside")
-	os.Rename(filepath.Join(root, "..", filepath.Base(root)+"-docs"), filepath.Join(root, "docs"))
-	tracker2, err := newTracker(projectStore)
+	outside := filepath.Join(root, "..", filepath.Base(root)+"-docs")
+	if err := os.Rename(filepath.Join(root, "docs"), outside); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(outside, "added.md"), "added outside")
+	if err := os.Rename(outside, filepath.Join(root, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(tracker2.Close)
-	second := takeCheckpoint(t, tracker2, "2")
+	t.Cleanup(resumed.Close)
+	second := takeCheckpoint(t, resumed, "2")
 	checkMatchesScan(t, projectStore, root, second.ID)
 }
 
@@ -958,4 +971,15 @@ func TestTrackerStoresLostFileAgainAfterPrune(t *testing.T) {
 	if state["docs/guide.md"].IsLost {
 		t.Fatalf("checkpoint %d still has docs/guide.md lost, though the project holds it", next.ID)
 	}
+}
+
+// takeScan takes a checkpoint by scanning the project, as undo does when no
+// watcher runs.
+func takeScan(t *testing.T, projectStore *store.Store, label string) store.Checkpoint {
+	t.Helper()
+	checkpoint, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: projectStore.Root()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checkpoint
 }
