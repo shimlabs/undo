@@ -36,9 +36,9 @@ func defaultStoreHome(t *testing.T) string {
 }
 
 // mustRun runs undo like run and fails the test if it exits with an error.
-func mustRun(t *testing.T, dir string, stdin string, args ...string) string {
+func mustRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	code, out := run(t, dir, stdin, args...)
+	code, out := run(t, dir, "", args...)
 	if code != 0 {
 		t.Fatalf("undo %v: exit %d: %s", args, code, out)
 	}
@@ -111,7 +111,7 @@ func TestUndoRestoresLatest(t *testing.T) {
 
 func TestUndoAsksBeforeRestoring(t *testing.T) {
 	root := newProject(t)
-	mustRun(t, root, "", "checkpoint")
+	mustRun(t, root, "checkpoint")
 	if err := os.Remove(filepath.Join(root, "f.txt")); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestUndoAsksBeforeRestoring(t *testing.T) {
 
 func TestDiffListsPaths(t *testing.T) {
 	root := newProject(t)
-	mustRun(t, root, "", "checkpoint")
+	mustRun(t, root, "checkpoint")
 	if err := os.Remove(filepath.Join(root, "f.txt")); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestDiffListsPaths(t *testing.T) {
 
 func TestListShowsLabels(t *testing.T) {
 	root := newProject(t)
-	mustRun(t, root, "", "checkpoint", "--label", "npm run build")
+	mustRun(t, root, "checkpoint", "--label", "npm run build")
 
 	code, out := run(t, root, "", "list")
 	if code != 0 || !strings.Contains(out, "npm run build") {
@@ -167,7 +167,7 @@ func TestDiffGroupsDirectories(t *testing.T) {
 		}
 		testutil.WriteFile(t, path, "x")
 	}
-	mustRun(t, root, "", "checkpoint")
+	mustRun(t, root, "checkpoint")
 	if err := os.RemoveAll(filepath.Join(root, "big")); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestRefusalExplainsCopyMode(t *testing.T) {
 		t.Skip("UNDO_TEST_PLAIN_DIR is not set")
 	}
 	t.Setenv("UNDO_HOME", t.TempDir())
-	root, err := os.MkdirTemp(plain, "project-")
+	root, err := os.MkdirTemp(plain, "project-") //nolint:usetesting // the project must be on the filesystem UNDO_TEST_PLAIN_DIR names
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestStatusShowsUnreadableDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
-	mustRun(t, root, "", "checkpoint")
+	mustRun(t, root, "checkpoint")
 
 	_, out := run(t, root, "", "status")
 	if !strings.Contains(out, "Unreadable   pgdata") {

@@ -111,8 +111,9 @@ func TestChangedReportsDeleted(t *testing.T) {
 	}
 }
 
-// buildTree creates dirs directories with files files each, some of them
-// nested, with an excluded node_modules and a symlink in every directory.
+// buildTree creates dirs directories that each hold the given number of
+// files, some of them nested, with an excluded node_modules and a symlink in
+// every directory.
 func buildTree(tb testing.TB, dirs, files int) string {
 	tb.Helper()
 	root := tb.TempDir()

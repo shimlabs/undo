@@ -21,7 +21,7 @@ func newServerProject(t *testing.T) (projectStore *store.Store, root, socketDir 
 	t.Helper()
 	// Socket paths are limited to about 100 bytes, and the test's own
 	// temporary directory can be longer than that.
-	socketDir, err := os.MkdirTemp("/tmp", "undo-test-")
+	socketDir, err := os.MkdirTemp("/tmp", "undo-test-") //nolint:usetesting // a socket path must fit in 104 bytes, which t.TempDir paths do not on macOS
 	if err != nil {
 		t.Fatal(err)
 	}

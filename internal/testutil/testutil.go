@@ -118,7 +118,7 @@ func History(tb testing.TB, root string, checkpoint func(label string)) []map[st
 			WriteFile(tb, filepath.Join(root, "dir"), "now a file")
 		},
 	}
-	var states []map[string]string
+	states := make([]map[string]string, 0, len(steps))
 	for i, step := range steps {
 		step()
 		states = append(states, Fingerprint(tb, root))

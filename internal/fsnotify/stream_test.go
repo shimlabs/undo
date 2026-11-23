@@ -27,7 +27,7 @@ func (c *collector) add(events []Event) {
 func (c *collector) paths() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var paths []string
+	paths := make([]string, 0, len(c.events))
 	for _, event := range c.events {
 		paths = append(paths, event.Path)
 	}

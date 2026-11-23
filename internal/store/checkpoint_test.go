@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -416,7 +417,7 @@ func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
 				}
 			}
 		}()
-		checkpoint, err := projectStore.Take(CheckpointOptions{Label: fmt.Sprint(attempt), Dir: root})
+		checkpoint, err := projectStore.Take(CheckpointOptions{Label: strconv.Itoa(attempt), Dir: root})
 		stop.Store(true)
 		<-done
 		if err != nil {

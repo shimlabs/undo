@@ -32,7 +32,7 @@ func TestFormatBytes(t *testing.T) {
 }
 
 func TestTimeAgo(t *testing.T) {
-	old := time.Date(2025, time.March, 4, 12, 0, 0, 0, time.Local)
+	old := time.Date(2025, time.March, 4, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		moment time.Time
 		want   string

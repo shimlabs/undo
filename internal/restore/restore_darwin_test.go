@@ -24,12 +24,12 @@ func lockFile(t *testing.T, path string, dirs ...string) {
 	}
 	t.Cleanup(func() {
 		for _, dir := range dirs {
-			filepath.WalkDir(dir, func(entryPath string, _ fs.DirEntry, err error) error {
-				if err == nil {
-					unix.Chflags(entryPath, 0)
-				}
-				return nil
+			err := filepath.WalkDir(dir, func(entryPath string, _ fs.DirEntry, _ error) error {
+				return unix.Chflags(entryPath, 0)
 			})
+			if err != nil {
+				t.Error(err)
+			}
 		}
 	})
 }
@@ -97,7 +97,11 @@ func lockSymlink(t *testing.T, path string) {
 	if err := setSymlinkFlags(unix.UF_IMMUTABLE); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { setSymlinkFlags(0) })
+	t.Cleanup(func() {
+		if err := setSymlinkFlags(0); err != nil {
+			t.Error(err)
+		}
+	})
 }
 
 // requireWorksAfterPrune merges all but the newest checkpoint, then checks

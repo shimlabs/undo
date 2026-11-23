@@ -49,7 +49,7 @@ func plainProject(t *testing.T) (*store.Store, string) {
 	if plain == "" {
 		t.Skip("UNDO_TEST_PLAIN_DIR is not set")
 	}
-	root, err := os.MkdirTemp(plain, "project-")
+	root, err := os.MkdirTemp(plain, "project-") //nolint:usetesting // the project must be on the filesystem UNDO_TEST_PLAIN_DIR names
 	if err != nil {
 		t.Fatal(err)
 	}
