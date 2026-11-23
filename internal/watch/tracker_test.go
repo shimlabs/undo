@@ -932,3 +932,30 @@ func TestTrackerResumesAfterDirectorySwapped(t *testing.T) {
 	second := takeCheckpoint(t, tracker2, "2")
 	checkMatchesScan(t, projectStore, root, second.ID)
 }
+
+func TestTrackerStoresLostFileAgainAfterPrune(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "precious v2")
+	second := takeCheckpoint(t, projectTracker, "2")
+	// A power cut can lose the newest checkpoint's copies.
+	if err := os.Remove(filepath.Join(projectStore.Dir(), "layers", strconv.Itoa(second.ID), "files", "docs", "guide.md")); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		testutil.WriteFile(t, filepath.Join(root, "README.md"), fmt.Sprint("edit ", i))
+		takeCheckpoint(t, projectTracker, "later")
+	}
+	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40}); err != nil {
+		t.Fatal(err)
+	}
+
+	next := takeCheckpoint(t, projectTracker, "after prune")
+	state, err := projectStore.State(next.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state["docs/guide.md"].IsLost {
+		t.Fatalf("checkpoint %d still has docs/guide.md lost, though the project holds it", next.ID)
+	}
+}

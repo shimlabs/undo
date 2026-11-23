@@ -66,11 +66,11 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	lost, err := s.lostPaths()
+	record, err := s.readLost()
 	if err != nil {
 		return 0, err
 	}
-	lostBefore := len(lost)
+	lost := setOf(record.Paths)
 	var freed int64
 	parents := tree.NewParentChecker(s.baseDir())
 	for _, checkpoint := range checkpoints {
@@ -83,18 +83,18 @@ func (s *Store) mergeRecorded() (int64, error) {
 		}
 		freed += layerFreed
 	}
-	if err := writeJSON(s.lostPath(), slices.Sorted(maps.Keys(lost))); err != nil {
+	// Listings, the watcher's included, still hold the lost paths as
+	// stored, so the next commit stores them again from the project.
+	toStoreAgain := setOf(record.Pending)
+	for rel := range lost {
+		toStoreAgain[rel] = true
+	}
+	record = lostRecord{Paths: slices.Sorted(maps.Keys(lost)), Pending: slices.Sorted(maps.Keys(toStoreAgain))}
+	if err := writeJSON(s.lostPath(), record); err != nil {
 		return freed, err
 	}
 	if err := writeGob(s.baseListingPath(), base); err != nil {
 		return freed, err
-	}
-	// A saved listing still holds the lost paths as stored, and the next
-	// checkpoint would not store them again.
-	if len(lost) > lostBefore {
-		if err := os.Remove(s.listingPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return freed, err
-		}
 	}
 	remaining := slices.DeleteFunc(checkpoints, func(checkpoint Checkpoint) bool { return checkpoint.ID <= pending.Through })
 	if err := s.writeIndex(remaining); err != nil {
@@ -179,17 +179,27 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 	return freed, nil
 }
 
-// lostPaths returns the paths in the base whose stored copy is gone.
-func (s *Store) lostPaths() (map[string]bool, error) {
-	var paths []string
-	if err := readJSON(s.lostPath(), &paths); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
+// lostRecord lists the paths in the base whose stored copy is gone, and the
+// ones the next commit must store again from the project.
+type lostRecord struct {
+	Paths   []string `json:"paths"`
+	Pending []string `json:"pending"`
+}
+
+func (s *Store) readLost() (lostRecord, error) {
+	var record lostRecord
+	if err := readJSON(s.lostPath(), &record); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return lostRecord{}, err
 	}
-	lost := make(map[string]bool, len(paths))
+	return record, nil
+}
+
+func setOf(paths []string) map[string]bool {
+	set := make(map[string]bool, len(paths))
 	for _, rel := range paths {
-		lost[rel] = true
+		set[rel] = true
 	}
-	return lost, nil
+	return set
 }
 
 // mergeDir makes sure rel is a directory in the base.

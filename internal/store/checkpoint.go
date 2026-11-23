@@ -66,7 +66,8 @@ type Changes struct {
 	Listing tree.Listing
 	Changed []string
 	Deleted []string
-	// Unreadable are directories the caller could not list.
+	// Unreadable are all the directories the caller cannot list now, not
+	// only new ones.
 	Unreadable []string
 	// ExcludePatterns are the exclude rules the changes were found with.
 	ExcludePatterns []string
@@ -158,6 +159,11 @@ func (s *Store) Commit(after int, options CheckpointOptions, changes Changes) (C
 // checkpoints are unaffected.
 func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes) (Checkpoint, error) {
 	id := latestID + 1
+	lost, err := s.readLost()
+	if err != nil {
+		return Checkpoint{}, err
+	}
+	changes.Changed = withPending(changes, lost.Pending)
 	// A layer left behind by an interrupted checkpoint would mix old files
 	// into this one.
 	if err := os.RemoveAll(s.layerDir(id)); err != nil {
@@ -182,7 +188,30 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 		UnstableCount:     len(manifest.Unstable),
 		StoredBytes:       storedBytes(manifest.Changed),
 	}
-	return checkpoint, s.appendIndex(checkpoint)
+	if err := s.appendIndex(checkpoint); err != nil {
+		return Checkpoint{}, err
+	}
+	// After a crash before this, the next commit stores them once more.
+	if len(lost.Pending) > 0 {
+		lost.Pending = nil
+		if err := writeJSON(s.lostPath(), lost); err != nil {
+			return checkpoint, err
+		}
+	}
+	return checkpoint, nil
+}
+
+// withPending adds to the changed paths the pending ones the project still
+// holds, so the checkpoint stores them again.
+func withPending(changes Changes, pending []string) []string {
+	changed := changes.Changed
+	isChanged := setOf(changed)
+	for _, rel := range pending {
+		if _, isListed := changes.Listing[rel]; isListed && !isChanged[rel] {
+			changed = append(changed, rel)
+		}
+	}
+	return changed
 }
 
 // shortLabel keeps the first line of label, cut to maxLabelLength

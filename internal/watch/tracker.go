@@ -293,10 +293,9 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		return checkpoint, t.loadListing(checkpoint.ID)
 	}
 	if t.listing == nil || latest.ID != t.lastID {
-		if t.listing, err = t.store.ListingAt(latest.ID); err != nil {
+		if err := t.loadListing(latest.ID); err != nil {
 			return store.Checkpoint{}, err
 		}
-		t.lastID = latest.ID
 		shouldRescan = true
 	}
 
