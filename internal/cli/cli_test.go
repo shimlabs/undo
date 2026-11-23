@@ -169,9 +169,11 @@ func TestInstallClaudeWritesSettings(t *testing.T) {
 func TestHookNeverBlocksTheAgent(t *testing.T) {
 	root := newProject(t)
 
-	code, out := run(t, root, "not json", "hook", "claude")
-	if code != 0 || out != "" {
-		t.Fatalf("exit %d, output %q", code, out)
+	for _, args := range [][]string{{"hook", "claude"}, {"hook", "no-such-agent"}, {"hook"}} {
+		code, out := run(t, root, "not json", args...)
+		if code != 0 || out != "" {
+			t.Fatalf("%v: exit %d, output %q", args, code, out)
+		}
 	}
 }
 
@@ -284,5 +286,31 @@ func TestRefusalExplainsCopyMode(t *testing.T) {
 	code, out := run(t, root, "", "checkpoint")
 	if code != 1 || !strings.Contains(out, "undo checkpoint --copy") {
 		t.Fatalf("exit %d: %s", code, out)
+	}
+}
+
+func TestStatusShowsInstalledHooks(t *testing.T) {
+	root := newProject(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("GEMINI_CLI_HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+
+	_, out := run(t, root, "", "status")
+	if !strings.Contains(out, "Hooks        none yet, run: undo install <agent>") {
+		t.Fatalf("status without hooks:\n%s", out)
+	}
+
+	for _, agent := range []string{"cursor", "opencode"} {
+		if code, out := run(t, root, "", "install", agent); code != 0 {
+			t.Fatalf("install %s: exit %d: %s", agent, code, out)
+		}
+	}
+	_, out = run(t, root, "", "status")
+	if !strings.Contains(out, "Hooks        Cursor, OpenCode") {
+		t.Fatalf("status with hooks:\n%s", out)
 	}
 }

@@ -11,31 +11,37 @@ import (
 	"strings"
 )
 
-// installEntry puts entry under hooks.PreToolUse in the JSON file at path. An
-// entry undo added before for agent is replaced in place, since Codex ties its
-// trust in a hook to the hook's position. Everything else is kept.
-func installEntry(path, agent string, entry map[string]any) error {
+// installEntry puts entry under hooks.<event> in the JSON settings file at
+// path, adding defaults if the file does not set them. An entry undo added
+// before for agent is replaced in place, since Codex ties its trust in a hook
+// to the hook's position. Everything else is kept.
+func installEntry(path, event, agent string, entry, defaults map[string]any) error {
 	settings, err := readSettings(path)
 	if err != nil {
 		return err
 	}
-	entries := preToolUseEntries(settings)
+	for key, value := range defaults {
+		if _, ok := settings[key]; !ok {
+			settings[key] = value
+		}
+	}
+	entries := hookEntries(settings, event)
 	if i := slices.IndexFunc(entries, isUndoEntry(agent)); i >= 0 {
 		entries[i] = entry
 		entries = slices.Concat(entries[:i+1], slices.DeleteFunc(entries[i+1:], isUndoEntry(agent)))
 	} else {
 		entries = append(entries, entry)
 	}
-	setPreToolUseEntries(settings, entries)
+	setHookEntries(settings, event, entries)
 	return writeSettings(path, settings)
 }
 
-func uninstallEntry(path, agent string) error {
+func uninstallEntry(path, event, agent string) error {
 	settings, err := readSettings(path)
 	if err != nil {
 		return err
 	}
-	setPreToolUseEntries(settings, slices.DeleteFunc(preToolUseEntries(settings), isUndoEntry(agent)))
+	setHookEntries(settings, event, slices.DeleteFunc(hookEntries(settings, event), isUndoEntry(agent)))
 	return writeSettings(path, settings)
 }
 
@@ -46,21 +52,21 @@ func isUndoEntry(agent string) func(entry any) bool {
 	}
 }
 
-func preToolUseEntries(settings map[string]any) []any {
+func hookEntries(settings map[string]any, event string) []any {
 	hooks, _ := settings["hooks"].(map[string]any)
-	entries, _ := hooks["PreToolUse"].([]any)
+	entries, _ := hooks[event].([]any)
 	return entries
 }
 
-func setPreToolUseEntries(settings map[string]any, entries []any) {
+func setHookEntries(settings map[string]any, event string, entries []any) {
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
 	if len(entries) == 0 {
-		delete(hooks, "PreToolUse")
+		delete(hooks, event)
 	} else {
-		hooks["PreToolUse"] = entries
+		hooks[event] = entries
 	}
 	if len(hooks) == 0 {
 		delete(settings, "hooks")

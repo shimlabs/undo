@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
+      # The OpenCode plugin tests load the plugin with Bun, as OpenCode does.
+      - uses: oven-sh/setup-bun@v2
       - run: go test -race ./...
 
   # Clones need Btrfs or XFS, so the tests run on a loop device. The runner's

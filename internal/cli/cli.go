@@ -37,8 +37,8 @@ Usage:
   undo run -- <command>    take a checkpoint, then run <command>
   undo checkpoint          take a checkpoint now
   undo status              show what undo protects
-  undo install claude      checkpoint before every Claude Code tool call
-  undo install codex       checkpoint before every Codex command and patch
+  undo install <agent>     checkpoint before every change the agent makes:
+                           claude, codex, cursor, gemini or opencode
   undo uninstall <agent>   remove that hook
   undo version             print the version
 
@@ -119,13 +119,14 @@ func dispatch(args []string, env Env) error {
 		checkpoint := func(s *store.Store, label, dir string) (store.Checkpoint, error) {
 			return takeCheckpoint(s, label, dir, env)
 		}
-		// The handlers log their failures in the store. Returning them would
-		// make the agent see a failed hook.
-		if len(rest) > 0 && rest[0] == "codex" {
-			_ = hook.HandleCodex(env.Stdin, checkpoint)
-		} else {
-			_ = hook.HandleClaude(env.Stdin, checkpoint)
+		// A hook must never fail, because some agents block the tool when it
+		// does. An unknown agent name is handled like any other agent.
+		var agent hook.Agent
+		if len(rest) > 0 {
+			agent, _ = hook.FindAgent(rest[0])
 		}
+		// Handle logs its failures in the store.
+		_ = agent.Handle(env.Stdin, checkpoint)
 		return nil
 	case "watch":
 		return watchCommand(env)
@@ -432,6 +433,17 @@ func statusCommand(env Env) error {
 	} else {
 		fmt.Fprintln(env.Stdout, "Watcher      not running, so checkpoints scan the project")
 	}
+	var hooks []string
+	for _, agent := range hook.Agents {
+		if agent.IsInstalled() {
+			hooks = append(hooks, agent.Title)
+		}
+	}
+	if len(hooks) == 0 {
+		fmt.Fprintln(env.Stdout, "Hooks        none yet, run: undo install <agent>")
+	} else {
+		fmt.Fprintf(env.Stdout, "Hooks        %s\n", strings.Join(hooks, ", "))
+	}
 	fmt.Fprintf(env.Stdout, "Excluded     %s\n", strings.Join(ex.Patterns(), ", "))
 	fmt.Fprintln(env.Stdout, "Not covered  anything outside this folder: databases, git push, API calls")
 	if line := s.LastError(); line != "" {
@@ -469,8 +481,9 @@ func timeAgo(t time.Time) string {
 }
 
 func installCommand(args []string, env Env) error {
-	if len(args) != 1 || (args[0] != "claude" && args[0] != "codex") {
-		return usageError{"install supports: claude, codex"}
+	agent, err := agentArg("install", args)
+	if err != nil {
+		return err
 	}
 	binary, err := os.Executable()
 	if err != nil {
@@ -479,40 +492,42 @@ func installCommand(args []string, env Env) error {
 	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
 		binary = resolved
 	}
-	if args[0] == "codex" {
-		path, err := hook.InstallCodex(binary)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(env.Stdout, "Updated %s\n"+
-			"Codex runs new hooks only after you trust them: open Codex, run /hooks and trust the undo hook.\n"+
-			"Then Codex takes a checkpoint before every shell command and patch.\n", path)
-		return nil
-	}
-	path, err := hook.InstallClaude(binary)
+	path, err := agent.Install(binary)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "Claude Code now takes a checkpoint before every Bash, Edit and Write call.\nUpdated %s\n", path)
+	fmt.Fprintf(env.Stdout, "Updated %s\n%s\n", path, agent.Note)
 	return nil
 }
 
 func uninstallCommand(args []string, env Env) error {
-	var path string
-	var err error
-	switch {
-	case len(args) == 1 && args[0] == "claude":
-		path, err = hook.UninstallClaude()
-	case len(args) == 1 && args[0] == "codex":
-		path, err = hook.UninstallCodex()
-	default:
-		return usageError{"uninstall supports: claude, codex"}
+	agent, err := agentArg("uninstall", args)
+	if err != nil {
+		return err
 	}
+	path, err := agent.Uninstall()
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(env.Stdout, "Removed the undo hook from %s\n", path)
 	return nil
+}
+
+func agentArg(command string, args []string) (hook.Agent, error) {
+	if len(args) == 1 {
+		if agent, ok := hook.FindAgent(args[0]); ok {
+			return agent, nil
+		}
+	}
+	return hook.Agent{}, usageError{fmt.Sprintf("%s supports: %s", command, strings.Join(agentNames(), ", "))}
+}
+
+func agentNames() []string {
+	var names []string
+	for _, agent := range hook.Agents {
+		names = append(names, agent.Name)
+	}
+	return names
 }
 
 // takeCheckpoint checkpoints through the project's watcher when one can be started,
