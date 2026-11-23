@@ -43,8 +43,8 @@ func TestOpenNeverCreates(t *testing.T) {
 	if _, err := Open(home, t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Open = %v, want an error matching fs.ErrNotExist", err)
 	}
-	if entries, _ := os.ReadDir(home); len(entries) != 0 {
-		t.Fatalf("Open created %v", entries)
+	if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
+		t.Fatalf("Open created %v (%v)", entries, err)
 	}
 }
 
