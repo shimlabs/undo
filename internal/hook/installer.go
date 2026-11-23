@@ -277,7 +277,13 @@ func readSettings(path string) (map[string]any, error) {
 	return settings, nil
 }
 
+// writeSettings replaces the settings file. A settings file that is a
+// symlink, as dotfile managers make them, is written through, so the link
+// stays.
 func writeSettings(path string, settings map[string]any) error {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err

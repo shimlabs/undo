@@ -331,3 +331,24 @@ func TestInstallRefusesTemporaryBinary(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallKeepsSymlinkedSettings(t *testing.T) {
+	home := agentHome(t)
+	dotfiles := filepath.Join(t.TempDir(), "settings.json")
+	writeFile(t, dotfiles, `{"model": "opus"}`)
+	link := filepath.Join(home, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(link), 0o755)
+	if err := os.Symlink(dotfiles, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := claude.Install(privateBinary(t, "bin")); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("install replaced a symlinked settings file with a regular file")
+	}
+	if data, _ := os.ReadFile(dotfiles); !strings.Contains(string(data), "hook claude") {
+		t.Fatalf("the hook was not written through the symlink:\n%s", data)
+	}
+}
