@@ -18,11 +18,11 @@ import (
 // system instead of reading $TMPDIR, which agents do not always pass on to
 // the hooks they run.
 func userRuntimeDir() string {
-	buf := make([]byte, C.PATH_MAX)
-	if C.confstr(C._CS_DARWIN_USER_TEMP_DIR, (*C.char)(unsafe.Pointer(&buf[0])), C.size_t(len(buf))) == 0 {
+	buffer := make([]byte, C.PATH_MAX)
+	if C.confstr(C._CS_DARWIN_USER_TEMP_DIR, (*C.char)(unsafe.Pointer(&buffer[0])), C.size_t(len(buffer))) == 0 {
 		return os.TempDir()
 	}
-	return unix.ByteSliceToString(buf)
+	return unix.ByteSliceToString(buffer)
 }
 
 func peerUID(conn *net.UnixConn) (int, error) {

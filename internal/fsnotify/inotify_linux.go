@@ -85,27 +85,27 @@ func (s *Stream) Close() {
 
 func (s *Stream) readEvents() {
 	defer close(s.done)
-	buf := make([]byte, 64*1024)
+	buffer := make([]byte, 64*1024)
 	for {
-		n, err := s.file.Read(buf)
+		n, err := s.file.Read(buffer)
 		if err != nil {
 			return
 		}
-		if events := s.parseEvents(buf[:n]); len(events) > 0 {
+		if events := s.parseEvents(buffer[:n]); len(events) > 0 {
 			s.onEvents(events)
 		}
 	}
 }
 
-func (s *Stream) parseEvents(buf []byte) []Event {
+func (s *Stream) parseEvents(buffer []byte) []Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var events []Event
-	for len(buf) >= unix.SizeofInotifyEvent {
-		record := (*unix.InotifyEvent)(unsafe.Pointer(&buf[0]))
+	for len(buffer) >= unix.SizeofInotifyEvent {
+		record := (*unix.InotifyEvent)(unsafe.Pointer(&buffer[0]))
 		end := unix.SizeofInotifyEvent + int(record.Len)
-		name := string(bytes.TrimRight(buf[unix.SizeofInotifyEvent:end], "\x00"))
-		buf = buf[end:]
+		name := string(bytes.TrimRight(buffer[unix.SizeofInotifyEvent:end], "\x00"))
+		buffer = buffer[end:]
 		events = append(events, s.handleRecord(record, name)...)
 	}
 	for root := range s.missingRoots {

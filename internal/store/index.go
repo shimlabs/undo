@@ -139,13 +139,13 @@ func completeLinesEnd(file *os.File) (int64, error) {
 }
 
 func (s *Store) writeIndex(checkpoints []Checkpoint) error {
-	var buf bytes.Buffer
+	var buffer bytes.Buffer
 	for _, checkpoint := range checkpoints {
 		line, err := json.Marshal(checkpoint)
 		if err != nil {
 			return err
 		}
-		buf.Write(append(line, '\n'))
+		buffer.Write(append(line, '\n'))
 	}
-	return s.writeFileAtomic(s.indexPath(), buf.Bytes())
+	return s.writeFileAtomic(s.indexPath(), buffer.Bytes())
 }
