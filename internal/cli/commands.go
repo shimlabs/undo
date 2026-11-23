@@ -153,7 +153,7 @@ func commands() []command {
 			group:       groupRestore,
 			flags:       []string{flagAll, flagProject},
 			run:         listCommand,
-			examples:    []example{{"undo list", "See every checkpoint of this project"}},
+			examples:    []example{{"undo list", "See the newest 20 checkpoints"}, {"undo list --all", "See every checkpoint"}},
 			description: "Lists each checkpoint with its id, its age, the command that followed it, and the folder and agent it came from.",
 		},
 		{
@@ -162,7 +162,7 @@ func commands() []command {
 			group:       groupCheckpoints,
 			flags:       []string{flagLabel, flagCopy, flagProject},
 			run:         checkpointCommand,
-			examples:    []example{{`undo checkpoint --label "before the refactor"`, "Mark a point to come back to"}},
+			examples:    []example{{`undo checkpoint --label "the refactor"`, "Mark a point to come back to"}},
 			description: "Agents with an installed hook take checkpoints on their own; this takes one by hand.",
 		},
 		{

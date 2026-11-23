@@ -4,15 +4,18 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"golang.org/x/term"
 
+	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/restore"
-	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
 )
@@ -20,8 +23,7 @@ import (
 func undoCommand(parsed flags, env Env) error {
 	projectStore, err := openStore(env, parsed)
 	if isMissingProject(err) {
-		printNoCheckpoints(env, parsed)
-		return nil
+		return printNoCheckpoints(env, parsed)
 	}
 	if err != nil {
 		return err
@@ -32,8 +34,7 @@ func undoCommand(parsed flags, env Env) error {
 		return err
 	}
 	if !hasLatest {
-		printNoCheckpoints(env, parsed)
-		return nil
+		return printNoCheckpoints(env, parsed)
 	}
 	return restoreTo(env, parsed, projectStore, latest, true)
 }
@@ -71,7 +72,7 @@ func diffCommand(parsed flags, env Env) error {
 		return nil
 	}
 	out.Println()
-	out.Printf("Run %s to restore these %s.\n", out.Bold(projectCommand(parsed, "undo to "+strconv.Itoa(checkpoint.ID))), pluralize(count, "path"))
+	out.Printf("Run %s to restore these %s.\n", out.Bold(projectCommand(env, parsed, "undo to "+strconv.Itoa(checkpoint.ID))), pluralize(count, "path"))
 	return nil
 }
 
@@ -85,7 +86,9 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 	}
 	projectStore, err := openStore(env, parsed)
 	if isMissingProject(err) {
-		printNoCheckpoints(env, parsed)
+		if err := printNoCheckpoints(env, parsed); err != nil {
+			return nil, store.Checkpoint{}, err
+		}
 		return nil, store.Checkpoint{}, errAlreadyReported
 	}
 	if err != nil {
@@ -95,7 +98,7 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 	if err != nil {
 		projectStore.Close()
 		if errors.Is(err, store.ErrNoCheckpoint) {
-			err = withHint(err, fmt.Sprintf("Run %s to see the checkpoints.", env.stderr().Bold(projectCommand(parsed, "undo list"))))
+			err = withHint(err, fmt.Sprintf("Run %s to see the checkpoints.", env.stderr().Bold(projectCommand(env, parsed, "undo list"))))
 		}
 		return nil, store.Checkpoint{}, err
 	}
@@ -109,12 +112,12 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint store.Checkpoint, isLatest bool) error {
 	out := env.stdout()
 	if !parsed.isConfirmed && !isTerminal(env.Stdin) {
-		command := "undo"
+		commandLine := "undo"
 		if !isLatest {
-			command = "undo to " + strconv.Itoa(checkpoint.ID)
+			commandLine = "undo to " + strconv.Itoa(checkpoint.ID)
 		}
 		return withHint(errNeedsTerminal,
-			fmt.Sprintf("Run %s to restore without asking.", env.stderr().Bold(projectCommand(parsed, command+" --yes"))))
+			fmt.Sprintf("Run %s to restore without asking.", env.stderr().Bold(projectCommand(env, parsed, commandLine+" --yes"))))
 	}
 	printCheckpointHeading(out, checkpoint, projectStore.Root())
 	changes, err := restore.Plan(projectStore, checkpoint.ID)
@@ -125,7 +128,7 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 	if count == 0 {
 		out.Successf("Nothing to restore: the project already matches checkpoint %d.", checkpoint.ID)
 		if isLatest {
-			out.Printf("Run %s to pick an earlier checkpoint, then %s.\n", out.Bold(projectCommand(parsed, "undo list")), out.Bold("undo to <id>"))
+			out.Printf("Run %s to pick an earlier checkpoint, then %s.\n", out.Bold(projectCommand(env, parsed, "undo list")), out.Bold("undo to <id>"))
 		}
 		return nil
 	}
@@ -134,6 +137,8 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 		out.Println("Nothing restored.")
 		return errDeclined
 	}
+	_, statErr := os.Stat(projectStore.Root())
+	wasDeleted := errors.Is(statErr, fs.ErrNotExist)
 	applied, err := restore.Apply(projectStore, checkpoint.ID, env.checkpointer())
 	if err != nil {
 		return err
@@ -141,17 +146,30 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 	if printNotRestored(out, applied) {
 		out.Println()
 	}
-	out.Successf("Restored %s. Run %s to put them back.", pluralize(restoredCount(applied), "path"), out.Bold(projectCommand(parsed, "undo")))
+	count = restoredCount(applied)
+	pronoun := "them"
+	if count == 1 {
+		pronoun = "it"
+	}
+	out.Successf("Restored %s. Run %s to put %s back.", pluralize(count, "path"), out.Bold(projectCommand(env, parsed, "undo")), pronoun)
+	if wasDeleted {
+		out.Println("Checkpoints leave out excluded folders, such as node_modules/; reinstall them.")
+	}
 	return nil
 }
 
-// projectCommand returns command with the --project flag the user gave, so
-// a suggested command acts on the same project.
-func projectCommand(parsed flags, command string) string {
+// projectCommand returns commandLine with the --project flag the user gave,
+// so a suggested command acts on the same project. The path is shown short,
+// with ~, when that needs no quoting.
+func projectCommand(env Env, parsed flags, commandLine string) string {
 	if parsed.project == "" {
-		return command
+		return commandLine
 	}
-	return command + " --project " + shell.Join([]string{parsed.project})
+	project := parsed.project
+	if !filepath.IsAbs(project) {
+		project = filepath.Join(env.Dir, project)
+	}
+	return commandLine + " --project " + shellPath(project)
 }
 
 // isTerminal reports whether in is a terminal a person can answer from.
@@ -188,8 +206,7 @@ type changeRow struct {
 	path   string
 	detail string
 	count  int
-	// color colors the action.
-	color func(string) string
+	color  func(string) string
 }
 
 // maxPathColumnWidth keeps one long path from pushing every detail far to
@@ -219,7 +236,7 @@ func keepReasons() map[restore.KeepReason]string {
 	return map[restore.KeepReason]string{
 		restore.KeptUnreadable: "undo cannot read it; fix its permissions and run undo again",
 		restore.KeptLocked:     "it or its folder is locked; unlock it and run undo again",
-		restore.KeptExcluded:   "excluded since the checkpoint; remove the rule from " + ".undoignore to restore it",
+		restore.KeptExcluded:   "excluded since the checkpoint; remove the rule from " + exclude.IgnoreFile + " to restore it",
 		restore.KeptOccupied:   "it holds files undo leaves alone, such as excluded ones",
 	}
 }
@@ -230,7 +247,7 @@ func printNotRestored(out *terminal.Writer, applied restore.Changes) bool {
 	rows := make([]changeRow, 0, len(applied.Kept)+len(applied.Lost)+len(applied.Unstable)+len(applied.Skipped))
 	reasons := keepReasons()
 	for _, rel := range applied.Kept {
-		rows = append(rows, changeRow{action: "kept", path: displayRel(rel, false), detail: reasons[applied.KeepReasons[rel]], color: out.Yellow})
+		rows = append(rows, changeRow{action: "kept", path: displayRel(rel, applied.Dirs[rel]), detail: reasons[applied.KeepReasons[rel]], color: out.Yellow})
 	}
 	rows = append(rows, reasonRows("lost", applied.Lost, "its saved copy is gone, as after a power cut", out.Red)...)
 	rows = append(rows, reasonRows("check", applied.Unstable, "it was changing while it was saved", out.Yellow)...)
@@ -249,24 +266,21 @@ func reasonRows(action string, paths []string, reason string, color func(string)
 
 // printChanges lists the changes and returns how many it listed.
 func printChanges(out *terminal.Writer, changes restore.Changes) int {
-	rows := slices.Concat(
-		withColor(groupedRows("restore", changes.Written, changes.Dirs), out.Green),
-		withColor(groupedRows("remove", changes.Removed, changes.Dirs), out.Red),
-	)
+	written, removed := changeRows(changes.Written, changes.Removed, changes.Dirs)
+	rows := slices.Concat(withColor(written, "restore", out.Green), withColor(removed, "remove", out.Red))
 	printRows(out, rows)
 	return rowsCount(rows)
 }
 
 // restoredCount returns how many of the listed changes the restore made.
 func restoredCount(applied restore.Changes) int {
-	notWritten := slices.Concat(applied.Lost, applied.Skipped)
-	written := slices.DeleteFunc(slices.Clone(applied.Written), func(rel string) bool { return slices.Contains(notWritten, rel) })
-	return rowsCount(groupedRows("", written, applied.Dirs)) + rowsCount(groupedRows("", applied.Removed, applied.Dirs))
+	written, removed := changeRows(applied.RestoredPaths(), applied.Removed, applied.Dirs)
+	return rowsCount(written) + rowsCount(removed)
 }
 
-func withColor(rows []changeRow, color func(string) string) []changeRow {
+func withColor(rows []changeRow, action string, color func(string) string) []changeRow {
 	for i := range rows {
-		rows[i].color = color
+		rows[i].action, rows[i].color = action, color
 	}
 	return rows
 }
@@ -279,16 +293,31 @@ func rowsCount(rows []changeRow) int {
 	return total
 }
 
-// groupedRows returns one row for each top-level path. A folder with changes
-// inside it is shown as one row with the number of those changes, which
-// counts the folder itself only when nothing inside it changed.
-func groupedRows(action string, paths []string, dirs map[string]bool) []changeRow {
+// changeRows returns the rows for the written and the removed paths. A folder
+// with changes inside it, written or removed, stands for those changes
+// rather than counting as one itself, so no folder shows under two actions.
+func changeRows(written, removed []string, dirs map[string]bool) (writtenRows, removedRows []changeRow) {
+	holdsChanges := map[string]bool{}
+	for _, rel := range slices.Concat(written, removed) {
+		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
+			holdsChanges[dir] = true
+		}
+	}
+	isShown := func(rel string) bool { return rel != "." && (!dirs[rel] || !holdsChanges[rel]) }
+	return groupedRows(filter(written, isShown), dirs), groupedRows(filter(removed, isShown), dirs)
+}
+
+func filter(paths []string, isKept func(string) bool) []string {
+	return slices.DeleteFunc(slices.Clone(paths), func(rel string) bool { return !isKept(rel) })
+}
+
+// groupedRows returns one row for each top-level name: the path itself when
+// it is the only one under that name, and otherwise the folder with the
+// number of paths in it.
+func groupedRows(paths []string, dirs map[string]bool) []changeRow {
 	var order []string
 	groups := map[string][]string{}
 	for _, rel := range paths {
-		if rel == "." {
-			continue
-		}
 		top, _, _ := strings.Cut(rel, "/")
 		if _, ok := groups[top]; !ok {
 			order = append(order, top)
@@ -297,15 +326,12 @@ func groupedRows(action string, paths []string, dirs map[string]bool) []changeRo
 	}
 	rows := make([]changeRow, 0, len(order))
 	for _, top := range order {
-		inside := slices.DeleteFunc(groups[top], func(rel string) bool { return rel == top })
-		switch {
-		case len(inside) == 0:
-			rows = append(rows, changeRow{action: action, path: displayRel(top, dirs[top]), count: 1})
-		case len(inside) == 1 && !dirs[top] && len(groups[top]) == 1:
-			rows = append(rows, changeRow{action: action, path: displayRel(inside[0], dirs[inside[0]]), count: 1})
-		default:
-			rows = append(rows, changeRow{action: action, path: displayRel(top, true), detail: pluralize(len(inside), "path"), count: len(inside)})
+		members := groups[top]
+		if len(members) == 1 {
+			rows = append(rows, changeRow{path: displayRel(members[0], dirs[members[0]]), count: 1})
+			continue
 		}
+		rows = append(rows, changeRow{path: displayRel(top, true), detail: pluralize(len(members), "path"), count: len(members)})
 	}
 	return rows
 }

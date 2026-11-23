@@ -61,7 +61,6 @@ const (
 	green  = "\x1b[32m"
 	yellow = "\x1b[33m"
 	blue   = "\x1b[34m"
-	cyan   = "\x1b[36m"
 )
 
 // Width returns the terminal's width in columns, and 0 when the output is
@@ -82,9 +81,6 @@ func (w *Writer) Red(text string) string { return w.style(red, text) }
 
 // Yellow returns text in yellow.
 func (w *Writer) Yellow(text string) string { return w.style(yellow, text) }
-
-// Cyan returns text in cyan.
-func (w *Writer) Cyan(text string) string { return w.style(cyan, text) }
 
 // Printf writes formatted text as it is.
 func (w *Writer) Printf(format string, args ...any) {

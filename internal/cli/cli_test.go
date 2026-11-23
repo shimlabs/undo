@@ -177,7 +177,7 @@ func TestDiffGroupsDirectories(t *testing.T) {
 
 	_, out := run(t, root, "", "diff", "1")
 
-	if !strings.Contains(out, "restore  big/") || !strings.Contains(out, "32 paths") || !strings.Contains(out, "restore  f.txt\n") {
+	if !strings.Contains(out, "restore  big/") || !strings.Contains(out, "30 paths") || !strings.Contains(out, "restore  f.txt\n") {
 		t.Fatalf("output not grouped:\n%s", out)
 	}
 	if rows := strings.Count(out, "  restore  "); rows != 2 {
@@ -526,6 +526,14 @@ func TestNotProjectMessageNamesTheRefusedFolder(t *testing.T) {
 	root := newProject(t)
 	code, out := run(t, root, "", "status", "--project", home)
 	if code != 1 || !strings.Contains(out, "Error: ~ is your home folder, not a project.") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}
+
+func TestMissingProjectPathIsAnError(t *testing.T) {
+	root := newProject(t)
+	code, out := run(t, root, "", "list", "--project", "nope")
+	if code != 1 || !strings.Contains(out, "does not exist, and undo has no checkpoints of it.") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }

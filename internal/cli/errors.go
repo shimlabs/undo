@@ -61,6 +61,7 @@ var (
 	// can answer.
 	errNeedsTerminal           = errors.New("undo asks before it restores, and its input is not a terminal")
 	errProjectAndParentMissing = errors.New("does not exist, and neither does the folder it was in")
+	errNoSuchProject           = errors.New("does not exist, and undo has no checkpoints of it")
 )
 
 // userMessage returns err as a sentence for people: a path in it is shown
@@ -69,7 +70,11 @@ var (
 func userMessage(err error) string {
 	message := err.Error()
 	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
-		message = strings.Replace(message, pathErr.Error(), displayPath(pathErr.Path)+": "+pathErr.Err.Error(), 1)
+		shown := displayPath(pathErr.Path) + ": " + pathErr.Err.Error()
+		if pathErr.Op == "open" {
+			shown = "cannot open " + shown
+		}
+		message = strings.Replace(message, pathErr.Error(), shown, 1)
 	}
 	if linkErr, ok := errors.AsType[*os.LinkError](err); ok {
 		message = strings.Replace(message, linkErr.Error(), displayPath(linkErr.New)+": "+linkErr.Err.Error(), 1)

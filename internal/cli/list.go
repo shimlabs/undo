@@ -23,8 +23,7 @@ const newestShown = 20
 func listCommand(parsed flags, env Env) error {
 	projectStore, err := openStore(env, parsed)
 	if isMissingProject(err) {
-		printNoCheckpoints(env, parsed)
-		return nil
+		return printNoCheckpoints(env, parsed)
 	}
 	if err != nil {
 		return err
@@ -35,8 +34,7 @@ func listCommand(parsed flags, env Env) error {
 		return err
 	}
 	if len(checkpoints) == 0 {
-		printNoCheckpoints(env, parsed)
-		return nil
+		return printNoCheckpoints(env, parsed)
 	}
 	out := env.stdout()
 	older := 0
@@ -46,8 +44,14 @@ func listCommand(parsed flags, env Env) error {
 	}
 	printCheckpoints(out, checkpoints, projectStore.Root())
 	if older > 0 {
-		out.Println()
-		out.Printf("%s older. Run %s to see them.\n", pluralize(older, "checkpoint"), out.Bold(projectCommand(parsed, "undo list --all")))
+		// The note goes to stderr, so the last line of the output is still
+		// the newest checkpoint.
+		errOut := env.stderr()
+		verb := "are"
+		if older == 1 {
+			verb = "is"
+		}
+		errOut.Printf("%s %s not shown. Run %s to see them.\n", pluralize(older, "older checkpoint"), verb, errOut.Bold(projectCommand(env, parsed, "undo list --all")))
 	}
 	return nil
 }
@@ -64,20 +68,36 @@ func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root
 		ages[i] = timeAgo(checkpoint.Time)
 		ageWidth = max(ageWidth, len(ages[i]))
 	}
+	prefixWidth := 2 + idWidth + 2 + ageWidth + 2
 	for i, checkpoint := range checkpoints {
-		prefixWidth := 2 + idWidth + 2 + ageWidth + 2
-		text := displayLabel(checkpoint.Label)
-		if details := checkpointDetails(checkpoint, root); details != "" {
-			text += "  " + details
-		}
-		text = truncate(text, out.Width()-prefixWidth)
-		label, details, _ := strings.Cut(text, "  ")
+		label, details := fitRow(displayLabel(checkpoint.Label), checkpointDetails(checkpoint, root), out.Width()-prefixWidth)
 		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), label)
 		if details != "" {
 			line += "  " + out.Dim(details)
 		}
 		out.Println(line)
 	}
+}
+
+// minLabelWidth is the narrowest a label is cut to before its details are
+// dropped to make room.
+const minLabelWidth = 20
+
+// fitRow cuts label so that it and details fit in width characters. When
+// even that leaves the label too short, it drops the details instead. A
+// width of 0 or less leaves both whole.
+func fitRow(label, details string, width int) (string, string) {
+	if width <= 0 {
+		return label, details
+	}
+	room := width
+	if details != "" {
+		room = width - utf8.RuneCountInString(details) - 2
+	}
+	if details != "" && room < minLabelWidth {
+		return truncate(label, width), ""
+	}
+	return truncate(label, room), details
 }
 
 // checkpointDetails says where a checkpoint's command ran, when that was not
@@ -118,16 +138,21 @@ func isMissingProject(err error) bool {
 // to take one. When a deleted project directly inside the folder has some,
 // it says how to bring that back instead, since running undo in the parent
 // of a deleted folder is how people look for it.
-func printNoCheckpoints(env Env, parsed flags) {
+func printNoCheckpoints(env Env, parsed flags) error {
 	out := env.stdout()
 	if printDeletedProjects(env) {
-		return
+		return nil
 	}
 	root, err := projectRoot(env, parsed)
+	if err == nil && parsed.project != "" {
+		if _, statErr := os.Stat(root); errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("%s %w", displayPath(root), errNoSuchProject)
+		}
+	}
 	if errors.Is(err, project.ErrNotProject) {
 		out.Println(sentence(notProjectMessage(err)))
 		out.Printf("Run %s inside a project folder.\n", out.Bold("undo"))
-		return
+		return nil
 	}
 	if err != nil {
 		root = env.Dir
@@ -135,9 +160,10 @@ func printNoCheckpoints(env Env, parsed flags) {
 	out.Printf("No checkpoints yet in %s.\n", displayPath(root))
 	if installed, _ := agentHooks(); len(installed) == 0 {
 		out.Printf("Run %s to take one before every agent command, or %s to take one now.\n", out.Bold("undo install <agent>"), out.Bold("undo checkpoint"))
-		return
+		return nil
 	}
 	out.Printf("The next agent command takes one, or run %s to take one now.\n", out.Bold("undo checkpoint"))
+	return nil
 }
 
 // printDeletedProjects says how to bring back each deleted project directly
@@ -153,14 +179,14 @@ func printDeletedProjects(env Env) bool {
 	if err != nil {
 		return false
 	}
-	isAny := false
+	hasDeleted := false
 	for _, other := range stores {
 		if printDeletedProject(env.stdout(), other) {
-			isAny = true
+			hasDeleted = true
 		}
 		other.Close()
 	}
-	return isAny
+	return hasDeleted
 }
 
 // printDeletedProject says how to bring back the project of projectStore if

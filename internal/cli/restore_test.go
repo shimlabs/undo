@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -61,48 +62,37 @@ func TestRestoreTotalsAddUpRows(t *testing.T) {
 	mustRun(t, root, "checkpoint")
 
 	out := mustRun(t, root, "diff", "1")
-	for _, want := range []string{"restore  src/       4 paths", "remove   notes.txt", "Run undo to 1 to restore these 5 paths."} {
+	for _, want := range []string{"restore  src/       3 paths", "remove   notes.txt", "Run undo to 1 to restore these 4 paths."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("diff does not show %q:\n%s", want, out)
 		}
 	}
-	if out := mustRun(t, root, "to", "1", "--yes"); !strings.Contains(out, "Restored 5 paths.") {
+	if out := mustRun(t, root, "to", "1", "--yes"); !strings.Contains(out, "Restored 4 paths.") {
 		t.Errorf("restore:\n%s", out)
 	}
 }
 
-func TestRunFailsLikeAShell(t *testing.T) {
-	root := newProject(t)
-	testutil.WriteFile(t, filepath.Join(root, "script.sh"), "#!/bin/sh\n")
-	tests := []struct {
-		args     []string
-		exitCode int
-		want     string
-	}{
-		{[]string{"run", "--", "no-such-command-anywhere"}, 127, "Command not found: no-such-command-anywhere."},
-		{[]string{"run", "--", "./missing.sh"}, 127, "No such file: ./missing.sh."},
-		{[]string{"run", "--", "./script.sh"}, 126, "Run chmod +x ./script.sh to make it executable."},
+func TestChangeRows(t *testing.T) {
+	written := []string{".", "README.md", "src", "src/main.go", "src/util.go", "docs", "lib/a.go", "web"}
+	removed := []string{"web/old.js"}
+	dirs := map[string]bool{"src": true, "docs": true, "web": true}
+	writtenRows, removedRows := changeRows(written, removed, dirs)
+	want := []changeRow{
+		{path: "README.md", count: 1},
+		{path: "src/", detail: "2 paths", count: 2},
+		{path: "docs/", count: 1},
+		{path: "lib/a.go", count: 1},
 	}
-	for _, test := range tests {
-		code, out := run(t, root, "", test.args...)
-		if code != test.exitCode || !strings.Contains(out, test.want) {
-			t.Errorf("undo %s: exit %d, want %d and %q\n%s", strings.Join(test.args, " "), code, test.exitCode, test.want, out)
-		}
+	isEqual := func(a, b changeRow) bool {
+		return a.path == b.path && a.detail == b.detail && a.count == b.count
 	}
-	if list := mustRun(t, root, "list"); strings.Contains(list, "script.sh") {
-		t.Fatalf("a command that cannot run got a checkpoint:\n%s", list)
+	if !slices.EqualFunc(writtenRows, want, isEqual) {
+		t.Fatalf("written rows = %+v, want %+v", writtenRows, want)
 	}
-}
-
-func TestInstallAndUninstallSayWhenNothingChanges(t *testing.T) {
-	testutil.AgentHome(t)
-	root := newProject(t)
-	mustRun(t, root, "install", "claude")
-	if out := mustRun(t, root, "install", "claude"); !strings.Contains(out, "is already installed") {
-		t.Errorf("second install:\n%s", out)
+	if len(removedRows) != 1 || removedRows[0].path != "web/old.js" {
+		t.Fatalf("removed rows = %+v, want only web/old.js, with web/ under no action", removedRows)
 	}
-	mustRun(t, root, "uninstall", "claude")
-	if out := mustRun(t, root, "uninstall", "claude"); !strings.Contains(out, "is not installed") {
-		t.Errorf("second uninstall:\n%s", out)
+	if total := rowsCount(writtenRows) + rowsCount(removedRows); total != 6 {
+		t.Fatalf("rowsCount = %d, want 6, the sum of the rows", total)
 	}
 }

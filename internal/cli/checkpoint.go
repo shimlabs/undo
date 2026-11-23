@@ -11,6 +11,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/terminal"
 )
 
 func checkpointCommand(parsed flags, env Env) error {
@@ -77,7 +78,7 @@ func checkRunnable(dir, name string) error {
 	}
 	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
 		return commandError{
-			err:      withHint(fmt.Errorf("%s %w", name, errNotExecutable), "Run chmod +x "+shell.Join([]string{name})+" to make it executable."),
+			err:      withHint(fmt.Errorf("%s %w", name, errNotExecutable), "Run chmod +x "+terminal.Printable(shell.Join([]string{name}))+" to make it executable."),
 			exitCode: 126,
 		}
 	}
