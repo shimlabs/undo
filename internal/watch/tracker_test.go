@@ -385,10 +385,7 @@ func TestTrackerSeesRenamesThatOnlyChangeUnicodeForm(t *testing.T) {
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
-func TestTrackerResumesWhereThePreviousOneStopped(t *testing.T) {
-	if !fsnotify.CanResume {
-		t.Skip("this system keeps no event history")
-	}
+func TestTrackerStartedAgainSeesChangesMadeWhileStopped(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "first")
 	projectTracker.Close()
@@ -398,15 +395,12 @@ func TestTrackerResumesWhereThePreviousOneStopped(t *testing.T) {
 	}
 	testutil.WriteFile(t, filepath.Join(root, "new", "file.txt"), "new")
 
-	resumed, err := newTracker(projectStore)
+	restarted, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(resumed.Close)
-	if resumed.shouldRescan {
-		t.Fatal("a tracker started after a clean stop rescans the whole project")
-	}
-	checkpoint := takeCheckpoint(t, resumed, "second")
+	t.Cleanup(restarted.Close)
+	checkpoint := takeCheckpoint(t, restarted, "second")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
@@ -592,15 +586,11 @@ func TestRestoreAfterEditThenCaseRenameOfParent(t *testing.T) {
 
 // The watcher is killed (no Close), scans take checkpoints, files change,
 // then a new watcher resumes.
-func TestTrackerResumesAfterKillAndScans(t *testing.T) {
-	if !fsnotify.CanResume {
-		t.Skip()
-	}
+func TestTrackerStartedAgainAfterKillAndScans(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "a")
 	takeCheckpoint(t, projectTracker, "2")
-	projectTracker.SaveState()
 	projectTracker.stream.Close()
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "b")
 	testutil.WriteFile(t, filepath.Join(root, "docs", "x.md"), "x")
@@ -616,35 +606,29 @@ func TestTrackerResumesAfterKillAndScans(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "back")
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "changed after scans")
 
-	resumed, err := newTracker(projectStore)
+	restarted, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(resumed.Close)
-	if resumed.shouldRescan {
-		t.Fatal("expected resume")
-	}
-	checkpoint := takeCheckpoint(t, resumed, "5")
+	t.Cleanup(restarted.Close)
+	checkpoint := takeCheckpoint(t, restarted, "5")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
 // A rules change made while no watcher ran.
-func TestTrackerResumesAfterRulesChange(t *testing.T) {
-	if !fsnotify.CanResume {
-		t.Skip()
-	}
+func TestTrackerStartedAgainAfterRulesChange(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
 	projectTracker.Close()
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "docs/\n")
 	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "edited")
 
-	resumed, err := newTracker(projectStore)
+	restarted, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(resumed.Close)
-	checkpoint := takeCheckpoint(t, resumed, "2")
+	t.Cleanup(restarted.Close)
+	checkpoint := takeCheckpoint(t, restarted, "2")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
@@ -685,10 +669,10 @@ func TestRestoreOfDirectoryReadableAgain(t *testing.T) {
 }
 
 // An unreadable directory, then a watcher restart that resumes events.
-// The resumed tracker must still know the directory was never saved.
-func TestTrackerKeepsUnreadableDirectoryAcrossResume(t *testing.T) {
-	if os.Getuid() == 0 || !fsnotify.CanResume {
-		t.Skip()
+// The restarted tracker must still know the directory was never saved.
+func TestTrackerKeepsUnreadableDirectoryAcrossRestart(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can read any directory")
 	}
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
@@ -702,18 +686,18 @@ func TestTrackerKeepsUnreadableDirectoryAcrossResume(t *testing.T) {
 	projectTracker.mu.Unlock()
 	takeCheckpoint(t, projectTracker, "2 rescan")
 	projectTracker.Close()
-	resumed, err := newTracker(projectStore)
+	restarted, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(resumed.Close)
+	t.Cleanup(restarted.Close)
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "edit")
-	third := takeCheckpoint(t, resumed, "3")
+	third := takeCheckpoint(t, restarted, "3")
 	if err := os.Chmod(locked, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	takeCheckpoint(t, resumed, "4")
-	changes, err := restore.Apply(projectStore, third.ID, checkpointThroughTracker(resumed))
+	takeCheckpoint(t, restarted, "4")
+	changes, err := restore.Apply(projectStore, third.ID, checkpointThroughTracker(restarted))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -835,16 +819,16 @@ func TestRestoreNeverDeletesFileWhoseCopyWasLostAndMerged(t *testing.T) {
 	takeCheckpoint(t, projectTracker, "1")
 	loseNewestCopyAndPrune(t, projectTracker, projectStore, root)
 	projectTracker.Close()
-	resumed, err := newTracker(projectStore)
+	restarted, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(resumed.Close)
+	t.Cleanup(restarted.Close)
 	latest, _, err := projectStore.Latest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := restore.Apply(projectStore, latest.ID, checkpointThroughTracker(resumed)); err != nil {
+	if _, err := restore.Apply(projectStore, latest.ID, checkpointThroughTracker(restarted)); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "docs", "guide.md"))
@@ -901,12 +885,12 @@ func TestTrackerResumesAfterProjectRecreated(t *testing.T) {
 	}
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# other project")
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package other")
-	resumed, err := newTracker(projectStore)
+	restarted, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(resumed.Close)
-	third := takeCheckpoint(t, resumed, "3")
+	t.Cleanup(restarted.Close)
+	third := takeCheckpoint(t, restarted, "3")
 	checkMatchesScan(t, projectStore, root, third.ID)
 }
 
@@ -924,12 +908,12 @@ func TestTrackerResumesAfterDirectorySwapped(t *testing.T) {
 	if err := os.Rename(outside, filepath.Join(root, "docs")); err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := newTracker(projectStore)
+	restarted, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(resumed.Close)
-	second := takeCheckpoint(t, resumed, "2")
+	t.Cleanup(restarted.Close)
+	second := takeCheckpoint(t, restarted, "2")
 	checkMatchesScan(t, projectStore, root, second.ID)
 }
 

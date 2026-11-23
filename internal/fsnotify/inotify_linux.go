@@ -42,25 +42,13 @@ type Stream struct {
 	hasUnwatchedDirs bool
 }
 
-// CanResume reports whether a stream can start from an earlier EventID.
-// inotify keeps no history.
-const CanResume = false
-
-// EventStoreID returns an error: inotify keeps no history to resume from.
-func EventStoreID(string) (string, error) {
-	return "", errors.ErrUnsupported
-}
-
 // NewStream watches the directories in paths and everything below them, except
 // directories for which shouldSkip returns true, and calls onEvents on a
 // background goroutine with each batch of changes. inotify needs a watch per
 // directory, so new directories are watched as they appear, and the paths
 // already inside them are reported, since they may have been created before
-// the watch. inotify keeps no history, so since must be SinceNow.
-func NewStream(paths []string, since EventID, shouldSkip func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
-	if since != SinceNow {
-		return nil, errors.ErrUnsupported
-	}
+// the watch.
+func NewStream(paths []string, shouldSkip func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		return nil, err

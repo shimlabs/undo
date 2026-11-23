@@ -52,14 +52,3 @@ func (s *Store) WatcherFailure() (reason string, failedAt time.Time, err error) 
 func (s *Store) SaveWatcherFailure(reason string) error {
 	return s.writeFileAtomic(filepath.Join(s.dir, watcherFailureFile), []byte(reason))
 }
-
-// WatcherPosition returns where a new watcher can resume the filesystem
-// events, as the last watcher saved it.
-func (s *Store) WatcherPosition() ([]byte, error) {
-	return s.readFile(filepath.Join(s.dir, watcherPositionFile))
-}
-
-// SaveWatcherPosition records where a new watcher can resume.
-func (s *Store) SaveWatcherPosition(position []byte) error {
-	return s.writeFileAtomic(filepath.Join(s.dir, watcherPositionFile), position)
-}

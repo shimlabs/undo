@@ -50,10 +50,7 @@ type tracker struct {
 	dirty          map[string]bool
 	shouldRescan   bool
 	hasRulesChange bool
-	markers        map[string]chan fsnotify.EventID
-	// historyDone is closed once a resumed stream has delivered the changes
-	// made before it started.
-	historyDone chan struct{}
+	markers        map[string]chan struct{}
 
 	// The fields below belong to the server goroutine, which handles one
 	// request at a time.
@@ -68,19 +65,16 @@ type tracker struct {
 	// checkpoint checks them.
 	hardLinked map[string]bool
 	lastID     int
-	// position is where a new tracker can resume the events, as of the last
-	// checkpoint whose marker arrived.
-	position streamPosition
 }
 
 // errStreamStopped means the tracker no longer watches the project, so the
 // server has to stop and let clients scan instead.
 var errStreamStopped = errors.New("watching stopped")
 
-// newTracker starts watching the project in projectStore. Where the system
-// keeps an event history, it resumes after the previous tracker's last
-// checkpoint. Otherwise its first checkpoint compares the whole project,
-// because changes made before it started are not known.
+// newTracker starts watching the project in projectStore. Its first
+// checkpoint compares the whole project, because changes made before it
+// started are not known. Replaying the system's event history instead can
+// miss the latest changes, which the history may not hold yet.
 func newTracker(projectStore *store.Store) (*tracker, error) {
 	markerDir, err := projectStore.MarkerDir()
 	if err != nil {
@@ -98,14 +92,9 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 		markerPrefix: rand.Text()[:8],
 		dirty:        map[string]bool{},
 		shouldRescan: true,
-		markers:      map[string]chan fsnotify.EventID{},
-		historyDone:  make(chan struct{}),
+		markers:      map[string]chan struct{}{},
 	}
-	since := t.resume()
-	if since == fsnotify.SinceNow {
-		close(t.historyDone)
-	}
-	if err := t.startStream(since); err != nil {
+	if err := t.startStream(); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -118,24 +107,13 @@ func (t *tracker) Close() {
 	t.closeOnce.Do(func() {
 		t.stream.Close()
 		t.saveListing()
-		t.savePosition()
 	})
-}
-
-// SaveState saves where a new tracker can resume, and the listing when the
-// saved one is far behind. The server calls it when it goes quiet, so a
-// watcher that is killed still leaves a recent position.
-func (t *tracker) SaveState() {
-	if t.store.IsListingBehind(t.lastID) {
-		t.saveListing()
-	}
-	t.savePosition()
 }
 
 // Checkpoint records the project's current state. Before that, it waits until
 // every change made before the call has been delivered.
 func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint, error) {
-	markerID, isDelivered := t.waitForMarker()
+	isDelivered := t.waitForMarker()
 	t.mu.Lock()
 	dirty, shouldRescan, hasRulesChange := t.dirty, t.shouldRescan || !isDelivered, t.hasRulesChange
 	t.dirty, t.shouldRescan, t.hasRulesChange = map[string]bool{}, false, false
@@ -145,7 +123,7 @@ func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint,
 		// Paths the old rules excluded were never tracked, and a restore would
 		// treat them as created after the checkpoint.
 		t.stream.Close()
-		if err := t.startStream(fsnotify.SinceNow); err != nil {
+		if err := t.startStream(); err != nil {
 			return store.Checkpoint{}, fmt.Errorf("%w: %w", errStreamStopped, err)
 		}
 		shouldRescan = true
@@ -158,22 +136,28 @@ func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint,
 		t.listing = nil
 		return checkpoint, err
 	}
-	if isDelivered {
-		t.position = streamPosition{CheckpointID: checkpoint.ID, EventID: uint64(markerID)}
-	}
 	return checkpoint, nil
+}
+
+// saveListingIfBehind saves the listing when the saved one is far behind. The
+// server calls it when it goes quiet, so a watcher that is killed still
+// leaves a recent listing.
+func (t *tracker) saveListingIfBehind() {
+	if t.store.IsListingBehind(t.lastID) {
+		t.saveListing()
+	}
 }
 
 // startStream reads the exclude rules and starts watching with them. On Linux
 // the stream does not watch excluded directories, so it has to start over
 // when the rules change.
-func (t *tracker) startStream(since fsnotify.EventID) error {
+func (t *tracker) startStream() error {
 	matcher, err := exclude.New(t.root)
 	if err != nil {
 		return err
 	}
 	previous := t.matcher.Swap(matcher)
-	stream, err := fsnotify.NewStream([]string{t.root, t.markerDir}, since, t.shouldSkip, t.handleEvents)
+	stream, err := fsnotify.NewStream([]string{t.root, t.markerDir}, t.shouldSkip, t.handleEvents)
 	if err != nil {
 		t.matcher.Store(previous)
 		return err
@@ -227,12 +211,8 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 	matcher := t.matcher.Load()
 	isExcludedDir := map[string]bool{}
 	for _, event := range events {
-		if event.IsHistoryDone {
-			t.closeHistoryDone()
-			continue
-		}
 		if done, ok := t.markers[event.Path]; ok {
-			done <- event.ID
+			done <- struct{}{}
 			delete(t.markers, event.Path)
 			continue
 		}
@@ -261,16 +241,6 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 		if t.isInRoot(parent) {
 			markDirty(t.dirty, parent)
 		}
-	}
-}
-
-// closeHistoryDone marks the replayed history as delivered. The caller holds
-// t.mu.
-func (t *tracker) closeHistoryDone() {
-	select {
-	case <-t.historyDone:
-	default:
-		close(t.historyDone)
 	}
 }
 
@@ -429,22 +399,10 @@ func (t *tracker) isReadableOrGone(rel string) bool {
 // waitForMarker writes a file next to the store and waits for its event.
 // Events arrive in order, so once this one arrives, every earlier change has
 // arrived too.
-func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
-	// A resumed stream can deliver the marker before the earlier changes.
-	select {
-	case <-t.historyDone:
-	case <-time.After(markerTimeout):
-		// Waiting again on every checkpoint would make each one slow. This
-		// checkpoint compares the whole project instead, and later replayed
-		// events only mark paths to check again.
-		t.mu.Lock()
-		t.closeHistoryDone()
-		t.mu.Unlock()
-		return 0, false
-	}
+func (t *tracker) waitForMarker() bool {
 	markerName := fmt.Sprintf("%s-%d-%d", t.markerPrefix, os.Getpid(), t.sequence.Add(1))
 	markerPath := filepath.Join(t.markerDir, markerName)
-	done := make(chan fsnotify.EventID, 1)
+	done := make(chan struct{}, 1)
 	t.mu.Lock()
 	t.markers[markerPath] = done
 	t.mu.Unlock()
@@ -452,16 +410,16 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 	defer func() { _ = t.store.RemoveMarker(markerName) }()
 
 	if err := t.store.WriteMarker(markerName); err != nil {
-		return 0, false
+		return false
 	}
 	select {
-	case id := <-done:
-		return id, true
+	case <-done:
+		return true
 	case <-time.After(markerTimeout):
 		t.mu.Lock()
 		delete(t.markers, markerPath)
 		t.mu.Unlock()
-		return 0, false
+		return false
 	}
 }
 
