@@ -312,8 +312,18 @@ func TestLatestIgnoresLineCutOffByCrash(t *testing.T) {
 	if err != nil || !ok || latest.ID != first.ID {
 		t.Fatalf("Latest = %+v, %v, %v; want checkpoint %d", latest, ok, err, first.ID)
 	}
-	if list, err := projectStore.List(); err != nil || len(list) != 1 {
-		t.Fatalf("List = %v, %v", list, err)
+	if checkpoints, err := projectStore.List(); err != nil || len(checkpoints) != 1 {
+		t.Fatalf("List = %v, %v", checkpoints, err)
+	}
+
+	for _, label := range []string{"second", "third"} {
+		if _, err := projectStore.Take(CheckpointOptions{Label: label, Dir: root}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkpoints, err := projectStore.List()
+	if err != nil || len(checkpoints) != 3 || checkpoints[2].ID != 3 {
+		t.Fatalf("List after two more checkpoints = %v, %v", checkpoints, err)
 	}
 }
 

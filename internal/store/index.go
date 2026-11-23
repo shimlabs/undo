@@ -92,23 +92,49 @@ func parseIndex(data []byte) ([]Checkpoint, error) {
 	return checkpoints, nil
 }
 
+// appendIndex adds checkpoint to the index. A line cut off by a crash is
+// removed first, so the new line does not join it.
 func (s *Store) appendIndex(checkpoint Checkpoint) error {
 	line, err := json.Marshal(checkpoint)
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(s.indexPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(s.indexPath(), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
-	_, err = file.Write(append(line, '\n'))
+	end, err := completeLinesEnd(file)
+	if err == nil {
+		err = file.Truncate(end)
+	}
+	if err == nil {
+		_, err = file.WriteAt(append(line, '\n'), end)
+	}
 	if err == nil {
 		err = atomicfile.Sync(file)
 	}
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
+	return errors.Join(err, file.Close())
+}
+
+// completeLinesEnd returns the size of index file without a last line that
+// has no newline.
+func completeLinesEnd(file *os.File) (int64, error) {
+	info, err := file.Stat()
+	if err != nil || info.Size() == 0 {
+		return 0, err
 	}
-	return err
+	last := make([]byte, 1)
+	if _, err := file.ReadAt(last, info.Size()-1); err != nil {
+		return 0, err
+	}
+	if last[0] == '\n' {
+		return info.Size(), nil
+	}
+	data := make([]byte, info.Size())
+	if _, err := file.ReadAt(data, 0); err != nil {
+		return 0, err
+	}
+	return int64(bytes.LastIndexByte(data, '\n') + 1), nil
 }
 
 func (s *Store) writeIndex(checkpoints []Checkpoint) error {
