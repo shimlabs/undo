@@ -5,14 +5,16 @@ package fsnotify
 #include <CoreServices/CoreServices.h>
 #include <dispatch/dispatch.h>
 
-extern void undoStreamEvents(uintptr_t handle, size_t count, char **paths, FSEventStreamEventFlags *flags);
+extern void undoStreamEvents(uintptr_t handle, size_t count, char **paths, FSEventStreamEventFlags *flags,
+                             FSEventStreamEventId *ids);
 
 static void undoStreamCallback(ConstFSEventStreamRef stream, void *info, size_t count, void *paths,
                                const FSEventStreamEventFlags flags[], const FSEventStreamEventId ids[]) {
-	undoStreamEvents((uintptr_t)info, count, (char **)paths, (FSEventStreamEventFlags *)flags);
+	undoStreamEvents((uintptr_t)info, count, (char **)paths, (FSEventStreamEventFlags *)flags,
+	                 (FSEventStreamEventId *)ids);
 }
 
-static FSEventStreamRef undoStreamCreate(uintptr_t handle, char **paths, int count) {
+static FSEventStreamRef undoStreamCreate(uintptr_t handle, char **paths, int count, FSEventStreamEventId since) {
 	CFMutableArrayRef roots = CFArrayCreateMutable(NULL, count, &kCFTypeArrayCallBacks);
 	for (int i = 0; i < count; i++) {
 		CFStringRef root = CFStringCreateWithCString(NULL, paths[i], kCFStringEncodingUTF8);
@@ -21,10 +23,24 @@ static FSEventStreamRef undoStreamCreate(uintptr_t handle, char **paths, int cou
 	}
 	FSEventStreamContext context = {0, (void *)handle, NULL, NULL, NULL};
 	FSEventStreamRef stream = FSEventStreamCreate(NULL, undoStreamCallback, &context, roots,
-		kFSEventStreamEventIdSinceNow, 0.0,
+		since == 0 ? kFSEventStreamEventIdSinceNow : since, 0.0,
 		kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagWatchRoot);
 	CFRelease(roots);
 	return stream;
+}
+
+// undoEventStoreID writes the UUID of the FSEvents history of the volume
+// that holds dev. A volume whose history was reset gets a new one.
+static int undoEventStoreID(dev_t dev, char *buffer, CFIndex size) {
+	CFUUIDRef uuid = FSEventsCopyUUIDForDevice(dev);
+	if (uuid == NULL) {
+		return -1;
+	}
+	CFStringRef text = CFUUIDCreateString(NULL, uuid);
+	CFRelease(uuid);
+	Boolean isConverted = CFStringGetCString(text, buffer, size, kCFStringEncodingUTF8);
+	CFRelease(text);
+	return isConverted ? 0 : -1;
 }
 
 static dispatch_queue_t undoQueueCreate(void) {
@@ -53,15 +69,21 @@ import "C"
 
 import (
 	"errors"
+	"os"
 	"runtime/cgo"
 	"sync"
+	"syscall"
 	"unsafe"
 )
 
 const rescanFlags = C.kFSEventStreamEventFlagMustScanSubDirs |
 	C.kFSEventStreamEventFlagUserDropped |
 	C.kFSEventStreamEventFlagKernelDropped |
-	C.kFSEventStreamEventFlagRootChanged
+	C.kFSEventStreamEventFlagRootChanged |
+	C.kFSEventStreamEventFlagEventIdsWrapped
+
+// CanResume reports whether a stream can start from an earlier EventID.
+const CanResume = true
 
 // Stream delivers FSEvents for a set of directories.
 type Stream struct {
@@ -72,17 +94,18 @@ type Stream struct {
 }
 
 // NewStream watches the directories in paths and calls onEvents on a
-// background thread with each batch of changes. FSEvents watches whole trees,
-// so the second argument, which tells the Linux stream what not to watch, is
-// not used.
-func NewStream(paths []string, _ func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
+// background thread with each batch of changes. With since other than
+// SinceNow, it first delivers the changes made after event since, as long
+// as the volume's history has them. FSEvents watches whole trees, so
+// shouldSkip, which tells the Linux stream what not to watch, is not used.
+func NewStream(paths []string, since EventID, _ func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
 	cPaths := make([]*C.char, len(paths))
 	for i, path := range paths {
 		cPaths[i] = C.CString(path)
 		defer C.free(unsafe.Pointer(cPaths[i]))
 	}
 	handle := cgo.NewHandle(onEvents)
-	ref := C.undoStreamCreate(C.uintptr_t(handle), &cPaths[0], C.int(len(cPaths)))
+	ref := C.undoStreamCreate(C.uintptr_t(handle), &cPaths[0], C.int(len(cPaths)), C.FSEventStreamEventId(since))
 	if ref == nil {
 		handle.Delete()
 		return nil, errors.New("FSEventStreamCreate failed")
@@ -104,14 +127,39 @@ func (s *Stream) Close() {
 	})
 }
 
+// EventStoreID identifies the FSEvents history of the volume that holds
+// path. Event IDs from one history mean nothing in another, so a stream can
+// only resume while it is the same.
+func EventStoreID(path string) (string, error) {
+	var stat syscall.Stat_t
+	if err := syscall.Stat(path, &stat); err != nil {
+		return "", &os.PathError{Op: "stat", Path: path, Err: err}
+	}
+	var buffer [64]C.char
+	if C.undoEventStoreID(C.dev_t(stat.Dev), &buffer[0], C.CFIndex(len(buffer))) != 0 {
+		return "", errors.New("FSEventsCopyUUIDForDevice failed")
+	}
+	return C.GoString(&buffer[0]), nil
+}
+
 //export undoStreamEvents
-func undoStreamEvents(handle C.uintptr_t, count C.size_t, paths **C.char, flags *C.FSEventStreamEventFlags) {
+func undoStreamEvents(handle C.uintptr_t, count C.size_t, paths **C.char, flags *C.FSEventStreamEventFlags,
+	ids *C.FSEventStreamEventId) {
 	onEvents := cgo.Handle(handle).Value().(func([]Event))
 	pathList := unsafe.Slice(paths, count)
 	flagList := unsafe.Slice(flags, count)
-	events := make([]Event, count)
-	for i := range events {
-		events[i] = Event{Path: C.GoString(pathList[i]), ShouldRescan: flagList[i]&rescanFlags != 0}
+	idList := unsafe.Slice(ids, count)
+	events := make([]Event, 0, count)
+	for i := range count {
+		if flagList[i]&C.kFSEventStreamEventFlagHistoryDone != 0 {
+			events = append(events, Event{ID: EventID(idList[i]), IsHistoryDone: true})
+			continue
+		}
+		events = append(events, Event{
+			Path:         C.GoString(pathList[i]),
+			ID:           EventID(idList[i]),
+			ShouldRescan: flagList[i]&rescanFlags != 0,
+		})
 	}
 	onEvents(events)
 }

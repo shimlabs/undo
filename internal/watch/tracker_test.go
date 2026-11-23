@@ -344,3 +344,26 @@ func TestTrackerSeesRenamesThatOnlyChangeUnicodeForm(t *testing.T) {
 	checkpoint := takeCheckpoint(t, tracker, "renamed")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
+
+func TestTrackerResumesWhereThePreviousOneStopped(t *testing.T) {
+	if !fsnotify.CanResume {
+		t.Skip("this system keeps no event history")
+	}
+	tracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, tracker, "first")
+	tracker.Close()
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# edited while no watcher ran")
+	os.RemoveAll(filepath.Join(root, "src"))
+	testutil.WriteFile(t, filepath.Join(root, "new", "file.txt"), "new")
+
+	resumed, err := newTracker(projectStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(resumed.Close)
+	if resumed.shouldRescan {
+		t.Fatal("a tracker started after a clean stop rescans the whole project")
+	}
+	checkpoint := takeCheckpoint(t, resumed, "second")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}

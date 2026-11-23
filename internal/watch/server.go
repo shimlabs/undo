@@ -173,7 +173,7 @@ func (s *server) acceptLoop() error {
 				return nil
 			}
 			isPruneDue = false
-			s.tracker.SaveListingIfBehind()
+			s.tracker.SaveState()
 			s.pruner.request()
 			// The listing and the last checkpoint's buffers are garbage now,
 			// and the server may stay idle for a long time.

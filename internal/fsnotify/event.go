@@ -4,9 +4,21 @@ package fsnotify
 
 import "errors"
 
+// EventID orders the events of a volume. Only FSEvents has them, and a
+// stream can resume after the last one it delivered.
+type EventID uint64
+
+// SinceNow starts a stream with the changes made from now on.
+const SinceNow EventID = 0
+
 // Event is a filesystem change reported by the operating system.
 type Event struct {
 	Path string
+	// ID is the event's FSEvents ID. It is 0 on Linux.
+	ID EventID
+	// IsHistoryDone marks the end of the earlier changes a resumed stream
+	// delivers. Events after it are new, and may arrive before it.
+	IsHistoryDone bool
 	// ShouldRescan is set when the system lost track of changes under Path or
 	// dropped events. Everything under Path has to be compared in full.
 	ShouldRescan bool

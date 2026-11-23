@@ -8,20 +8,21 @@ import (
 // The store's folder holds these files. Changing any of them needs a new
 // format.
 const (
-	configFile         = "config.json"
-	indexFile          = "index.jsonl"
-	lockFile           = "lock"
-	mergeFile          = "merge.json"
-	logFile            = "errors.log"
-	pruneMarkerFile    = "last-prune"
-	baseListingFile    = "base.gob"
-	listingFile        = "listing.gob"
-	manifestFile       = "manifest.json"
-	restoreFile        = "restored.gob"
-	baseDirName        = "base"
-	layersDirName      = "layers"
-	markersDirName     = "markers"
-	watcherFailureFile = "watcher-failure"
+	configFile          = "config.json"
+	indexFile           = "index.jsonl"
+	lockFile            = "lock"
+	mergeFile           = "merge.json"
+	logFile             = "errors.log"
+	pruneMarkerFile     = "last-prune"
+	baseListingFile     = "base.gob"
+	listingFile         = "listing.gob"
+	manifestFile        = "manifest.json"
+	restoreFile         = "restored.gob"
+	baseDirName         = "base"
+	layersDirName       = "layers"
+	markersDirName      = "markers"
+	watcherFailureFile  = "watcher-failure"
+	watcherPositionFile = "watcher-position"
 )
 
 // MarkerDir is where the watcher writes the marker files it waits for.
@@ -33,6 +34,12 @@ func (s *Store) MarkerDir() string {
 // last failed to start.
 func (s *Store) WatcherFailurePath() string {
 	return filepath.Join(s.dir, watcherFailureFile)
+}
+
+// WatcherPositionPath is where the watcher records where a new watcher can
+// resume the filesystem events.
+func (s *Store) WatcherPositionPath() string {
+	return filepath.Join(s.dir, watcherPositionFile)
 }
 
 func (s *Store) configPath() string {

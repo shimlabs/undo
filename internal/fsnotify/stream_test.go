@@ -53,7 +53,7 @@ func (c *collector) waitFor(t *testing.T, marker string) []string {
 func startCollecting(t *testing.T, root string) *collector {
 	t.Helper()
 	var collected collector
-	stream, err := NewStream([]string{root}, nil, collected.add)
+	stream, err := NewStream([]string{root}, SinceNow, nil, collected.add)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestStreamDeliversDeletesBeforeLaterMarker(t *testing.T) {
 func TestStreamCloseWhileEventsArrive(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	for round := range 50 {
-		stream, err := NewStream([]string{root}, nil, func([]Event) {})
+		stream, err := NewStream([]string{root}, SinceNow, nil, func([]Event) {})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +127,7 @@ func TestStreamWatchesRecreatedRoot(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	markers, _ := filepath.EvalSymlinks(t.TempDir())
 	var collected collector
-	stream, err := NewStream([]string{root, markers}, nil, collected.add)
+	stream, err := NewStream([]string{root, markers}, SinceNow, nil, collected.add)
 	if err != nil {
 		t.Fatal(err)
 	}
