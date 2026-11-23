@@ -74,7 +74,7 @@ func Apply(projectStore *store.Store, id int, checkpoint store.Checkpointer) (Ch
 	if err != nil {
 		return Changes{}, err
 	}
-	isCovered, err := isCoveredBy(projectStore, safety.ID, plan.current)
+	isCovered, err := isCoveredBy(projectStore, safety.ID, plan.scanned)
 	if err != nil {
 		unlock()
 		return Changes{}, err
@@ -127,8 +127,11 @@ type restorePlan struct {
 	projectRoot *os.Root
 	root        string
 	target      map[string]store.Source
-	current     tree.Listing
-	changes     Changes
+	// current is the project as it is, less the paths the plan drops.
+	current tree.Listing
+	// scanned is the project as it is, with every path.
+	scanned tree.Listing
+	changes Changes
 	// unchanged holds the paths an earlier restore to the same checkpoint
 	// wrote and nothing changed since, so they still match the target.
 	unchanged tree.Listing
@@ -148,7 +151,7 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	if err != nil {
 		return restorePlan{}, err
 	}
-	plan := restorePlan{root: projectStore.Root(), target: inputs.target, current: inputs.current}
+	plan := restorePlan{root: projectStore.Root(), target: inputs.target, current: maps.Clone(inputs.current), scanned: inputs.current}
 	plan.planChanges(inputs)
 	return plan, nil
 }
