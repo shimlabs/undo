@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -174,6 +175,9 @@ func (s *server) acceptLoop() error {
 			isPruneDue = false
 			s.tracker.SaveListingIfBehind()
 			s.pruner.request()
+			// The listing and the last checkpoint's buffers are garbage now,
+			// and the server may stay idle for a long time.
+			debug.FreeOSMemory()
 			continue
 		}
 		if err != nil {
