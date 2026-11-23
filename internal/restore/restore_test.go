@@ -831,3 +831,69 @@ func TestRestoreKeepsDirectoryWithExcludedContentWhereSymlinkWas(t *testing.T) {
 		t.Errorf("src/main.go = %q, %v; kept %v", mainContent, err, changes.Kept)
 	}
 }
+
+// replaceCacheFile takes checkpoint 1 with cache as a file, then makes cache
+// a directory built by fill, damages other files and takes checkpoint 2.
+func replaceCacheFile(t *testing.T, fill func(cache string)) (*store.Store, string) {
+	t.Helper()
+	projectStore, root := newProject(t)
+	cache := filepath.Join(root, "cache")
+	testutil.WriteFile(t, cache, "file")
+	take(t, projectStore, "1")
+	if err := os.Remove(cache); err != nil {
+		t.Fatal(err)
+	}
+	fill(cache)
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
+	take(t, projectStore, "2")
+	return projectStore, root
+}
+
+// requireRestoredAroundCache restores checkpoint 1 and checks that the
+// files around cache came back and cache was kept.
+func requireRestoredAroundCache(t *testing.T, projectStore *store.Store, root string) {
+	t.Helper()
+	changes := apply(t, projectStore, 1)
+	if !slices.Contains(changes.Kept, "cache") {
+		t.Errorf("Kept = %v, want cache", changes.Kept)
+	}
+	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil || string(readme) != "# demo\n" {
+		t.Errorf("README.md = %q, %v", readme, err)
+	}
+	mainContent, err := os.ReadFile(filepath.Join(root, "src", "main.go"))
+	if err != nil || string(mainContent) != "package main\n" {
+		t.Errorf("src/main.go = %q, %v", mainContent, err)
+	}
+}
+
+func TestRestoreKeepsDirectoryWithNestedExcludedContentWhereFileWas(t *testing.T) {
+	projectStore, root := replaceCacheFile(t, func(cache string) {
+		testutil.WriteFile(t, filepath.Join(cache, "sub", "node_modules", "x.js"), "x")
+	})
+	requireRestoredAroundCache(t, projectStore, root)
+}
+
+func TestRestoreKeepsDirectoryWithNestedUnreadableContentWhereFileWas(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read any file")
+	}
+	for name, lockedRel := range map[string]string{"file": "sub/secret", "directory": "sub/locked", "itself": "."} {
+		t.Run(name, func(t *testing.T) {
+			var locked string
+			projectStore, root := replaceCacheFile(t, func(cache string) {
+				locked = filepath.Join(cache, filepath.FromSlash(lockedRel))
+				testutil.WriteFile(t, filepath.Join(cache, "sub", "locked", "f"), "s")
+				testutil.WriteFile(t, filepath.Join(cache, "sub", "secret"), "s")
+				if err := os.Chmod(locked, 0); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.Chmod(locked, 0o755) })
+			})
+			requireRestoredAroundCache(t, projectStore, root)
+		})
+	}
+}

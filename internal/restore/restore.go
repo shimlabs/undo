@@ -162,7 +162,7 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	plan := restorePlan{root: root, target: target, current: current}
 	lost := plan.lostPaths()
 	plan.drop(lost)
-	kept := plan.dropUnsaved(matcherThen, matcherNow, slices.Concat(manifest.Unreadable, skipped.Unreadable))
+	kept, untracked := plan.dropUnsaved(matcherThen, matcherNow, manifest.Unreadable, skipped.Unreadable)
 	written, removed := tree.Changed(current, plan.targetListing())
 	// The safety checkpoint could not save a file undo cannot read, so the
 	// restore must not change it either.
@@ -171,10 +171,9 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	// A locked file cannot be replaced or removed, so it is kept as it is.
 	locked := plan.lockedPaths(slices.Concat(written, removed))
 	plan.drop(locked)
-	// A directory that holds paths the restore must not touch cannot be
-	// replaced by a file either. Only now does a directory holding an
-	// unreadable file hold something the plan does not track.
-	blocked := plan.dirsHoldingUntracked(written)
+	// A directory that holds paths the restore must not touch, at any
+	// depth, cannot be replaced by a file either.
+	blocked := plan.dirsHoldingUntracked(written, slices.Concat(untracked, unreadable, locked, skipped.Excluded, skipped.Unreadable))
 	plan.drop(blocked)
 	if left := slices.Concat(unreadable, locked, blocked); len(left) > 0 {
 		kept = append(kept, left...)
@@ -196,15 +195,19 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 }
 
 // dropUnsaved removes from the plan every path the checkpoint did not save:
-// paths its exclude rules left out and paths in unreadable directories. It
-// also drops existing paths that only today's rules exclude, and returns them.
-func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unreadable []string) (kept []string) {
+// paths its exclude rules left out and paths in directories unreadable then
+// or now. It returns the existing paths that the restore keeps as they are,
+// because only today's rules exclude them or they cannot be read now, and
+// the paths it dropped from the project's current state.
+func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unreadableThen, unreadableNow []string) (kept, untracked []string) {
+	unreadable := slices.Concat(unreadableThen, unreadableNow)
 	isUnsaved := func(rel string, isDir bool) bool {
 		return matcherThen.Excludes(rel, isDir) || isAtOrInside(rel, unreadable)
 	}
 	for rel, entry := range p.current {
 		if isUnsaved(rel, entry.Kind == tree.Dir) {
 			delete(p.current, rel)
+			untracked = append(untracked, rel)
 		}
 	}
 	for rel, source := range p.target {
@@ -212,12 +215,15 @@ func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unre
 		switch {
 		case isUnsaved(rel, isDir):
 			delete(p.target, rel)
+			if slices.Contains(unreadableNow, rel) {
+				kept = append(kept, rel)
+			}
 		case matcherNow.Excludes(rel, isDir) && exists(p.path(rel)):
 			delete(p.target, rel)
 			kept = append(kept, rel)
 		}
 	}
-	return kept
+	return kept, untracked
 }
 
 // lostPaths returns the paths the target holds whose stored copy is gone,
@@ -246,23 +252,18 @@ func (p *restorePlan) unreadableFiles(paths []string) []string {
 }
 
 // dirsHoldingUntracked returns the directories among paths that must become
-// files or symlinks but hold something the plan does not track, such as
-// excluded or unreadable paths.
-func (p *restorePlan) dirsHoldingUntracked(paths []string) []string {
+// files or symlinks but hold, at any depth, one of the untracked paths, such
+// as excluded or unreadable ones.
+func (p *restorePlan) dirsHoldingUntracked(paths, untracked []string) []string {
+	holdsUntracked := map[string]bool{}
+	for _, rel := range untracked {
+		for dir := path.Dir(rel); dir != "." && !holdsUntracked[dir]; dir = path.Dir(dir) {
+			holdsUntracked[dir] = true
+		}
+	}
 	var blocked []string
 	for _, rel := range paths {
-		if p.current[rel].Kind != tree.Dir || p.target[rel].Entry.Kind == tree.Dir {
-			continue
-		}
-		entries, err := os.ReadDir(p.path(rel))
-		if err != nil {
-			blocked = append(blocked, rel)
-			continue
-		}
-		if slices.ContainsFunc(entries, func(entry fs.DirEntry) bool {
-			_, isTracked := p.current[rel+"/"+entry.Name()]
-			return !isTracked
-		}) {
+		if p.current[rel].Kind == tree.Dir && p.target[rel].Entry.Kind != tree.Dir && holdsUntracked[rel] {
 			blocked = append(blocked, rel)
 		}
 	}
