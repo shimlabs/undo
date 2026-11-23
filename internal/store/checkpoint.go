@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/shimlabs/undo/internal/exclude"
+	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/tree"
 	"github.com/shimlabs/undo/internal/walk"
 )
@@ -335,44 +336,79 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 	if manifest.Deleted == nil {
 		manifest.Deleted = []string{}
 	}
+	var files []string
 	for _, rel := range changes.Changed {
 		entry := changes.Listing[rel]
-		if entry.Kind != tree.File && entry.Kind != tree.Symlink {
+		if entry.Kind == tree.File || entry.Kind == tree.Symlink {
+			files = append(files, rel)
+		} else {
 			manifest.Changed[rel] = entry
-			continue
 		}
-		entry, isStable, err := s.cloneStable(id, rel, entry)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
+	}
+	type cloned struct {
+		entry    tree.Entry
+		isStable bool
+		err      error
+	}
+	if len(files) == 0 {
+		return manifest, nil
+	}
+	results := make([]cloned, len(files))
+	layer, err := s.openLayer(id)
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer layer.Close()
+	err = parallel.For(len(files), func(i int) error {
+		entry, isStable, err := s.cloneStable(layer, id, files[i], changes.Listing[files[i]])
+		results[i] = cloned{entry, isStable, err}
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			return nil
+		}
+		return err
+	})
+	if err != nil {
+		return Manifest{}, err
+	}
+	for i, rel := range files {
+		switch result := results[i]; {
+		case errors.Is(result.err, fs.ErrNotExist):
 			delete(changes.Listing, rel)
 			manifest.Deleted = append(manifest.Deleted, rel)
-			continue
-		case errors.Is(err, fs.ErrPermission):
+		case errors.Is(result.err, fs.ErrPermission):
 			delete(changes.Listing, rel)
 			manifest.Unreadable = append(manifest.Unreadable, rel)
-			continue
-		case err != nil:
-			return Manifest{}, err
+		default:
+			if !result.isStable {
+				manifest.Unstable = append(manifest.Unstable, rel)
+			}
+			changes.Listing[rel] = result.entry
+			manifest.Changed[rel] = result.entry
 		}
-		if !isStable {
-			manifest.Unstable = append(manifest.Unstable, rel)
-		}
-		changes.Listing[rel] = entry
-		manifest.Changed[rel] = entry
 	}
 	return manifest, nil
 }
 
+// openLayer creates the files directory of layer id and opens it as a root,
+// so creating parents and removing files there never follows a symlink that
+// was cloned into the layer.
+func (s *Store) openLayer(id int) (*os.Root, error) {
+	if err := os.MkdirAll(s.layerFile(id, "."), 0o700); err != nil {
+		return nil, err
+	}
+	return os.OpenRoot(s.layerFile(id, "."))
+}
+
 // cloneStable clones rel into the layer and checks that the source did not
 // change during the clone. If it did, it tries again a few times.
-func (s *Store) cloneStable(id int, rel string, entry tree.Entry) (tree.Entry, bool, error) {
+func (s *Store) cloneStable(layer *os.Root, id int, rel string, entry tree.Entry) (tree.Entry, bool, error) {
 	src := filepath.Join(s.root, filepath.FromSlash(rel))
 	dst := s.layerFile(id, rel)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+	if err := layer.MkdirAll(path.Dir(rel), 0o700); err != nil {
 		return entry, false, err
 	}
 	for attempt := 1; ; attempt++ {
-		if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := layer.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return entry, false, err
 		}
 		if err := s.clone(src, dst); err != nil {
