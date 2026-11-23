@@ -25,7 +25,7 @@ func (s *Store) MarkerDir() (string, error) {
 
 // WriteMarker creates the empty marker file name in the marker directory.
 func (s *Store) WriteMarker(name string) error {
-	file, err := s.openFile(filepath.Join(s.dir, markersDirName, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC|unix.O_NOFOLLOW, 0o600)
+	file, err := s.openFile(filepath.Join(s.dir, markersDirName, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC|unix.O_NOFOLLOW)
 	if err != nil {
 		return err
 	}

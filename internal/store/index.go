@@ -100,7 +100,7 @@ func (s *Store) appendIndex(checkpoint Checkpoint) error {
 	if err != nil {
 		return err
 	}
-	file, err := s.openFile(s.indexPath(), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
+	file, err := s.openFile(s.indexPath(), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW)
 	if err != nil {
 		return err
 	}

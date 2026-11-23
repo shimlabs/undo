@@ -28,7 +28,7 @@ func (s *Store) RLock() (unlock func(), err error) {
 }
 
 func (s *Store) flock(operation int) (unlock func(), err error) {
-	file, err := s.openFile(s.lockPath(), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
+	file, err := s.openFile(s.lockPath(), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW)
 	if err != nil {
 		return nil, err
 	}

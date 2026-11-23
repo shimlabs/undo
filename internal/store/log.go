@@ -23,7 +23,7 @@ func (s *Store) LogError(failure error) {
 	if info, err := s.lstat(s.logPath()); err == nil && info.Size() > maxLogSize {
 		flags |= os.O_TRUNC
 	}
-	if file, err := s.openFile(s.logPath(), flags, 0o600); err == nil {
+	if file, err := s.openFile(s.logPath(), flags); err == nil {
 		writeLogLine(file, failure)
 	}
 }

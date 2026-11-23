@@ -55,8 +55,10 @@ func (s *Store) open(path string) (*os.File, error) {
 	return s.files.Open(s.storeName(path))
 }
 
-func (s *Store) openFile(path string, flag int, perm os.FileMode) (*os.File, error) {
-	return s.files.OpenFile(s.storeName(path), flag, perm)
+// openFile opens path in the store with flag, creating it, if flag says so,
+// readable only by the user.
+func (s *Store) openFile(path string, flag int) (*os.File, error) {
+	return s.files.OpenFile(s.storeName(path), flag, 0o600)
 }
 
 func (s *Store) openRoot(path string) (*os.Root, error) {
