@@ -414,6 +414,17 @@ func TestDeletedProjectHintIsQuotedForTheShell(t *testing.T) {
 	}
 }
 
+func TestStatusEscapesExcludePatterns(t *testing.T) {
+	t.Setenv("UNDO_HOME", t.TempDir())
+	root := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "x\x1b]0;pwned\x07\n")
+
+	_, out := run(t, root, "", "status")
+	if strings.Contains(out, "\x1b") {
+		t.Fatalf("status printed a raw escape sequence:\n%q", out)
+	}
+}
+
 func TestPrintableEscapesControlCharacters(t *testing.T) {
 	if got := printable("rm -rf build"); got != "rm -rf build" {
 		t.Fatalf("printable changed plain text: %q", got)

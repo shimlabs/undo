@@ -42,7 +42,7 @@ func statusCommand(args []string, env Env) error {
 	} else {
 		fmt.Fprintln(out, "Hooks        none yet, run: undo install <agent>")
 	}
-	fmt.Fprintf(out, "Excluded     %s\n", strings.Join(matcher.Patterns(), ", "))
+	fmt.Fprintf(out, "Excluded     %s\n", printable(strings.Join(matcher.Patterns(), ", ")))
 	fmt.Fprintln(out, "Not covered  anything outside this folder: databases, git push, API calls")
 	return nil
 }

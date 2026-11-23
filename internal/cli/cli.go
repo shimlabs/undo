@@ -105,9 +105,9 @@ func Run(args []string, env Env) int {
 	case errors.Is(err, errDeclined):
 	case errors.Is(err, store.ErrCloneUnsupported):
 		fmt.Fprintf(env.Stderr, "undo: %s, so it cannot protect this project cheaply.\n"+
-			"Run 'undo checkpoint --copy' once to keep full copies instead. They take as much disk as the project.\n", err)
+			"Run 'undo checkpoint --copy' once to keep full copies instead. They take as much disk as the project.\n", printable(err.Error()))
 	case errors.Is(err, project.ErrNotProject):
-		fmt.Fprintf(env.Stderr, "undo: %s.\nRun undo, or start your agent, inside a project folder.\n", err)
+		fmt.Fprintf(env.Stderr, "undo: %s.\nRun undo, or start your agent, inside a project folder.\n", printable(err.Error()))
 	default:
 		fmt.Fprintf(env.Stderr, "undo: %s\n", printable(err.Error()))
 	}
