@@ -38,6 +38,8 @@ func UnlockAt(dir *os.File, name string) error {
 		return &os.PathError{Op: "openat", Path: name, Err: err}
 	}
 	defer unix.Close(fd)
+	// The name may point to another file since the first stat, so the flags
+	// to keep are read from the opened one.
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return &os.PathError{Op: "fstat", Path: name, Err: err}
 	}

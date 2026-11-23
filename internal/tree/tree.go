@@ -40,8 +40,8 @@ type Entry struct {
 	ChangeTime int64       `json:"ctime"`
 	Inode      uint64      `json:"ino"`
 	Link       string      `json:"link,omitempty"`
-	// LinkCount is how many names a file has. A write through any of them
-	// changes all of them.
+	// LinkCount is how many names a file has, and 0 when it has one. A write
+	// through any of them changes all of them.
 	LinkCount uint64 `json:"link_count,omitempty"`
 }
 
