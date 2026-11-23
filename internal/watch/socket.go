@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
 )
 
@@ -19,7 +20,8 @@ const maxSocketPath = 100
 // dialTimeout is how long to wait for a running server to accept.
 const dialTimeout = 200 * time.Millisecond
 
-// socketIDLength is how much of the store's name a socket name keeps.
+// socketIDLength is how much of the project ID a socket name keeps, short
+// enough to fit the platform's limit on socket paths.
 const socketIDLength = 16
 
 // DefaultSocketDir returns the directory for the servers' sockets:
@@ -42,10 +44,7 @@ func socketPath(socketDir string, projectStore *store.Store) (string, error) {
 	if err := checkSocketDir(socketDir); err != nil {
 		return "", err
 	}
-	id := filepath.Base(projectStore.Dir())
-	if len(id) > socketIDLength {
-		id = id[len(id)-socketIDLength:]
-	}
+	id := project.ID(projectStore.Root())[:socketIDLength]
 	return filepath.Join(socketDir, id+".sock"), nil
 }
 
