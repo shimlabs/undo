@@ -96,7 +96,7 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 		dirty:        map[string]bool{},
 		shouldRescan: true,
 		markers:      map[string]chan struct{}{},
-		ignoresCase:  isCaseInsensitive(projectStore.Root()),
+		ignoresCase:  tree.IsCaseInsensitive(projectStore.Root()),
 	}
 	if err := t.startStream(); err != nil {
 		return nil, err
@@ -487,24 +487,6 @@ func (t *tracker) removeGoneCaseVariants(changes *changeSet) {
 			changes.removeTree(rel, entry.Kind == tree.Dir)
 		}
 	}
-}
-
-// isCaseInsensitive reports whether dir is reached under another case too,
-// as on a default APFS volume.
-func isCaseInsensitive(dir string) bool {
-	swapped := strings.ToUpper(dir)
-	if swapped == dir {
-		swapped = strings.ToLower(dir)
-	}
-	if swapped == dir {
-		return false
-	}
-	original, err := os.Stat(dir)
-	if err != nil {
-		return false
-	}
-	other, err := os.Stat(swapped)
-	return err == nil && os.SameFile(original, other)
 }
 
 // withHardLinks adds the other names of every dirty file, named pipe or

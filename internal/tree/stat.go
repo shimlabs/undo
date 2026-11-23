@@ -3,6 +3,7 @@ package tree
 import (
 	"io/fs"
 	"os"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -117,4 +118,22 @@ func toUint32[T ~uint16 | ~uint32](mode T) uint32 {
 // between platforms.
 func toUint64[T ~int32 | ~uint16 | ~uint32 | ~uint64](n T) uint64 {
 	return uint64(n)
+}
+
+// IsCaseInsensitive reports whether dir is reached under another case too,
+// as on a default APFS volume.
+func IsCaseInsensitive(dir string) bool {
+	swapped := strings.ToUpper(dir)
+	if swapped == dir {
+		swapped = strings.ToLower(dir)
+	}
+	if swapped == dir {
+		return false
+	}
+	original, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	other, err := os.Stat(swapped)
+	return err == nil && os.SameFile(original, other)
 }
