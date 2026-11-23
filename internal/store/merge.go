@@ -66,20 +66,35 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	lost, err := s.lostPaths()
+	if err != nil {
+		return 0, err
+	}
+	lostBefore := len(lost)
 	var freed int64
 	parents := tree.NewParentChecker(s.baseDir())
 	for _, checkpoint := range checkpoints {
 		if checkpoint.ID > pending.Through {
 			break
 		}
-		layerFreed, err := s.mergeLayer(checkpoint.ID, base, parents)
+		layerFreed, err := s.mergeLayer(checkpoint.ID, base, lost, parents)
 		if err != nil {
 			return freed, err
 		}
 		freed += layerFreed
 	}
+	if err := writeJSON(s.lostPath(), slices.Sorted(maps.Keys(lost))); err != nil {
+		return freed, err
+	}
 	if err := writeGob(s.baseListingPath(), base); err != nil {
 		return freed, err
+	}
+	// A saved listing still holds the lost paths as stored, and the next
+	// checkpoint would not store them again.
+	if len(lost) > lostBefore {
+		if err := os.Remove(s.listingPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return freed, err
+		}
 	}
 	remaining := slices.DeleteFunc(checkpoints, func(checkpoint Checkpoint) bool { return checkpoint.ID <= pending.Through })
 	if err := s.writeIndex(remaining); err != nil {
@@ -110,7 +125,9 @@ func (s *Store) removeLayersThrough(through int) error {
 // the bytes of base content it removed. A replay after an interruption can
 // find a later layer's symlink where this layer has a directory, so no path
 // is touched through a parent that is not a real directory.
-func (s *Store) mergeLayer(id int, base tree.Listing, parents *tree.ParentChecker) (int64, error) {
+// Paths whose stored copy is gone stay in base and are added to lost; a path
+// a later layer stores again leaves lost.
+func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, parents *tree.ParentChecker) (int64, error) {
 	manifest, err := s.Manifest(id)
 	if err != nil {
 		return 0, err
@@ -123,6 +140,7 @@ func (s *Store) mergeLayer(id int, base tree.Listing, parents *tree.ParentChecke
 		}
 		freed += size
 		delete(base, rel)
+		delete(lost, rel)
 	}
 	paths := slices.Collect(maps.Keys(manifest.Changed))
 	slices.SortFunc(paths, func(a, b string) int { return tree.Depth(a) - tree.Depth(b) })
@@ -138,14 +156,16 @@ func (s *Store) mergeLayer(id int, base tree.Listing, parents *tree.ParentChecke
 		case tree.File, tree.Symlink:
 			size, err = s.mergeFile(id, rel, parents)
 			if errors.Is(err, ErrStoredFileMissing) {
-				// The checkpoints that held this version cannot restore it
-				// either, so the merge drops it instead of stopping for good.
+				// The merge goes on instead of stopping for good. The path
+				// stays in the base listing, marked lost, so a restore never
+				// deletes the file the project still has.
 				s.LogError(fmt.Errorf("merging checkpoint %d: %w", id, err))
 				if size, err = s.removeFromBase(rel, parents); err != nil {
 					return freed, err
 				}
 				freed += size
-				delete(base, rel)
+				base[rel] = entry
+				lost[rel] = true
 				continue
 			}
 		}
@@ -154,8 +174,22 @@ func (s *Store) mergeLayer(id int, base tree.Listing, parents *tree.ParentChecke
 		}
 		freed += size
 		base[rel] = entry
+		delete(lost, rel)
 	}
 	return freed, nil
+}
+
+// lostPaths returns the paths in the base whose stored copy is gone.
+func (s *Store) lostPaths() (map[string]bool, error) {
+	var paths []string
+	if err := readJSON(s.lostPath(), &paths); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	lost := make(map[string]bool, len(paths))
+	for _, rel := range paths {
+		lost[rel] = true
+	}
+	return lost, nil
 }
 
 // mergeDir makes sure rel is a directory in the base.

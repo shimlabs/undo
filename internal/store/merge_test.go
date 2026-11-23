@@ -48,7 +48,7 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := projectStore.mergeLayer(2, base, tree.NewParentChecker(projectStore.baseDir())); err != nil {
+	if _, err := projectStore.mergeLayer(2, base, map[string]bool{}, tree.NewParentChecker(projectStore.baseDir())); err != nil {
 		t.Fatal(err)
 	}
 

@@ -20,6 +20,7 @@ const (
 	manifestFile        = "manifest.json"
 	restoreFile         = "restored.gob"
 	usageFile           = "usage.json"
+	lostFile            = "lost.json"
 	locationSuffix      = ".location"
 	storeDirPrefix      = ".undo-"
 	baseDirName         = "base"
@@ -117,4 +118,8 @@ func (s *Store) usagePath() string {
 // project, named after the store dir.
 func locationPath(home, dir string) string {
 	return filepath.Join(home, strings.TrimPrefix(filepath.Base(dir), storeDirPrefix)+locationSuffix)
+}
+
+func (s *Store) lostPath() string {
+	return filepath.Join(s.dir, lostFile)
 }

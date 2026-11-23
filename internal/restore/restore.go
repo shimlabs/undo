@@ -160,6 +160,8 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 		return restorePlan{}, err
 	}
 	plan := restorePlan{root: root, target: target, current: current}
+	lost := plan.lostPaths()
+	plan.drop(lost)
 	kept := plan.dropUnsaved(matcherThen, matcherNow, slices.Concat(manifest.Unreadable, skipped.Unreadable))
 	written, removed := tree.Changed(current, plan.targetListing())
 	// The safety checkpoint could not save a file undo cannot read, so the
@@ -184,7 +186,7 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 		return isRestored && current[rel] == entry
 	})
 	slices.Sort(kept)
-	plan.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable}
+	plan.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable, Lost: lost}
 	return plan, nil
 }
 
@@ -211,6 +213,19 @@ func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unre
 		}
 	}
 	return kept
+}
+
+// lostPaths returns the paths the target holds whose stored copy is gone,
+// sorted.
+func (p *restorePlan) lostPaths() []string {
+	var lost []string
+	for rel, source := range p.target {
+		if source.IsLost {
+			lost = append(lost, rel)
+		}
+	}
+	slices.Sort(lost)
+	return lost
 }
 
 // unreadableFiles returns the files among paths that exist now and cannot be

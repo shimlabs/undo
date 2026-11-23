@@ -56,6 +56,11 @@ func (s *Store) ListingAt(id int) (tree.Listing, error) {
 	}
 	listing = make(tree.Listing, len(state))
 	for rel, source := range state {
+		if source.IsLost {
+			// A change time no file has makes the next checkpoint store the
+			// project's copy again.
+			source.Entry.ChangeTime = 0
+		}
 		listing[rel] = source.Entry
 	}
 	return listing, nil

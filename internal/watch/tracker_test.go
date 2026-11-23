@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/fsnotify"
@@ -766,5 +768,46 @@ func TestRestoreOfDirectoryMovedOutEditedAndBack(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "docs", "guide.md")); string(data) != "edited while outside" {
 		t.Fatalf("docs/guide.md = %q after restoring checkpoint 2", data)
+	}
+}
+
+// A stored copy lost in a power cut, then merged away. The tracker's listing
+// and the saved listing still hold the file, so no later checkpoint stores it
+// again, while State no longer has it.
+func TestRestoreNeverDeletesFileWhoseCopyWasLostAndMerged(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "precious v2")
+	second := takeCheckpoint(t, projectTracker, "2")
+	layerCopy := filepath.Join(projectStore.Dir(), "layers", strconv.Itoa(second.ID), "files", "docs", "guide.md")
+	if err := os.Remove(layerCopy); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		testutil.WriteFile(t, filepath.Join(root, "README.md"), "edit "+strconv.Itoa(i))
+		takeCheckpoint(t, projectTracker, "later")
+	}
+	projectTracker.Close()
+	tracker2, err := newTracker(projectStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker2.Close)
+	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40}); err != nil {
+		t.Fatal(err)
+	}
+	latest, _, _ := projectStore.Latest()
+	if _, err := restore.Apply(projectStore, latest.ID, checkpointThroughTracker(tracker2)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "docs", "guide.md"))
+	if err != nil {
+		after, _, _ := projectStore.Latest()
+		state, _ := projectStore.State(after.ID)
+		_, inSafety := state["docs/guide.md"]
+		t.Fatalf("restoring the latest checkpoint (unchanged project) removed docs/guide.md; safety checkpoint %d holds it: %v", after.ID, inSafety)
+	}
+	if string(data) != "precious v2" {
+		t.Fatalf("guide.md = %q", data)
 	}
 }

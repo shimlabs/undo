@@ -21,6 +21,9 @@ import (
 type Source struct {
 	Entry tree.Entry
 	Layer int
+	// IsLost is set when the stored copy was gone when its checkpoint was
+	// merged into the base. A restore leaves such a path alone.
+	IsLost bool
 }
 
 // ErrMergePending means an earlier merge of old checkpoints did not finish,
@@ -45,9 +48,13 @@ func (s *Store) State(id int) (map[string]Source, error) {
 	if err != nil {
 		return nil, err
 	}
+	lost, err := s.lostPaths()
+	if err != nil {
+		return nil, err
+	}
 	state := make(map[string]Source, len(base))
 	for rel, entry := range base {
-		state[rel] = Source{Entry: entry}
+		state[rel] = Source{Entry: entry, IsLost: lost[rel]}
 	}
 	for _, checkpoint := range checkpoints {
 		if checkpoint.ID > id {
@@ -178,7 +185,7 @@ func (s *Store) UnchangedDirs(state map[string]Source, dirs []string) (map[strin
 		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
 			if candidates[dir] {
 				inState[dir]++
-				if source.Layer != 0 || source.Entry.Kind == tree.Other {
+				if source.Layer != 0 || source.Entry.Kind == tree.Other || source.IsLost {
 					candidates[dir] = false
 				}
 			}
