@@ -1,4 +1,5 @@
-// Package clone makes copy-on-write copies of files and directories.
+// Package clone makes copy-on-write copies of files and directories, and
+// clears the lock flags that clones keep.
 package clone
 
 import (
@@ -57,22 +58,5 @@ func cloneContent(in, out *os.File) error {
 	if err := unix.IoctlFileClone(int(out.Fd()), int(in.Fd())); err != nil {
 		return &os.LinkError{Op: "ficlone", Old: in.Name(), New: out.Name(), Err: markUnsupported(err)}
 	}
-	return nil
-}
-
-// IsLocked reports whether path has a flag that stops it from being changed.
-// Linux keeps such flags only for privileged users, so undo treats no file
-// as locked.
-func IsLocked(string) bool {
-	return false
-}
-
-// Unlock does nothing on Linux; see IsLocked.
-func Unlock(string) error {
-	return nil
-}
-
-// UnlockAt does nothing on Linux; see IsLocked.
-func UnlockAt(*os.File, string) error {
 	return nil
 }
