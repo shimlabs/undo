@@ -130,7 +130,8 @@ func restoreTo(env Env, projectStore *store.Store, checkpoint store.Checkpoint, 
 	if printNotRestored(out, applied) {
 		out.Println()
 	}
-	out.Success("Restored %s. Run %s again to put them back.", pluralize(applied.Len(), "path"), out.Bold("undo"))
+	restored := applied.Len() - len(applied.Skipped) - len(applied.Lost)
+	out.Success("Restored %s. Run %s again to put them back.", pluralize(restored, "path"), out.Bold("undo"))
 	return nil
 }
 
