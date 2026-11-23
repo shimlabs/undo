@@ -210,7 +210,7 @@ func withPending(changes Changes, pending []string) []string {
 		return changes.Changed
 	}
 	changed := slices.Clone(changes.Changed)
-	isChanged := setOf(changed)
+	isChanged := toSet(changed)
 	for _, rel := range pending {
 		if _, isListed := changes.Listing[rel]; isListed && !isChanged[rel] {
 			changed = append(changed, rel)

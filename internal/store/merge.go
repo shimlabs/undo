@@ -69,7 +69,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	lost := setOf(record.Paths)
+	lost := toSet(record.Paths)
 	var freed int64
 	parents := tree.NewParentChecker(s.baseDir())
 	for _, checkpoint := range checkpoints {
@@ -84,7 +84,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 	}
 	// Listings, the watcher's included, still hold the lost paths as
 	// stored, so the next commit stores them again from the project.
-	toStoreAgain := setOf(record.Pending)
+	toStoreAgain := toSet(record.Pending)
 	for rel := range lost {
 		toStoreAgain[rel] = true
 	}

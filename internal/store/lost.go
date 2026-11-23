@@ -21,15 +21,7 @@ func (s *Store) readLost() (lostRecord, error) {
 	return record, nil
 }
 
-// setOf returns paths as a set.
-func setOf(paths []string) map[string]bool {
-	set := make(map[string]bool, len(paths))
-	for _, rel := range paths {
-		set[rel] = true
-	}
-	return set
-}
-
+// writeLost replaces the lost record.
 func (s *Store) writeLost(record lostRecord) error {
 	return s.writeJSON(s.lostPath(), record)
 }

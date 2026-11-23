@@ -53,7 +53,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	lost := setOf(record.Paths)
+	lost := toSet(record.Paths)
 	state := make(map[string]Source, len(base))
 	for rel, entry := range base {
 		state[rel] = Source{Entry: entry, IsLost: lost[rel]}
