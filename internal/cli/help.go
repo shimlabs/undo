@@ -16,7 +16,7 @@ func helpCommand(parsed flags, env Env) error {
 		return nil
 	}
 	cmd, ok := findCommand(parsed.args[0])
-	if !ok || cmd.group == "" {
+	if !ok || cmd.isInternal {
 		return unknownCommandError(parsed.args[0])
 	}
 	printCommandHelp(out, cmd)

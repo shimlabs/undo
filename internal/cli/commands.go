@@ -187,8 +187,14 @@ func commands() []command {
 			examples:    []example{{"undo uninstall claude", "Stop taking checkpoints for Claude Code"}},
 			description: "Removes the hook undo install added. Checkpoints already taken stay until they expire. Agents: " + agents + ".",
 		},
-		{name: "version", run: versionCommand},
-		{name: "help", arguments: "[command]", maxArguments: 1, run: helpCommand},
+		{
+			name: "version", run: versionCommand,
+			summary: "Print the version", description: "Prints the version of undo, as undo --version does.",
+		},
+		{
+			name: "help", arguments: "[command]", maxArguments: 1, run: helpCommand,
+			summary: "Show help for undo or a command", description: "Lists every command, or shows the flags and examples of one.",
+		},
 		{name: "hook", isInternal: true, run: hookCommand},
 		{name: "watch", isInternal: true, run: watchCommand},
 	}
