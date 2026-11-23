@@ -59,3 +59,13 @@ func MkfifoAt(dir *os.File, name string, perm fs.FileMode) error {
 	}
 	return nil
 }
+
+// IsSupportedIn reports whether the filesystem that holds dir can clone
+// files. It only reads the filesystem's type, so it changes nothing.
+func IsSupportedIn(dir string) bool {
+	var stat unix.Statfs_t
+	if unix.Statfs(dir, &stat) != nil {
+		return true
+	}
+	return unix.ByteSliceToString(stat.Fstypename[:]) == "apfs"
+}

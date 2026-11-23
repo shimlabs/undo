@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
@@ -23,6 +24,8 @@ func statusCommand(parsed flags, env Env) error {
 	out.Headingf("%s", displayPath(root))
 	projectStore, err := store.Open(env.StoreHome, root)
 	switch {
+	case isMissingProject(err) && !clone.IsSupportedIn(root):
+		printField(out, "Checkpoints", "none yet; this filesystem cannot clone, so run "+out.Bold("undo checkpoint --copy"))
 	case isMissingProject(err):
 		printField(out, "Checkpoints", "none yet; run "+out.Bold("undo checkpoint")+" to take one")
 	case err != nil:

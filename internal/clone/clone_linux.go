@@ -51,3 +51,25 @@ func cloneContent(in, out *os.File) error {
 	}
 	return nil
 }
+
+// Filesystem types that support FICLONE, from statfs(2) and linux/magic.h.
+const (
+	btrfsMagic    = 0x9123683e
+	xfsMagic      = 0x58465342
+	bcachefsMagic = 0xca451a4e
+)
+
+// IsSupportedIn reports whether the filesystem that holds dir can clone
+// files. It only reads the filesystem's type, so it changes nothing; an XFS
+// made without reflink still cannot clone.
+func IsSupportedIn(dir string) bool {
+	var stat unix.Statfs_t
+	if unix.Statfs(dir, &stat) != nil {
+		return true
+	}
+	switch uint64(stat.Type) { //nolint:gosec // filesystem magic numbers are 32-bit
+	case btrfsMagic, xfsMagic, bcachefsMagic:
+		return true
+	}
+	return false
+}
