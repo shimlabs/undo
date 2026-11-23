@@ -350,31 +350,11 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 	if manifest.Deleted == nil {
 		manifest.Deleted = []string{}
 	}
-	var files []string
-	for _, rel := range changes.Changed {
-		entry := changes.Listing[rel]
-		if !hasDirParents(changes.Listing, rel) {
-			// A path below a symlink or a file cannot be in the project, and
-			// cloning it would go through the link.
-			delete(changes.Listing, rel)
-			manifest.Deleted = append(manifest.Deleted, rel)
-			continue
-		}
-		if entry.Kind == tree.File || entry.Kind == tree.Symlink {
-			files = append(files, rel)
-		} else {
-			manifest.Changed[rel] = entry
-		}
-	}
-	type cloned struct {
-		entry    tree.Entry
-		isStable bool
-		err      error
-	}
+	files := splitChanged(changes, &manifest)
 	if len(files) == 0 {
 		return manifest, nil
 	}
-	results := make([]cloned, len(files))
+	clonedFiles := make([]clonedFile, len(files))
 	layer, err := s.openLayer(id)
 	if err != nil {
 		return Manifest{}, err
@@ -382,7 +362,7 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 	defer layer.Close()
 	err = parallel.For(len(files), func(i int) error {
 		entry, isStable, err := s.cloneStable(layer, id, files[i], changes.Listing[files[i]])
-		results[i] = cloned{entry, isStable, err}
+		clonedFiles[i] = clonedFile{entry, isStable, err}
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			return nil
 		}
@@ -392,25 +372,52 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		return Manifest{}, err
 	}
 	for i, rel := range files {
-		switch result := results[i]; {
-		case errors.Is(result.err, fs.ErrNotExist):
+		switch cloned := clonedFiles[i]; {
+		case errors.Is(cloned.err, fs.ErrNotExist):
 			delete(changes.Listing, rel)
 			manifest.Deleted = append(manifest.Deleted, rel)
-		case errors.Is(result.err, fs.ErrPermission):
+		case errors.Is(cloned.err, fs.ErrPermission):
 			// The file's older content is not what the project holds now, so
 			// later checkpoints must not bring it back either.
 			delete(changes.Listing, rel)
 			manifest.Deleted = append(manifest.Deleted, rel)
 			manifest.Unreadable = append(manifest.Unreadable, rel)
 		default:
-			if !result.isStable {
+			if !cloned.isStable {
 				manifest.Unstable = append(manifest.Unstable, rel)
 			}
-			changes.Listing[rel] = result.entry
-			manifest.Changed[rel] = result.entry
+			changes.Listing[rel] = cloned.entry
+			manifest.Changed[rel] = cloned.entry
 		}
 	}
 	return manifest, nil
+}
+
+// clonedFile is how cloning one changed file went.
+type clonedFile struct {
+	entry    tree.Entry
+	isStable bool
+	err      error
+}
+
+// splitChanged records the changed directories and other entries without
+// content in manifest, and returns the files and symlinks to clone. A path
+// below a symlink or a file cannot be in the project, and cloning it would
+// go through the link, so it is recorded as deleted.
+func splitChanged(changes Changes, manifest *Manifest) (files []string) {
+	for _, rel := range changes.Changed {
+		entry := changes.Listing[rel]
+		switch {
+		case !hasDirParents(changes.Listing, rel):
+			delete(changes.Listing, rel)
+			manifest.Deleted = append(manifest.Deleted, rel)
+		case entry.Kind == tree.File || entry.Kind == tree.Symlink:
+			files = append(files, rel)
+		default:
+			manifest.Changed[rel] = entry
+		}
+	}
+	return files
 }
 
 // hasDirParents reports whether every parent of rel is a directory in
