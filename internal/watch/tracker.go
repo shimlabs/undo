@@ -49,6 +49,8 @@ type tracker struct {
 	// made before it started.
 	historyDone chan struct{}
 
+	// The fields below belong to the server goroutine, which handles one
+	// request at a time.
 	listing    tree.Listing
 	unreadable []string
 	lastID     int
@@ -359,8 +361,9 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, err error) {
 	changes := newChangeSet(t.listing)
 	matcher := t.matcher.Load()
-	for path := range t.withHardLinks(dirty) {
-		if err := t.applyPath(changes, matcher, path); err != nil {
+	parents := tree.NewParentChecker(t.root)
+	for fullPath := range t.withHardLinks(dirty) {
+		if err := t.applyPath(changes, matcher, parents, fullPath); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -396,8 +399,11 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 	return dirty
 }
 
-func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path string) error {
-	rel, err := filepath.Rel(t.root, path)
+// applyPath updates the listing for one reported path. A path below a
+// symlink or a file is gone from the project, even if a stat through the
+// link would find something.
+func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parents *tree.ParentChecker, fullPath string) error {
+	rel, err := filepath.Rel(t.root, fullPath)
 	if err != nil {
 		return nil
 	}
@@ -410,7 +416,13 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 			changes.removeUnder(rel)
 		}
 	}
-	entry, err := tree.Stat(path)
+	if err := parents.Check(rel); errors.Is(err, tree.ErrParentNotDir) {
+		removeRel()
+		return nil
+	} else if err != nil {
+		return err
+	}
+	entry, err := tree.Stat(fullPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		removeRel()
 		return nil
@@ -418,7 +430,7 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 	if err != nil {
 		return err
 	}
-	storedName, err := tree.StoredName(path)
+	storedName, err := tree.StoredName(fullPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		removeRel()
 		return nil
@@ -426,11 +438,11 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 	if err != nil {
 		return err
 	}
-	if storedName != filepath.Base(path) {
+	if storedName != filepath.Base(fullPath) {
 		// The event names the path before a rename that changed only case or
 		// Unicode form, and the stat reached the renamed file.
 		removeRel()
-		return t.applyPath(changes, matcher, filepath.Join(filepath.Dir(path), storedName))
+		return t.applyPath(changes, matcher, parents, filepath.Join(filepath.Dir(fullPath), storedName))
 	}
 	if matcher.Excludes(rel, entry.Kind == tree.Dir) {
 		return nil
@@ -445,7 +457,7 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 	// A directory that is new or replaced, or whose mode changed and may have
 	// become readable, can hold files that never had events of their own.
 	if entry.Kind == tree.Dir && (!wasDir || isReplaced || previous.Mode != entry.Mode) {
-		return t.addUnder(changes, matcher, path)
+		return t.addUnder(changes, matcher, fullPath)
 	}
 	return nil
 }

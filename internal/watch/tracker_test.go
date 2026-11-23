@@ -401,3 +401,33 @@ func TestTrackerKeepsUnreadableDirectoriesUntilReadable(t *testing.T) {
 	}
 	checkMatchesScan(t, projectStore, root, readable.ID)
 }
+
+func TestTrackerNeverActsThroughSymlinkedParent(t *testing.T) {
+	for name, create := range map[string]string{"file": "a/secret", "directory": "a/home/deep"} {
+		t.Run(name, func(t *testing.T) {
+			projectTracker, _, root := newTrackerWithFiles(t)
+			outside := testutil.TempDir(t)
+			testutil.WriteFile(t, filepath.Join(outside, "secret"), "do not delete")
+			testutil.WriteFile(t, filepath.Join(outside, "home", "deep", "file"), "do not delete")
+			takeCheckpoint(t, projectTracker, "first")
+
+			if err := os.MkdirAll(filepath.Join(root, filepath.Dir(create)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			testutil.WriteFile(t, filepath.Join(root, create), "")
+			if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "a2")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
+				t.Fatal(err)
+			}
+
+			takeCheckpoint(t, projectTracker, "swapped")
+			for _, rel := range []string{"secret", "home/deep/file"} {
+				if data, err := os.ReadFile(filepath.Join(outside, rel)); err != nil || string(data) != "do not delete" {
+					t.Errorf("%s outside the project = %q, %v", rel, data, err)
+				}
+			}
+		})
+	}
+}
