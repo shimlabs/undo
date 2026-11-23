@@ -3,12 +3,12 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
@@ -56,17 +56,6 @@ func (env Env) checkpointer() store.Checkpointer {
 	return env.watcher().Checkpoint
 }
 
-// usageError is a mistake in how undo was called. command, when set, is the
-// command whose usage the error shows.
-type usageError struct {
-	message string
-	command *command
-}
-
-func (e usageError) Error() string { return e.message }
-
-var errDeclined = errors.New("declined")
-
 // Run runs the command in args and returns the exit code for the process.
 func Run(args []string, env Env) int {
 	err := dispatch(args, env)
@@ -81,34 +70,22 @@ func Run(args []string, env Env) int {
 		printUsageError(errOut, usageErr)
 		return 2
 	}
+	if commandErr, ok := errors.AsType[commandError](err); ok {
+		printError(errOut, commandErr)
+		return commandErr.exitCode
+	}
 	switch {
-	case errors.Is(err, errDeclined):
+	case errors.Is(err, errDeclined) || errors.Is(err, errAlreadyReported):
 	case errors.Is(err, store.ErrCloneUnsupported):
-		errOut.Errorf("%s, so undo cannot protect this project cheaply.", terminal.Printable(err.Error()))
-		errOut.Printf("Run %s once to keep full copies instead. They take as much disk as the project.\n", errOut.Bold("undo checkpoint --copy"))
+		printError(errOut, withHint(fmt.Errorf("%w, so undo cannot protect this project cheaply", err),
+			fmt.Sprintf("Run %s once to keep full copies instead. They take as much disk as the project.", errOut.Bold("undo checkpoint --copy"))))
 	case errors.Is(err, project.ErrNotProject):
-		errOut.Errorf("%s.", terminal.Printable(err.Error()))
-		errOut.Println("Run undo, or start your agent, inside a project folder.")
+		printError(errOut, withHint(notProjectError(env.Dir),
+			fmt.Sprintf("Run %s, or start your agent, inside a project folder.", errOut.Bold("undo"))))
 	default:
-		errOut.Errorf("%s", terminal.Printable(err.Error()))
+		printError(errOut, err)
 	}
 	return 1
-}
-
-// printUsageError writes err, how its command is typed, and where to read
-// more.
-func printUsageError(out *terminal.Writer, err usageError) {
-	out.Errorf("%s", terminal.Printable(err.message))
-	if err.command == nil {
-		out.Printf("Run %s for the list of commands.\n", out.Bold("undo help"))
-		return
-	}
-	out.Printf("%s %s\n", out.Bold("Usage:"), err.command.usageLine())
-	help := "undo help " + err.command.name
-	if err.command.name == "" {
-		help = "undo help"
-	}
-	out.Printf("Run %s for more.\n", out.Bold(strings.TrimSpace(help)))
 }
 
 // projectRoot returns the root of the project in env.Dir, or of the project
@@ -151,6 +128,9 @@ func deletedOrExistingRoot(path, dir string) (string, error) {
 		return "", err
 	}
 	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("%s %w", displayPath(path), errProjectAndParentMissing)
+	}
 	if err != nil {
 		return "", err
 	}

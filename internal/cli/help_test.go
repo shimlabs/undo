@@ -31,12 +31,13 @@ func TestUsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"lsit"}, `unknown command "lsit". Did you mean undo list?`},
+		{[]string{"lsit"}, `Unknown command "lsit". Did you mean undo list?`},
 		{[]string{"list", "--copy"}, "undo list does not take --copy"},
-		{[]string{"list", "--verbose"}, "unknown flag --verbose"},
+		{[]string{"list", "--verbose"}, "Unknown flag --verbose."},
 		{[]string{"status", "extra"}, "undo status takes no arguments"},
-		{[]string{"diff", "1", "2"}, "too many arguments for undo diff <id>"},
-		{[]string{"help", "watch"}, `unknown command "watch"`},
+		{[]string{"diff", "1", "2"}, "Too many arguments for undo diff <id>."},
+		{[]string{"help", "watch"}, `Unknown command "watch".`},
+		{[]string{"rm"}, `Unknown command "rm".`},
 	}
 	for _, test := range tests {
 		code, out := run(t, t.TempDir(), "", test.args...)

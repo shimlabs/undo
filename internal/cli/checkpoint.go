@@ -23,7 +23,7 @@ func checkpointCommand(parsed flags, env Env) error {
 	if err != nil {
 		return err
 	}
-	env.stdout().Successf("Took checkpoint %d", checkpoint.ID)
+	env.stdout().Successf("Took checkpoint %d.", checkpoint.ID)
 	return nil
 }
 

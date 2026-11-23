@@ -12,7 +12,7 @@ import (
 
 // ErrParentNotDir means a directory above a path is now a symlink or a file,
 // so acting on the path would follow it, possibly out of the tree.
-var ErrParentNotDir = errors.New("a parent is not a directory")
+var ErrParentNotDir = errors.New("a parent is not a folder")
 
 // ParentChecker checks that the parents of paths under root are real
 // directories. It remembers the directories it checked, so callers that

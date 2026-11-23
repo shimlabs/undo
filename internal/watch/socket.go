@@ -69,7 +69,7 @@ func checkSocketDir(dir string) error {
 
 // ErrUnsafeSocketDir means the directory for the watchers' sockets is not
 // a directory owned by the current user and private to them.
-var ErrUnsafeSocketDir = errors.New("must be a directory owned by you and private to you")
+var ErrUnsafeSocketDir = errors.New("must be a folder owned by you and private to you")
 
 var (
 	errNotUnixSocket = errors.New("not a unix socket")

@@ -70,7 +70,7 @@ func FindAgent(name string) (Agent, bool) {
 
 // ErrUnsafeBinary means the undo binary lives where it will disappear or
 // where other users can replace it, so a hook must not run it.
-var ErrUnsafeBinary = errors.New("this undo binary is in a temporary or shared directory; install undo with go install or a package manager first")
+var ErrUnsafeBinary = errors.New("this undo binary is in a temporary or shared folder; install undo with go install or a package manager first")
 
 // Install adds a hook that runs binary before the agent changes files. A hook
 // undo installed before is replaced, and everything else in the agent's

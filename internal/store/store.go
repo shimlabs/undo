@@ -31,7 +31,7 @@ var (
 	ErrNewerFormat = errors.New("this store was written by a newer version of undo")
 	// ErrUnsafeStore means a store directory exists that is not a private
 	// directory of the current user, so someone else could change it.
-	ErrUnsafeStore = errors.New("the store directory must be a directory owned by you and private to you")
+	ErrUnsafeStore = errors.New("the store folder must be a folder owned by you and private to you")
 	// ErrStoredFileMissing means the stored copy of a file is gone. The
 	// newest checkpoint's copies can be lost in a power cut, since they are
 	// not flushed to disk.
