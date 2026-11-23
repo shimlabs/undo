@@ -2,6 +2,7 @@ package exclude
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,5 +155,18 @@ func TestNewRefusesHugeIgnoreFileLine(t *testing.T) {
 	}
 	if matcher, err := New(root); !errors.Is(err, ErrIgnoreFileTooLarge) || matcher != nil {
 		t.Fatalf("New = %v, %v, want no matcher and ErrIgnoreFileTooLarge", matcher, err)
+	}
+}
+
+func TestNewReportsUnreadableIgnoreFileAsUnreadable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, IgnoreFile), []byte("dist/\n"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(root); !errors.Is(err, fs.ErrPermission) || errors.Is(err, ErrIgnoreFileOutsideProject) {
+		t.Fatalf("New = %v, want a permission error", err)
 	}
 }

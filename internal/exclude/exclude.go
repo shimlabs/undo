@@ -108,7 +108,9 @@ func openIgnoreFile(root string) (*os.File, error) {
 		return nil, err
 	}
 	if err != nil {
-		if _, statErr := projectRoot.Lstat(IgnoreFile); statErr == nil {
+		// The root refuses a symlink that leads out of the project.
+		info, statErr := projectRoot.Lstat(IgnoreFile)
+		if statErr == nil && info.Mode()&fs.ModeSymlink != 0 && !errors.Is(err, fs.ErrPermission) {
 			return nil, ErrIgnoreFileOutsideProject
 		}
 		return nil, err
