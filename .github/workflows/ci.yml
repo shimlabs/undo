@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - run: go test -race ./...
+
+  # Clones need Btrfs or XFS, so the tests run on a loop device. The runner's
+  # own ext4 disk is where the copy mode and refusal tests run.
+  test-linux:
+    strategy:
+      matrix:
+        filesystem: [btrfs, xfs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - name: Mount a ${{ matrix.filesystem }} volume
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq btrfs-progs xfsprogs
+          truncate -s 2G "$RUNNER_TEMP/volume.img"
+          sudo mkfs.${{ matrix.filesystem }} -q "$RUNNER_TEMP/volume.img"
+          sudo mkdir -p /mnt/volume
+          sudo mount -o loop "$RUNNER_TEMP/volume.img" /mnt/volume
+          sudo chown "$USER" /mnt/volume
+          mkdir /mnt/volume/tmp "$RUNNER_TEMP/plain"
+      - run: go test -race ./...
+        env:
+          TMPDIR: /mnt/volume/tmp
+          UNDO_TEST_PLAIN_DIR: ${{ runner.temp }}/plain
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
