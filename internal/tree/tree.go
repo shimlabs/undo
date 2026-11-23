@@ -176,7 +176,7 @@ func Stat(path string) (Entry, error) {
 	switch {
 	case info.Mode().IsRegular():
 		entry.Kind = File
-		entry.Links = uint64(stat.Nlink)
+		entry.Links = toUint64(stat.Nlink)
 	case info.IsDir():
 		entry.Kind = Dir
 		entry.Size = 0
@@ -216,4 +216,9 @@ func Depth(rel string) int {
 		return -1
 	}
 	return strings.Count(rel, "/")
+}
+
+// toUint64 converts a link count, whose type differs between platforms.
+func toUint64[T ~uint16 | ~uint32 | ~uint64](n T) uint64 {
+	return uint64(n)
 }
