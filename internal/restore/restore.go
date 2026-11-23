@@ -504,43 +504,93 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 	extractor := projectStore.NewExtractor()
 	defer extractor.Close()
 	p.cloned = map[string]bool{}
-	var files []string
+	var pending pendingWrites
 	parents := tree.NewParentChecker(p.root)
 	for _, rel := range paths {
-		if rel != "." && p.cloned[path.Dir(rel)] {
-			p.cloned[rel] = true
-			continue
-		}
-		if err := parents.Check(rel); err != nil {
-			return skipped, err
-		}
-		source := p.target[rel]
-		if rel != "." {
-			if err := p.makeParentWritable(rel); err != nil {
-				return skipped, err
-			}
-		}
-		switch {
-		case clonable[rel]:
-			err = p.inParent(rel, func(dir *os.File, name string) error {
-				return extractor.ExtractBaseDir(rel, dir, name)
-			})
-			p.cloned[rel] = true
-		case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:
-			files = append(files, rel)
-		default:
-			var isWritten bool
-			isWritten, err = p.writeOther(rel, source.Entry)
-			if !isWritten {
-				skipped = append(skipped, rel)
-			}
-		}
-		if err != nil {
-			return skipped, err
+		if err := p.writePath(rel, clonable[rel], extractor, parents, &pending); err != nil {
+			return pending.skipped, err
 		}
 	}
+	p.keepOccupied(pending.occupied)
 	// Every directory exists now, so the files can be written in any order.
-	return skipped, p.writeFiles(extractor, files)
+	return pending.skipped, p.writeFiles(extractor, pending.files)
+}
+
+// pendingWrites is what writing paths parents first leaves for later: the
+// files to write in parallel, the paths that what the removals left in
+// place occupies, and the paths that cannot be recreated.
+type pendingWrites struct {
+	files    []string
+	occupied []string
+	skipped  []string
+}
+
+// writePath writes the directory or special file rel, or adds it to
+// pending. A directory that is missing and isClonable is cloned whole.
+func (p *restorePlan) writePath(rel string, isClonable bool, extractor *store.Extractor, parents *tree.ParentChecker, pending *pendingWrites) error {
+	if rel != "." && p.cloned[path.Dir(rel)] {
+		p.cloned[rel] = true
+		return nil
+	}
+	if isAtOrInside(rel, pending.occupied) {
+		return nil
+	}
+	source := p.target[rel]
+	if p.isOccupied(rel, source.Entry) {
+		pending.occupied = append(pending.occupied, rel)
+		return nil
+	}
+	if err := parents.Check(rel); err != nil {
+		return err
+	}
+	if rel != "." {
+		if err := p.makeParentWritable(rel); err != nil {
+			return err
+		}
+	}
+	switch {
+	case isClonable && p.isMissing(rel):
+		p.cloned[rel] = true
+		return p.inParent(rel, func(dir *os.File, name string) error {
+			return extractor.ExtractBaseDir(rel, dir, name)
+		})
+	case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:
+		pending.files = append(pending.files, rel)
+		return nil
+	default:
+		isWritten, err := p.writeOther(rel, source.Entry)
+		if !isWritten {
+			pending.skipped = append(pending.skipped, rel)
+		}
+		return err
+	}
+}
+
+// isOccupied reports whether something the removals left in place stands
+// where the restore must write entry, so writing it would fail. On a
+// filesystem that ignores case, a directory renamed only in case that holds
+// excluded content survives its removal under the target's name; a locked
+// file survives too.
+func (p *restorePlan) isOccupied(rel string, entry tree.Entry) bool {
+	if rel == "." {
+		return false
+	}
+	info, err := p.projectRoot.Lstat(filepath.FromSlash(rel))
+	if err != nil {
+		return false
+	}
+	return info.IsDir() != (entry.Kind == tree.Dir)
+}
+
+// keepOccupied takes the occupied paths, and everything under them, out of
+// the written paths and reports them as kept.
+func (p *restorePlan) keepOccupied(occupied []string) {
+	if len(occupied) == 0 {
+		return
+	}
+	p.changes.Written = slices.DeleteFunc(p.changes.Written, func(rel string) bool { return isAtOrInside(rel, occupied) })
+	p.changes.Kept = append(p.changes.Kept, occupied...)
+	slices.Sort(p.changes.Kept)
 }
 
 // writeFiles writes files from the store in parallel. A file whose stored
@@ -570,7 +620,10 @@ func (p *restorePlan) writeFiles(extractor *store.Extractor, files []string) err
 func (p *restorePlan) writeOther(rel string, entry tree.Entry) (bool, error) {
 	switch {
 	case entry.Kind == tree.Dir:
-		return true, p.projectRoot.MkdirAll(filepath.FromSlash(rel), 0o700)
+		if err := p.projectRoot.MkdirAll(filepath.FromSlash(rel), 0o700); err != nil {
+			return true, err
+		}
+		return true, p.restoreNameCase(rel)
 	case entry.Mode&fs.ModeNamedPipe != 0:
 		return true, p.inParent(rel, func(dir *os.File, name string) error {
 			return clone.MkfifoAt(dir, name, entry.Mode)
@@ -578,6 +631,29 @@ func (p *restorePlan) writeOther(rel string, entry tree.Entry) (bool, error) {
 	default:
 		return false, nil
 	}
+}
+
+// isMissing reports whether nothing is at rel now. A directory renamed only
+// in case, which a filesystem that ignores case finds under the target name,
+// survives its removal when it holds excluded content.
+func (p *restorePlan) isMissing(rel string) bool {
+	_, err := p.projectRoot.Lstat(filepath.FromSlash(rel))
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// restoreNameCase gives the directory rel the exact name the checkpoint
+// recorded. On a filesystem that ignores case, a directory renamed only in
+// case is found under the target name; one that holds excluded content was
+// not removed, so it keeps the new spelling until it is renamed back.
+func (p *restorePlan) restoreNameCase(rel string) error {
+	if rel == "." {
+		return nil
+	}
+	storedName, err := tree.StoredName(p.path(rel))
+	if err != nil || storedName == path.Base(rel) {
+		return err
+	}
+	return p.projectRoot.Rename(filepath.FromSlash(path.Join(path.Dir(rel), storedName)), filepath.FromSlash(rel))
 }
 
 // inParent opens the directory that holds rel through the project root and

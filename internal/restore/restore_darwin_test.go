@@ -284,3 +284,25 @@ func TestRestoreFolderLockedInFinderKeepsModesAndTimes(t *testing.T) {
 	apply(t, projectStore, 1)
 	requireSame(t, want, snapshot(t, root))
 }
+
+func TestRestoreUndoesCaseRenameOfFolderHoldingExcludedContent(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "web", "node_modules", "dep", "index.js"), "dep")
+	testutil.WriteFile(t, filepath.Join(root, "web", "app.js"), "app")
+	first := take(t, projectStore, "1")
+	if err := os.Rename(filepath.Join(root, "web"), filepath.Join(root, "Web")); err != nil {
+		t.Fatal(err)
+	}
+	take(t, projectStore, "2")
+
+	apply(t, projectStore, first.ID)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "Web" {
+			t.Fatal("the folder is still named Web, want web as at the checkpoint")
+		}
+	}
+}

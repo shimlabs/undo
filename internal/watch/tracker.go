@@ -65,6 +65,9 @@ type tracker struct {
 	// checkpoint checks them.
 	hardLinked map[string]bool
 	lastID     int
+	// ignoresCase is whether the project's filesystem treats names that
+	// differ only in case as the same.
+	ignoresCase bool
 }
 
 // errStreamStopped means the tracker no longer watches the project, so the
@@ -93,6 +96,7 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 		dirty:        map[string]bool{},
 		shouldRescan: true,
 		markers:      map[string]chan struct{}{},
+		ignoresCase:  isCaseInsensitive(projectStore.Root()),
 	}
 	if err := t.startStream(); err != nil {
 		return nil, err
@@ -451,8 +455,53 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 	if changes.hasLinkCountChange {
 		return nil, nil, errNeedsFullComparison
 	}
+	if t.ignoresCase {
+		t.removeGoneCaseVariants(changes)
+	}
 	changes.finish()
 	return slices.Sorted(maps.Keys(changes.changed)), slices.Sorted(maps.Keys(changes.deleted)), nil
+}
+
+// removeGoneCaseVariants removes the listed paths that are gone and differ
+// only in case from a path reported gone. On a filesystem that ignores case,
+// an event can spell a removed or renamed path as the command did, not as
+// the listing does.
+func (t *tracker) removeGoneCaseVariants(changes *changeSet) {
+	if len(changes.goneUntracked) == 0 {
+		return
+	}
+	lengths := map[int]bool{}
+	folded := map[string]bool{}
+	for _, rel := range changes.goneUntracked {
+		lengths[len(rel)] = true
+		folded[strings.ToLower(rel)] = true
+	}
+	for rel, entry := range changes.listing {
+		if !lengths[len(rel)] || !folded[strings.ToLower(rel)] {
+			continue
+		}
+		if _, err := os.Lstat(t.path(rel)); isGone(err) {
+			changes.removeTree(rel, entry.Kind == tree.Dir)
+		}
+	}
+}
+
+// isCaseInsensitive reports whether dir is reached under another case too,
+// as on a default APFS volume.
+func isCaseInsensitive(dir string) bool {
+	swapped := strings.ToUpper(dir)
+	if swapped == dir {
+		swapped = strings.ToLower(dir)
+	}
+	if swapped == dir {
+		return false
+	}
+	original, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	other, err := os.Stat(swapped)
+	return err == nil && os.SameFile(original, other)
 }
 
 // withHardLinks adds the other names of every dirty file, named pipe or
@@ -505,7 +554,11 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 	entry, storedName, err := lookUp(parents, rel, fullPath)
 	switch {
 	case errors.Is(err, errPathGone):
-		changes.removeTree(rel, wasDir)
+		if wasTracked {
+			changes.removeTree(rel, wasDir)
+		} else {
+			changes.goneUntracked = append(changes.goneUntracked, rel)
+		}
 		return nil
 	case err != nil:
 		return err
