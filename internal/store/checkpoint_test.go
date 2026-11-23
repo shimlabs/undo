@@ -387,11 +387,11 @@ func TestPruneIfDueRunsHourly(t *testing.T) {
 	if merged, err := projectStore.PruneIfDue(now, Limits{MaxAge: time.Hour, MaxCount: 100, MaxBytes: 1 << 40}); err != nil || merged != 0 {
 		t.Fatalf("first PruneIfDue = %d, %v", merged, err)
 	}
-	if merged, _ := projectStore.PruneIfDue(now.Add(time.Minute), keepOne); merged != 0 {
-		t.Fatalf("PruneIfDue pruned again within the hour: merged %d", merged)
+	if merged, err := projectStore.PruneIfDue(now.Add(time.Minute), keepOne); err != nil || merged != 0 {
+		t.Fatalf("PruneIfDue pruned again within the hour: merged %d, %v", merged, err)
 	}
-	if merged, _ := projectStore.PruneIfDue(now.Add(2*time.Hour), keepOne); merged != 2 {
-		t.Fatalf("PruneIfDue after an hour merged %d, want 2", merged)
+	if merged, err := projectStore.PruneIfDue(now.Add(2*time.Hour), keepOne); err != nil || merged != 2 {
+		t.Fatalf("PruneIfDue after an hour merged %d, want 2: %v", merged, err)
 	}
 }
 

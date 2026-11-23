@@ -497,7 +497,7 @@ func TestRestoreNeverWritesThroughSymlinkExcludedLater(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "keys\n")
 
 	apply(t, projectStore, 1)
-	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
 		t.Fatalf("restore wrote %d entries outside the project through a symlink", len(entries))
 	}
 }
@@ -717,7 +717,7 @@ func TestRestoreNeverWritesOutsideWhenDirectoryIsSwappedForSymlink(t *testing.T)
 	if err := plan.apply(projectStore, 1); err == nil {
 		t.Fatal("restore went on after a directory was replaced by a symlink")
 	}
-	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
 		t.Fatalf("restore wrote %d entries outside the project", len(entries))
 	}
 }
@@ -881,17 +881,17 @@ func TestRestoreKeepsDirectoryWithNestedUnreadableContentWhereFileWas(t *testing
 	if os.Geteuid() == 0 {
 		t.Skip("root can read any file")
 	}
-	for name, lockedRel := range map[string]string{"file": "sub/secret", "directory": "sub/locked", "itself": "."} {
+	for name, unreadableRel := range map[string]string{"file": "sub/secret", "directory": "sub/unreadable", "itself": "."} {
 		t.Run(name, func(t *testing.T) {
-			var locked string
+			var unreadable string
 			projectStore, root := replaceCacheFile(t, func(cache string) {
-				locked = filepath.Join(cache, filepath.FromSlash(lockedRel))
-				testutil.WriteFile(t, filepath.Join(cache, "sub", "locked", "f"), "s")
+				unreadable = filepath.Join(cache, filepath.FromSlash(unreadableRel))
+				testutil.WriteFile(t, filepath.Join(cache, "sub", "unreadable", "f"), "s")
 				testutil.WriteFile(t, filepath.Join(cache, "sub", "secret"), "s")
-				if err := os.Chmod(locked, 0); err != nil {
+				if err := os.Chmod(unreadable, 0); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { os.Chmod(locked, 0o755) })
+				t.Cleanup(func() { os.Chmod(unreadable, 0o755) })
 			})
 			requireRestoredAroundCache(t, projectStore, root)
 		})

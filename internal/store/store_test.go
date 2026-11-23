@@ -280,6 +280,8 @@ func TestStoreNeverWritesThroughSymlinkedFiles(t *testing.T) {
 
 			testutil.WriteFile(t, filepath.Join(root, "a.txt"), "changed")
 			projectStore.LogError(errors.New("logged"))
+			// A planted symlink can make these fail; only the file outside
+			// the store matters.
 			_, _ = projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
 			_, _ = projectStore.PruneIfDue(time.Now().Add(2*time.Hour), DefaultLimits())
 

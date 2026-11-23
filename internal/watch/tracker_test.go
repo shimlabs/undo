@@ -828,31 +828,18 @@ func TestScanKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
 	}
 }
 
-// A stored copy lost in a power cut, then merged away. The tracker's listing
-// and the saved listing still hold the file, so no later checkpoint stores it
-// again, while State no longer has it.
+// A stored copy lost in a power cut, then merged into the base, where it
+// stays marked lost. Restoring must leave the project's file alone.
 func TestRestoreNeverDeletesFileWhoseCopyWasLostAndMerged(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
-	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "precious v2")
-	second := takeCheckpoint(t, projectTracker, "2")
-	layerCopy := filepath.Join(projectStore.Dir(), "layers", strconv.Itoa(second.ID), "files", "docs", "guide.md")
-	if err := os.Remove(layerCopy); err != nil {
-		t.Fatal(err)
-	}
-	for i := range 3 {
-		testutil.WriteFile(t, filepath.Join(root, "README.md"), "edit "+strconv.Itoa(i))
-		takeCheckpoint(t, projectTracker, "later")
-	}
+	loseNewestCopyAndPrune(t, projectTracker, projectStore, root)
 	projectTracker.Close()
 	resumed, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(resumed.Close)
-	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40}); err != nil {
-		t.Fatal(err)
-	}
 	latest, _, err := projectStore.Latest()
 	if err != nil {
 		t.Fatal(err)
@@ -949,19 +936,7 @@ func TestTrackerResumesAfterDirectorySwapped(t *testing.T) {
 func TestTrackerStoresLostFileAgainAfterPrune(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
-	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "precious v2")
-	second := takeCheckpoint(t, projectTracker, "2")
-	// A power cut can lose the newest checkpoint's copies.
-	if err := os.Remove(filepath.Join(projectStore.Dir(), "layers", strconv.Itoa(second.ID), "files", "docs", "guide.md")); err != nil {
-		t.Fatal(err)
-	}
-	for i := range 3 {
-		testutil.WriteFile(t, filepath.Join(root, "README.md"), fmt.Sprint("edit ", i))
-		takeCheckpoint(t, projectTracker, "later")
-	}
-	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40}); err != nil {
-		t.Fatal(err)
-	}
+	loseNewestCopyAndPrune(t, projectTracker, projectStore, root)
 
 	next := takeCheckpoint(t, projectTracker, "after prune")
 	state, err := projectStore.State(next.ID)
@@ -994,18 +969,28 @@ func TestTrackerSeesHardLinkWrittenFromOutside(t *testing.T) {
 	takeCheckpoint(t, projectTracker, "1")
 	// Only the name outside the project is written, so no event names the
 	// project's file.
-	file, err := os.OpenFile(outside, os.O_WRONLY|os.O_TRUNC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := file.WriteString("v2 important"); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFile(t, outside, "v2 important")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "edited")
 
 	second := takeCheckpoint(t, projectTracker, "2")
 	checkMatchesScan(t, projectStore, root, second.ID)
+}
+
+// loseNewestCopyAndPrune takes a checkpoint that stores docs/guide.md, deletes
+// that stored copy as a power cut can, takes three more checkpoints and
+// prunes, so the merge finds the copy gone.
+func loseNewestCopyAndPrune(t *testing.T, projectTracker *tracker, projectStore *store.Store, root string) {
+	t.Helper()
+	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "precious v2")
+	stored := takeCheckpoint(t, projectTracker, "2")
+	if err := os.Remove(filepath.Join(projectStore.Dir(), "layers", strconv.Itoa(stored.ID), "files", "docs", "guide.md")); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		testutil.WriteFile(t, filepath.Join(root, "README.md"), fmt.Sprint("edit ", i))
+		takeCheckpoint(t, projectTracker, "later")
+	}
+	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40}); err != nil {
+		t.Fatal(err)
+	}
 }

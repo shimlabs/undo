@@ -23,9 +23,9 @@ func lockFile(t *testing.T, path string, dirs ...string) {
 	}
 	t.Cleanup(func() {
 		for _, dir := range dirs {
-			filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
+			filepath.WalkDir(dir, func(entryPath string, _ fs.DirEntry, err error) error {
 				if err == nil {
-					unix.Chflags(path, 0)
+					unix.Chflags(entryPath, 0)
 				}
 				return nil
 			})
