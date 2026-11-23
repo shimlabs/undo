@@ -4,6 +4,7 @@
 package watch
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -38,7 +39,10 @@ type tracker struct {
 	matcher   atomic.Pointer[exclude.Matcher]
 	stream    *fsnotify.Stream
 	sequence  atomic.Uint64
-	closeOnce sync.Once
+	// markerPrefix tells this tracker's markers from those of an earlier
+	// tracker in the same process, whose late events could otherwise count.
+	markerPrefix string
+	closeOnce    sync.Once
 
 	mu sync.Mutex
 	// dirty maps each path reported since the last checkpoint to whether
@@ -91,6 +95,7 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 		store:        projectStore,
 		root:         projectStore.Root(),
 		markerDir:    markerDir,
+		markerPrefix: rand.Text()[:8],
 		dirty:        map[string]bool{},
 		shouldRescan: true,
 		markers:      map[string]chan fsnotify.EventID{},
@@ -416,7 +421,7 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 		t.mu.Unlock()
 		return 0, false
 	}
-	markerPath := filepath.Join(t.markerDir, fmt.Sprintf("%d-%d", os.Getpid(), t.sequence.Add(1)))
+	markerPath := filepath.Join(t.markerDir, fmt.Sprintf("%d-%s-%d", os.Getpid(), t.markerPrefix, t.sequence.Add(1)))
 	done := make(chan fsnotify.EventID, 1)
 	t.mu.Lock()
 	t.markers[markerPath] = done
