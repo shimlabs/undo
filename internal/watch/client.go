@@ -112,9 +112,15 @@ func StartFailure(projectStore *store.Store) (reason string, isRecent bool) {
 	return reason, time.Since(failedAt) < startBackoff
 }
 
+var (
+	errExitedWithoutError = errors.New("exit status 0")
+	errWatcherFailed      = errors.New("the watcher failed")
+	errWatcherNotStarted  = errors.New("the watcher did not start")
+)
+
 func recordStartFailure(projectStore *store.Store, failure error) {
 	if failure == nil {
-		failure = errors.New("exit status 0")
+		failure = errExitedWithoutError
 	}
 	if err := projectStore.SaveWatcherFailure(failure.Error()); err != nil {
 		projectStore.LogError(err)
@@ -131,7 +137,7 @@ func (c Client) checkpointThroughServer(projectStore *store.Store, options store
 		return store.Checkpoint{}, err
 	}
 	if reply.Error != "" {
-		return store.Checkpoint{}, errors.New(reply.Error)
+		return store.Checkpoint{}, fmt.Errorf("%w: %s", errWatcherFailed, reply.Error)
 	}
 	return reply.Checkpoint, nil
 }
@@ -158,7 +164,7 @@ func (c Client) connect(projectStore *store.Store, start startFunc) (net.Conn, e
 		case err := <-exited:
 			return nil, fmt.Errorf("the watcher exited: %w", err)
 		case <-deadline:
-			return nil, errors.New("the watcher did not start")
+			return nil, errWatcherNotStarted
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

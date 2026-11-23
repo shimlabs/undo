@@ -115,16 +115,22 @@ func NewStream(paths []string, since EventID, _ func(dir string) bool, onEvents 
 	ref := C.undoStreamCreate(C.uintptr_t(handle), &cPaths[0], C.int(len(cPaths)), C.FSEventStreamEventId(since))
 	if ref == nil {
 		handle.Delete()
-		return nil, errors.New("FSEventStreamCreate failed")
+		return nil, errStreamCreate
 	}
 	queue := C.undoQueueCreate()
 	if C.undoStreamStart(ref, queue) == 0 {
 		C.undoStreamStop(ref, queue)
 		handle.Delete()
-		return nil, errors.New("FSEventStreamStart failed")
+		return nil, errStreamStart
 	}
 	return &Stream{ref: ref, queue: queue, handle: handle}, nil
 }
+
+var (
+	errStreamCreate = errors.New("FSEventStreamCreate failed")
+	errStreamStart  = errors.New("FSEventStreamStart failed")
+	errEventStoreID = errors.New("FSEventsCopyUUIDForDevice failed")
+)
 
 // Close stops the stream. Closing it again does nothing.
 func (s *Stream) Close() {
@@ -144,7 +150,7 @@ func EventStoreID(path string) (string, error) {
 	}
 	var buffer [64]C.char
 	if C.undoEventStoreID(C.dev_t(stat.Dev), &buffer[0], C.CFIndex(len(buffer))) != 0 {
-		return "", errors.New("FSEventsCopyUUIDForDevice failed")
+		return "", errEventStoreID
 	}
 	return C.GoString(&buffer[0]), nil
 }

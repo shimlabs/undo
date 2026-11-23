@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -57,17 +58,22 @@ func hookCommand(parsed flags, env Env) error {
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			store.LogHomeError(env.StoreHome, fmt.Errorf("%s hook panicked: %v", name, recovered))
+			store.LogHomeError(env.StoreHome, fmt.Errorf("%s %w: %v", name, errHookPanicked, recovered))
 		}
 	}()
 	agent, ok := hook.FindAgent(name)
 	if !ok {
-		store.LogHomeError(env.StoreHome, fmt.Errorf("hook for unknown agent %q", name))
+		store.LogHomeError(env.StoreHome, fmt.Errorf("%w %q", errUnknownAgent, name))
 		return nil
 	}
 	_ = agent.Handle(env.Stdin, env.StoreHome, env.checkpointer())
 	return nil
 }
+
+var (
+	errHookPanicked = errors.New("hook panicked")
+	errUnknownAgent = errors.New("hook for unknown agent")
+)
 
 // installedAgentTitles returns the product names of the agents that have
 // undo's hook.

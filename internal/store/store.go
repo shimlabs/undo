@@ -39,6 +39,8 @@ var (
 	// ErrStoreInsideProject means the project holds the store home, and no
 	// folder next to it can hold the store instead.
 	ErrStoreInsideProject = errors.New("this folder holds the undo store and has no writable parent on the same volume")
+	// ErrNoCheckpoint means the store has no checkpoint with the id asked for.
+	ErrNoCheckpoint = errors.New("no checkpoint")
 )
 
 // Store is the data undo keeps on disk for one project. Several goroutines

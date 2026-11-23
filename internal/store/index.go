@@ -38,7 +38,7 @@ func (s *Store) Checkpoint(id int) (Checkpoint, error) {
 	}
 	i := slices.IndexFunc(checkpoints, func(checkpoint Checkpoint) bool { return checkpoint.ID == id })
 	if i < 0 {
-		return Checkpoint{}, fmt.Errorf("no checkpoint %d", id)
+		return Checkpoint{}, fmt.Errorf("%w %d", ErrNoCheckpoint, id)
 	}
 	return checkpoints[i], nil
 }

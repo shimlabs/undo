@@ -16,6 +16,10 @@ import (
 // checkpoint.
 var errNoBase = fmt.Errorf("no checkpoints yet: %w", fs.ErrNotExist)
 
+// errCheckpointsMerged reports that a listing cannot be built forward,
+// because checkpoints on the way were merged into the base.
+var errCheckpointsMerged = errors.New("checkpoints were merged")
+
 // baseListing returns the listing of what the base holds.
 func (s *Store) baseListing() (tree.Listing, error) {
 	var listing tree.Listing
@@ -76,7 +80,7 @@ func (s *Store) listingForward(from int, listing tree.Listing, to int) (tree.Lis
 		}
 	}
 	if len(later) != to-from {
-		return nil, fmt.Errorf("checkpoints %d to %d were merged", from+1, to)
+		return nil, fmt.Errorf("%w: %d to %d", errCheckpointsMerged, from+1, to)
 	}
 	for _, id := range later {
 		manifest, err := s.Manifest(id)

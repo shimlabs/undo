@@ -61,10 +61,19 @@ func checkSocketDir(dir string) error {
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || !info.IsDir() || int(stat.Uid) != os.Getuid() || info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%s must be a directory owned by you and private to you", dir)
+		return fmt.Errorf("%s: %w", dir, ErrUnsafeSocketDir)
 	}
 	return nil
 }
+
+// ErrUnsafeSocketDir means the directory for the watchers' sockets is not
+// a directory owned by the current user and private to them.
+var ErrUnsafeSocketDir = errors.New("must be a directory owned by you and private to you")
+
+var (
+	errNotUnixSocket = errors.New("not a unix socket")
+	errOtherUser     = errors.New("the other end of the socket runs as user")
+)
 
 // dialServer connects to the server at path and checks that it runs as the
 // current user.
@@ -84,14 +93,14 @@ func dialServer(path string) (net.Conn, error) {
 func checkPeer(conn net.Conn) error {
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
-		return errors.New("not a unix socket")
+		return errNotUnixSocket
 	}
 	uid, err := peerUID(unixConn)
 	if err != nil {
 		return err
 	}
 	if uid != os.Getuid() {
-		return fmt.Errorf("the other end of the socket runs as user %d", uid)
+		return fmt.Errorf("%w %d", errOtherUser, uid)
 	}
 	return nil
 }
