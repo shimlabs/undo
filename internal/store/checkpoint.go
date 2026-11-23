@@ -339,6 +339,13 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 	var files []string
 	for _, rel := range changes.Changed {
 		entry := changes.Listing[rel]
+		if !hasDirParents(changes.Listing, rel) {
+			// A path below a symlink or a file cannot be in the project, and
+			// cloning it would go through the link.
+			delete(changes.Listing, rel)
+			manifest.Deleted = append(manifest.Deleted, rel)
+			continue
+		}
 		if entry.Kind == tree.File || entry.Kind == tree.Symlink {
 			files = append(files, rel)
 		} else {
@@ -387,6 +394,17 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		}
 	}
 	return manifest, nil
+}
+
+// hasDirParents reports whether every parent of rel is a directory in
+// listing.
+func hasDirParents(listing tree.Listing, rel string) bool {
+	for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
+		if listing[dir].Kind != tree.Dir {
+			return false
+		}
+	}
+	return true
 }
 
 // openLayer creates the files directory of layer id and opens it as a root,
