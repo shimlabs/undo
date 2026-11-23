@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -84,7 +85,13 @@ func printNoCheckpoints(env Env, parsed flags) {
 	}
 	out := env.stdout()
 	out.Printf("No checkpoints yet in %s. The next agent command, or %s, takes one.\n", displayPath(dir), out.Bold("undo checkpoint"))
-	stores, err := store.StoresUnder(env.StoreHome, env.Dir)
+	// Stores record resolved roots, so a folder reached through a symlink,
+	// such as /tmp on macOS, is matched by its real path.
+	parent := env.Dir
+	if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+		parent = resolved
+	}
+	stores, err := store.StoresUnder(env.StoreHome, parent)
 	if err != nil {
 		return
 	}

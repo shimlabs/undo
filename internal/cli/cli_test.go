@@ -498,3 +498,25 @@ func TestListInHomeFindsDeletedProject(t *testing.T) {
 		t.Fatalf("exit %d, list in the home directory:\n%s", code, out)
 	}
 }
+
+func TestUndoFindsDeletedProjectThroughSymlinkedFolder(t *testing.T) {
+	t.Setenv("UNDO_HOME", t.TempDir())
+	parent := testutil.TempDir(t)
+	root := filepath.Join(parent, "app")
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
+	if code, out := run(t, root, "", "checkpoint"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(parent, link); err != nil {
+		t.Fatal(err)
+	}
+
+	_, out := run(t, link, "", "list")
+	if !strings.Contains(out, "was deleted. Bring it back with:") {
+		t.Fatalf("list in a symlinked parent does not point to the deleted project:\n%s", out)
+	}
+}
