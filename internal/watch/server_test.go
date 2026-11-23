@@ -158,13 +158,18 @@ func TestCheckpointRemembersFailedStart(t *testing.T) {
 		return exited, nil
 	}}
 
+	// The first checkpoint clones the project, which takes long on a slow
+	// disk. Only the time spent on the failed watcher matters.
+	if _, err := projectStore.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
+		t.Fatal(err)
+	}
 	began := time.Now()
 	for range 3 {
 		if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if waited := time.Since(began); waited > 2*time.Second {
+	if waited := time.Since(began); waited >= startTimeout {
 		t.Fatalf("waited %v for a watcher that had already exited", waited)
 	}
 	if starts != 1 {
