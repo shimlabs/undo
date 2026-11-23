@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/tree"
@@ -231,7 +232,7 @@ func (p *projectRestore) removals() []string {
 // removeAll deletes paths, deepest first. A directory that still holds
 // excluded files is left in place.
 func (p *projectRestore) removeAll(paths []string) error {
-	slices.SortFunc(paths, func(a, b string) int { return depth(b) - depth(a) })
+	slices.SortFunc(paths, func(a, b string) int { return tree.Depth(b) - tree.Depth(a) })
 	for _, rel := range paths {
 		full := p.path(rel)
 		if err := makeParentWritable(full); err != nil {
@@ -252,7 +253,7 @@ func (p *projectRestore) removeAll(paths []string) error {
 // cannot recreate.
 func (p *projectRestore) writeAll(projectStore *store.Store) (skipped []string, err error) {
 	paths := slices.Clone(p.changes.Written)
-	slices.SortStableFunc(paths, func(a, b string) int { return depth(a) - depth(b) })
+	slices.SortStableFunc(paths, func(a, b string) int { return tree.Depth(a) - tree.Depth(b) })
 	clonable, err := p.clonableDirs(projectStore, paths)
 	if err != nil {
 		return nil, err
@@ -316,7 +317,7 @@ func (p *projectRestore) restoreDirModeAndTimes(paths []string) error {
 		}
 	}
 	sorted := slices.Collect(maps.Keys(dirs))
-	slices.SortFunc(sorted, func(a, b string) int { return depth(b) - depth(a) })
+	slices.SortFunc(sorted, func(a, b string) int { return tree.Depth(b) - tree.Depth(a) })
 	for _, rel := range sorted {
 		source, ok := p.target[rel]
 		if !ok || source.Entry.Kind != tree.Dir {
@@ -345,21 +346,9 @@ func makeParentWritable(path string) error {
 }
 
 func setModeAndTimes(path string, entry tree.Entry) error {
-	if err := os.Chmod(path, permissionBits(entry.Mode)); err != nil {
+	if err := os.Chmod(path, clone.PermissionBits(entry.Mode)); err != nil {
 		return err
 	}
 	modTime := time.Unix(0, entry.ModTime)
 	return os.Chtimes(path, modTime, modTime)
-}
-
-// permissionBits returns the part of mode that chmod sets.
-func permissionBits(mode fs.FileMode) fs.FileMode {
-	return mode & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky)
-}
-
-func depth(rel string) int {
-	if rel == "." {
-		return -1
-	}
-	return strings.Count(rel, "/")
 }

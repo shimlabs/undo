@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/shimlabs/undo/internal/tree"
 )
@@ -114,7 +113,7 @@ func (s *Store) mergeLayer(id int, base tree.Listing) (int64, error) {
 	for rel := range manifest.Changed {
 		paths = append(paths, rel)
 	}
-	slices.SortFunc(paths, func(a, b string) int { return strings.Count(a, "/") - strings.Count(b, "/") })
+	slices.SortFunc(paths, func(a, b string) int { return tree.Depth(a) - tree.Depth(b) })
 	for _, rel := range paths {
 		entry := manifest.Changed[rel]
 		var size int64

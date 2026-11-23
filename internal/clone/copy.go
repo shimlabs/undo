@@ -61,7 +61,7 @@ func copyFile(src, dst string, info fs.FileInfo, copyData func(src, dst *os.File
 	}
 	err = copyData(in, out)
 	if err == nil {
-		err = out.Chmod(info.Mode().Perm() | info.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky))
+		err = out.Chmod(PermissionBits(info.Mode()))
 	}
 	if closeErr := out.Close(); err == nil {
 		err = closeErr
@@ -86,10 +86,15 @@ func copyDir(src, dst string, info fs.FileInfo, copyData func(src, dst *os.File)
 			return err
 		}
 	}
-	return os.Chmod(dst, info.Mode().Perm()|info.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky))
+	return os.Chmod(dst, PermissionBits(info.Mode()))
 }
 
 func setTimes(path string, info fs.FileInfo) error {
 	mtime := unix.NsecToTimespec(info.ModTime().UnixNano())
 	return unix.UtimesNanoAt(unix.AT_FDCWD, path, []unix.Timespec{mtime, mtime}, unix.AT_SYMLINK_NOFOLLOW)
+}
+
+// PermissionBits returns the part of mode that chmod sets.
+func PermissionBits(mode fs.FileMode) fs.FileMode {
+	return mode & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky)
 }

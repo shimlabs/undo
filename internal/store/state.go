@@ -102,15 +102,9 @@ func (s *Store) Extract(rel string, source Source, dst string) error {
 	if _, err := os.Lstat(dst); errors.Is(err, fs.ErrNotExist) {
 		return s.clone(src, dst)
 	}
-	tempPath := atomicfile.TempPath(dst)
-	if err := s.clone(src, tempPath); err != nil {
-		return err
-	}
-	if err := os.Rename(tempPath, dst); err != nil {
-		os.Remove(tempPath)
-		return err
-	}
-	return nil
+	return atomicfile.Replace(dst, func(tempPath string) error {
+		return s.clone(src, tempPath)
+	})
 }
 
 // ExtractBaseDir writes the whole directory rel from the base to dst, which

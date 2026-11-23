@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -195,4 +196,13 @@ func Changed(old, current Listing) (changed, deleted []string) {
 	slices.Sort(changed)
 	slices.Sort(deleted)
 	return changed, deleted
+}
+
+// Depth returns how many directories deep rel is below the root, with -1 for
+// the root itself, so sorting by depth puts parents before their children.
+func Depth(rel string) int {
+	if rel == "." {
+		return -1
+	}
+	return strings.Count(rel, "/")
 }
