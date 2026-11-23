@@ -18,7 +18,7 @@ import (
 	"github.com/shimlabs/undo/internal/tree"
 )
 
-func newTracker(t *testing.T) (*Tracker, *store.Store, string) {
+func newTrackerWithFiles(t *testing.T) (*tracker, *store.Store, string) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -35,13 +35,13 @@ func newTracker(t *testing.T) (*Tracker, *store.Store, string) {
 	return startTracker(t, root)
 }
 
-func startTracker(t *testing.T, root string) (*Tracker, *store.Store, string) {
+func startTracker(t *testing.T, root string) (*tracker, *store.Store, string) {
 	t.Helper()
 	projectStore, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracker, err := NewTracker(projectStore)
+	tracker, err := newTracker(projectStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func damage(t *testing.T, root string) {
 	os.Rename(filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "docs", "moved.md"))
 }
 
-func takeCheckpoint(t *testing.T, tracker *Tracker, label string) store.Checkpoint {
+func takeCheckpoint(t *testing.T, tracker *tracker, label string) store.Checkpoint {
 	t.Helper()
 	checkpoint, err := tracker.Checkpoint(store.CheckpointOptions{Label: label, Dir: tracker.root})
 	if err != nil {
@@ -83,14 +83,14 @@ func checkMatchesScan(t *testing.T, projectStore *store.Store, root string, id i
 	}
 }
 
-func checkpointThroughTracker(tracker *Tracker) store.Checkpointer {
+func checkpointThroughTracker(tracker *tracker) store.Checkpointer {
 	return func(_ *store.Store, options store.CheckpointOptions) (store.Checkpoint, error) {
 		return tracker.Checkpoint(options)
 	}
 }
 
 func TestTrackerMatchesFullScan(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, tracker, "first")
 	damage(t, root)
 
@@ -100,7 +100,7 @@ func TestTrackerMatchesFullScan(t *testing.T) {
 }
 
 func TestTrackerCheckpointsRestoreExactly(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	before := testutil.Fingerprint(t, root)
 	takeCheckpoint(t, tracker, "first")
 	takeCheckpoint(t, tracker, "second")
@@ -116,7 +116,7 @@ func TestTrackerCheckpointsRestoreExactly(t *testing.T) {
 }
 
 func TestTrackerSeesChangeRightBeforeCheckpoint(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, tracker, "first")
 	takeCheckpoint(t, tracker, "warm")
 
@@ -132,7 +132,7 @@ func TestTrackerSeesChangeRightBeforeCheckpoint(t *testing.T) {
 }
 
 func TestTrackerRecoversAfterOutsideCheckpoint(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	before := testutil.Fingerprint(t, root)
 	takeCheckpoint(t, tracker, "first")
 	takeCheckpoint(t, tracker, "second")
@@ -153,7 +153,7 @@ func TestTrackerRecoversAfterOutsideCheckpoint(t *testing.T) {
 }
 
 func TestTrackerFollowsMovedDirectories(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, tracker, "first")
 
 	os.Rename(filepath.Join(root, "src"), filepath.Join(root, "moved"))
@@ -166,7 +166,7 @@ func TestTrackerFollowsMovedDirectories(t *testing.T) {
 }
 
 func TestTrackerSeesRecreatedProject(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, tracker, "first")
 
 	os.RemoveAll(root)
@@ -180,7 +180,7 @@ func TestTrackerSeesRecreatedProject(t *testing.T) {
 }
 
 func TestTrackerFollowsExcludeRuleChanges(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "data\n")
 	testutil.WriteFile(t, filepath.Join(root, "data", "important.db"), "precious")
 	takeCheckpoint(t, tracker, "data excluded")
@@ -199,7 +199,7 @@ func TestTrackerFollowsExcludeRuleChanges(t *testing.T) {
 }
 
 func TestTrackerAppliesDirectoryPatterns(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "build/\n")
 	takeCheckpoint(t, tracker, "first")
 
@@ -245,7 +245,7 @@ func TestTrackerRecordsDirectoryThatBecomesReadable(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read every directory")
 	}
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, "data", "rows"), "data")
 	os.Chmod(filepath.Join(root, "data"), 0o000)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "data"), 0o755) })
@@ -258,7 +258,7 @@ func TestTrackerRecordsDirectoryThatBecomesReadable(t *testing.T) {
 }
 
 func TestTrackerFollowsHardLinks(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	os.Link(filepath.Join(root, "README.md"), filepath.Join(root, "docs", "README.link"))
 	takeCheckpoint(t, tracker, "first")
 
@@ -269,7 +269,7 @@ func TestTrackerFollowsHardLinks(t *testing.T) {
 }
 
 func TestTrackerSavesListingWhenClosed(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, tracker, "first")
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# edited")
 	checkpoint := takeCheckpoint(t, tracker, "second")
@@ -284,7 +284,7 @@ func TestTrackerSavesListingWhenClosed(t *testing.T) {
 }
 
 func TestTrackerRescansAfterDroppedEvents(t *testing.T) {
-	tracker, projectStore, root := newTracker(t)
+	tracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, tracker, "first")
 	testutil.WriteFile(t, filepath.Join(root, "missed.txt"), "created while events were dropped")
 	takeCheckpoint(t, tracker, "second")

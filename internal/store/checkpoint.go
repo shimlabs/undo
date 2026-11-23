@@ -115,7 +115,10 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	return checkpoint, s.saveListing(checkpoint.ID, current)
+	if !s.IsListingBehind(checkpoint.ID) {
+		return checkpoint, nil
+	}
+	return checkpoint, s.SaveListing(checkpoint.ID, current)
 }
 
 // Commit records a checkpoint from changes found by a caller that tracks the

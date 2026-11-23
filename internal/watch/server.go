@@ -70,7 +70,7 @@ func Serve(ctx context.Context, projectStore *store.Store, options Options) erro
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
 
-	tracker, err := NewTracker(projectStore)
+	tracker, err := newTracker(projectStore)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (p *pruner) stop() {
 
 type server struct {
 	listener        *net.UnixListener
-	tracker         *Tracker
+	tracker         *tracker
 	pruner          *pruner
 	options         Options
 	checkpointCount int
@@ -172,7 +172,7 @@ func (s *server) acceptLoop() error {
 				return nil
 			}
 			isPruneDue = false
-			s.tracker.SaveListing()
+			s.tracker.SaveListingIfBehind()
 			s.pruner.request()
 			continue
 		}

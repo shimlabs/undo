@@ -28,9 +28,9 @@ import (
 // instead.
 const markerTimeout = 3 * time.Second
 
-// Tracker keeps a project's listing in memory and updates it from filesystem
+// tracker keeps a project's listing in memory and updates it from filesystem
 // events, so a checkpoint only has to check the paths that changed.
-type Tracker struct {
+type tracker struct {
 	store     *store.Store
 	root      string
 	markerDir string
@@ -50,9 +50,9 @@ type Tracker struct {
 	lastID     int
 }
 
-// NewTracker starts watching the project of s. Its first checkpoint compares
+// newTracker starts watching the project in projectStore. Its first checkpoint compares
 // the whole project, because changes made before it started are not known.
-func NewTracker(projectStore *store.Store) (*Tracker, error) {
+func newTracker(projectStore *store.Store) (*tracker, error) {
 	markerDir := projectStore.MarkerDir()
 	if err := os.MkdirAll(markerDir, 0o700); err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func NewTracker(projectStore *store.Store) (*Tracker, error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &Tracker{
+	t := &tracker{
 		store:        projectStore,
 		root:         projectStore.Root(),
 		markerDir:    markerDir,
@@ -78,7 +78,7 @@ func NewTracker(projectStore *store.Store) (*Tracker, error) {
 // startStream reads the exclude rules and starts watching with them. On Linux
 // the stream does not watch excluded directories, so it has to start over
 // when the rules change.
-func (t *Tracker) startStream() error {
+func (t *tracker) startStream() error {
 	matcher, err := exclude.New(t.root)
 	if err != nil {
 		return err
@@ -95,16 +95,22 @@ func (t *Tracker) startStream() error {
 // Close stops watching and saves the listing, so the next tracker or scan
 // does not have to rebuild it from the layers.
 // Closing it again does nothing.
-func (t *Tracker) Close() {
+func (t *tracker) Close() {
 	t.closeOnce.Do(func() {
 		t.stream.Close()
-		t.SaveListing()
+		t.saveListing()
 	})
 }
 
-// SaveListing saves the tracker's listing in the store. The server calls it
-// when it goes quiet.
-func (t *Tracker) SaveListing() {
+// SaveListingIfBehind saves the tracker's listing in the store when the saved
+// one is far behind. The server calls it when it goes quiet.
+func (t *tracker) SaveListingIfBehind() {
+	if t.store.IsListingBehind(t.lastID) {
+		t.saveListing()
+	}
+}
+
+func (t *tracker) saveListing() {
 	if t.listing != nil && t.lastID > 0 {
 		if err := t.store.SaveListing(t.lastID, t.listing); err != nil {
 			t.store.LogError(fmt.Errorf("saving the listing: %w", err))
@@ -114,7 +120,7 @@ func (t *Tracker) SaveListing() {
 
 // shouldSkip reports whether dir is excluded, so the stream does not need to
 // watch it.
-func (t *Tracker) shouldSkip(dir string) bool {
+func (t *tracker) shouldSkip(dir string) bool {
 	rel, err := filepath.Rel(t.root, dir)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return false
@@ -122,7 +128,7 @@ func (t *Tracker) shouldSkip(dir string) bool {
 	return t.matcher.Load().Excludes(filepath.ToSlash(rel), true)
 }
 
-func (t *Tracker) handleEvents(events []fsnotify.Event) {
+func (t *tracker) handleEvents(events []fsnotify.Event) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, event := range events {
@@ -148,13 +154,13 @@ func (t *Tracker) handleEvents(events []fsnotify.Event) {
 	}
 }
 
-func (t *Tracker) isInRoot(path string) bool {
+func (t *tracker) isInRoot(path string) bool {
 	return path == t.root || strings.HasPrefix(path, t.root+string(filepath.Separator))
 }
 
 // Checkpoint records the project's current state. Before that, it waits until
 // every change made before the call has been delivered.
-func (t *Tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint, error) {
+func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint, error) {
 	isDelivered := t.waitForMarker()
 	t.mu.Lock()
 	dirty, shouldRescan, hasRulesChange := t.dirty, t.shouldRescan || !isDelivered, t.hasRulesChange
@@ -180,7 +186,7 @@ func (t *Tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint,
 	return checkpoint, err
 }
 
-func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]bool, shouldRescan bool) (store.Checkpoint, error) {
+func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]bool, shouldRescan bool) (store.Checkpoint, error) {
 	latest, hasLatest, err := t.store.Latest()
 	if err != nil {
 		return store.Checkpoint{}, err
@@ -190,8 +196,9 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		if err != nil {
 			return checkpoint, err
 		}
-		// Take saved the listing it scanned, and every change since then is in
-		// dirty, so the next checkpoint does not need a full scan.
+		// Take saved the listing it scanned, since there was none, and every
+		// change since then is in dirty, so the next checkpoint does not need
+		// a full scan.
 		t.listing, err = t.store.ListingAt(checkpoint.ID)
 		t.lastID = checkpoint.ID
 		return checkpoint, err
@@ -243,7 +250,7 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 // waitForMarker writes a file next to the store and waits for its event.
 // Events arrive in order, so once this one arrives, every earlier change has
 // arrived too.
-func (t *Tracker) waitForMarker() bool {
+func (t *tracker) waitForMarker() bool {
 	path := filepath.Join(t.markerDir, fmt.Sprintf("%d-%d", os.Getpid(), t.sequence.Add(1)))
 	done := make(chan struct{})
 	t.mu.Lock()
@@ -305,7 +312,7 @@ func (c *changeSet) removeUnder(rel string) {
 // checkpoint and returns what changed. A path it has no permission to read
 // returns an error matching fs.ErrPermission, and the caller compares the
 // whole project instead, as a scan handles unreadable paths.
-func (t *Tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, err error) {
+func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, err error) {
 	changes := changeSet{listing: t.listing, changed: map[string]bool{}, deleted: map[string]bool{}}
 	matcher := t.matcher.Load()
 	for path := range t.withHardLinks(dirty) {
@@ -319,7 +326,7 @@ func (t *Tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 // withHardLinks adds the other names of every dirty file that has several.
 // A write through one name changes the content of all of them, but the
 // event names only the one that was written.
-func (t *Tracker) withHardLinks(dirty map[string]bool) map[string]bool {
+func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 	var inodes map[uint64]bool
 	for path := range dirty {
 		info, err := os.Lstat(path)
@@ -344,7 +351,7 @@ func (t *Tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 	return dirty
 }
 
-func (t *Tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path string) error {
+func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path string) error {
 	rel, err := filepath.Rel(t.root, path)
 	if err != nil {
 		return nil
@@ -380,7 +387,7 @@ func (t *Tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 
 // addUnder adds everything inside a new directory to the listing, in case some
 // of its files were created before their events arrived.
-func (t *Tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir string) error {
+func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir string) error {
 	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || path == dir {
 			return nil

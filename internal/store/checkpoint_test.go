@@ -440,3 +440,37 @@ func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
 		t.Skip("the file never changed during a clone")
 	}
 }
+
+func TestListingAtBuildsForwardFromOlderSavedListing(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a", "dir/b.txt": "b"})
+	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
+	os.RemoveAll(filepath.Join(root, "dir"))
+	testutil.WriteFile(t, filepath.Join(root, "new", "c.txt"), "c")
+	latest, err := projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := projectStore.savedListingID(); id != 1 {
+		t.Fatalf("saved listing is at checkpoint %d, want it left at 1 until the chain is long", id)
+	}
+
+	forward, err := projectStore.ListingAt(latest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := projectStore.State(latest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forward) != len(state) {
+		t.Fatalf("forward listing has %d paths, state has %d", len(forward), len(state))
+	}
+	for rel, source := range state {
+		if forward[rel] != source.Entry {
+			t.Errorf("%s: forward %+v, state %+v", rel, forward[rel], source.Entry)
+		}
+	}
+}
