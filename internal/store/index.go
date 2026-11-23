@@ -14,6 +14,10 @@ import (
 	"github.com/shimlabs/undo/internal/tree"
 )
 
+// Checkpointer takes a checkpoint of the project in s, either by scanning it
+// with Take or through the background watcher.
+type Checkpointer func(s *Store, label, dir string) (Checkpoint, error)
+
 // Checkpoint is a point the project can be restored to: its state just before
 // the command in Label ran.
 type Checkpoint struct {

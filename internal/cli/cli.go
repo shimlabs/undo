@@ -229,23 +229,33 @@ func find(arg string, env Env) (*store.Store, store.Checkpoint, error) {
 	return nil, store.Checkpoint{}, fmt.Errorf("no checkpoint %d (see undo list)", id)
 }
 
+// restoreTo restores cp. Without yes, it shows the changes and asks first.
+// With yes, it skips that preview, which costs a scan of the project, and shows
+// the changes it made instead.
 func restoreTo(s *store.Store, cp store.Checkpoint, yes bool, env Env) error {
-	changes, err := restore.Plan(s, cp.ID)
-	if err != nil {
-		return err
-	}
 	fmt.Fprintf(env.Stdout, "Checkpoint %d, %s, before: %s\n", cp.ID, ago(cp.Time), cp.Label)
-	if len(changes.Write)+len(changes.Remove) == 0 {
-		fmt.Fprintln(env.Stdout, "Nothing to restore: the project already matches this checkpoint.")
-		return nil
+	if !yes {
+		changes, err := restore.Plan(s, cp.ID)
+		if err != nil {
+			return err
+		}
+		if len(changes.Write)+len(changes.Remove) == 0 {
+			fmt.Fprintln(env.Stdout, "Nothing to restore: the project already matches this checkpoint.")
+			return nil
+		}
+		printChanges(env.Stdout, changes)
+		if !confirm(env, fmt.Sprintf("Restore %d paths? [y/N] ", len(changes.Write)+len(changes.Remove))) {
+			return errDeclined
+		}
 	}
-	printChanges(env.Stdout, changes)
-	if !yes && !confirm(env, fmt.Sprintf("Restore %d paths? [y/N] ", len(changes.Write)+len(changes.Remove))) {
-		return errDeclined
-	}
-	applied, err := restore.Apply(s, cp.ID)
+	applied, err := restore.Apply(s, cp.ID, func(s *store.Store, label, dir string) (store.Checkpoint, error) {
+		return take(s, label, dir, env)
+	})
 	if err != nil {
 		return err
+	}
+	if yes {
+		printChanges(env.Stdout, applied)
 	}
 	fmt.Fprintf(env.Stdout, "Restored %d paths. Run undo again to put them back.\n", len(applied.Write)+len(applied.Remove))
 	return nil

@@ -10,9 +10,6 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-// Checkpointer takes a checkpoint of the project in s.
-type Checkpointer func(s *store.Store, label, dir string) (store.Checkpoint, error)
-
 // input is the part of a PreToolUse event that undo reads. Claude Code and
 // Codex send the same fields.
 type input struct {
@@ -26,7 +23,7 @@ type input struct {
 
 // handle reads one PreToolUse event from in and takes a checkpoint labeled by
 // label. Errors are logged in the store, and the agent is never blocked.
-func handle(in io.Reader, checkpoint Checkpointer, label func(event input, root string) string) error {
+func handle(in io.Reader, checkpoint store.Checkpointer, label func(event input, root string) string) error {
 	var event input
 	if err := json.NewDecoder(in).Decode(&event); err != nil {
 		return err

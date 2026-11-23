@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/shimlabs/undo/internal/store"
 )
 
 // codexMatcher covers shell commands, which Codex reports as Bash, and file
@@ -54,7 +56,7 @@ func UninstallCodex() (string, error) {
 // HandleCodex reads one Codex PreToolUse event from in and takes a checkpoint
 // with checkpoint. Errors are logged in the store, and the agent is never
 // blocked.
-func HandleCodex(in io.Reader, checkpoint Checkpointer) error {
+func HandleCodex(in io.Reader, checkpoint store.Checkpointer) error {
 	return handle(in, checkpoint, codexLabel)
 }
 

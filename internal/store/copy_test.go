@@ -23,7 +23,7 @@ func TestCopyModeRestoresExactly(t *testing.T) {
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := restore.Apply(s, 1); err != nil {
+	if _, err := restore.Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if got := fingerprint(root); !maps.Equal(got, want) {
@@ -82,7 +82,7 @@ func TestCopyModeWorksWithoutClones(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(root, "main.go"))
-	if _, err := restore.Apply(s, 1); err != nil {
+	if _, err := restore.Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if got := fingerprint(root); !maps.Equal(got, want) {

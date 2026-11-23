@@ -110,7 +110,7 @@ func TestTrackerCheckpointsRestoreExactly(t *testing.T) {
 	damage(t, root)
 	tracker.Checkpoint("third", root)
 
-	if _, err := restore.Apply(s, 2); err != nil {
+	if _, err := restore.Apply(s, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if after := fingerprint(t, root); !maps.Equal(before, after) {
@@ -152,7 +152,7 @@ func TestTrackerRecoversAfterOutsideCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := restore.Apply(s, 2); err != nil {
+	if _, err := restore.Apply(s, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if after := fingerprint(t, root); !maps.Equal(before, after) {

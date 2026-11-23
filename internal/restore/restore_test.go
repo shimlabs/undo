@@ -113,7 +113,7 @@ func restoreAfter(t *testing.T, damage func(root string)) {
 
 	damage(root)
 
-	if _, err := Apply(s, 1); err != nil {
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, want, snapshot(t, root))
@@ -173,7 +173,7 @@ func TestRestoreKeepsNodeModules(t *testing.T) {
 	write(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v2")
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	if _, err := Apply(s, 1); err != nil {
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "src", "main.go")); err != nil {
@@ -194,10 +194,10 @@ func TestRestoreIsUndoable(t *testing.T) {
 	write(t, filepath.Join(root, "notes.txt"), "written after the checkpoint")
 	damaged := snapshot(t, root)
 
-	if _, err := Apply(s, 1); err != nil {
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Apply(s, 2); err != nil {
+	if _, err := Apply(s, 2, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	requireSame(t, damaged, snapshot(t, root))

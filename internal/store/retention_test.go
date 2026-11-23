@@ -88,7 +88,7 @@ func TestPruneMergesOldestIntoBase(t *testing.T) {
 		t.Fatalf("remaining checkpoints = %+v", list)
 	}
 	for _, id := range []int{3, 4} {
-		if _, err := restore.Apply(s, id); err != nil {
+		if _, err := restore.Apply(s, id, (*store.Store).Take); err != nil {
 			t.Fatal(err)
 		}
 		if got := fingerprint(root); !maps.Equal(got, states[id-1]) {
@@ -166,7 +166,7 @@ func TestPruneBySizeMergesUntilUnder(t *testing.T) {
 	if list[len(list)-1].ID != 4 {
 		t.Fatalf("latest checkpoint is %d, want 4", list[len(list)-1].ID)
 	}
-	if _, err := restore.Apply(s, 4); err != nil {
+	if _, err := restore.Apply(s, 4, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
 	if got := fingerprint(root); !maps.Equal(got, want) {

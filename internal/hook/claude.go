@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/shimlabs/undo/internal/store"
 )
 
 const claudeMatcher = "Bash|Edit|Write|MultiEdit|NotebookEdit"
@@ -51,7 +53,7 @@ func UninstallClaude() (string, error) {
 // HandleClaude reads one Claude Code PreToolUse event from in and takes a
 // checkpoint with checkpoint. Errors are logged in the store, and the agent is
 // never blocked.
-func HandleClaude(in io.Reader, checkpoint Checkpointer) error {
+func HandleClaude(in io.Reader, checkpoint store.Checkpointer) error {
 	return handle(in, checkpoint, claudeLabel)
 }
 

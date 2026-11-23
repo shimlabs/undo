@@ -43,13 +43,17 @@ func Plan(s *store.Store, id int) (Changes, error) {
 }
 
 // Apply makes the project match checkpoint id. It first takes a checkpoint of
-// the current state, so the restore itself can be undone. Excluded paths are
-// never touched.
-func Apply(s *store.Store, id int) (Changes, error) {
-	if _, err := s.State(id); err != nil {
+// the current state with checkpoint, so the restore itself can be undone.
+// Excluded paths are never touched.
+func Apply(s *store.Store, id int, checkpoint store.Checkpointer) (Changes, error) {
+	list, err := s.List()
+	if err != nil {
 		return Changes{}, err
 	}
-	if _, err := s.Take(fmt.Sprintf("undo to %d", id), s.Root()); err != nil {
+	if !slices.ContainsFunc(list, func(cp store.Checkpoint) bool { return cp.ID == id }) {
+		return Changes{}, fmt.Errorf("no checkpoint %d", id)
+	}
+	if _, err := checkpoint(s, fmt.Sprintf("undo to %d", id), s.Root()); err != nil {
 		return Changes{}, err
 	}
 	unlock, err := s.RLock()
