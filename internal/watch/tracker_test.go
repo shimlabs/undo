@@ -36,17 +36,17 @@ func newTrackerWithFiles(t *testing.T) (*tracker, *store.Store, string) {
 	return startTracker(t, root)
 }
 
-func startTracker(t testing.TB, root string) (*tracker, *store.Store, string) {
-	t.Helper()
-	projectStore, err := store.Create(t.TempDir(), root)
+func startTracker(tb testing.TB, root string) (*tracker, *store.Store, string) {
+	tb.Helper()
+	projectStore, err := store.Create(tb.TempDir(), root)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	projectTracker, err := newTracker(projectStore)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	t.Cleanup(projectTracker.Close)
+	tb.Cleanup(projectTracker.Close)
 	return projectTracker, projectStore, root
 }
 
@@ -62,11 +62,11 @@ func damage(t *testing.T, root string) {
 	}
 }
 
-func takeCheckpoint(t testing.TB, projectTracker *tracker, label string) store.Checkpoint {
-	t.Helper()
+func takeCheckpoint(tb testing.TB, projectTracker *tracker, label string) store.Checkpoint {
+	tb.Helper()
 	checkpoint, err := projectTracker.Checkpoint(store.CheckpointOptions{Label: label, Dir: projectTracker.root})
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return checkpoint
 }
