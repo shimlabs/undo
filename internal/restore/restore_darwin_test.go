@@ -43,19 +43,7 @@ func TestPruneAndRestoreWithFileLockedInFinder(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "x")
 	take(t, projectStore, "3")
 
-	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
-	take(t, projectStore, "4")
-	checkpoints, err := projectStore.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	apply(t, projectStore, checkpoints[len(checkpoints)-2].ID)
-	if data, err := os.ReadFile(filepath.Join(root, "src", "main.go")); err != nil || string(data) != "package main\n" {
-		t.Fatalf("src/main.go = %q, %v", data, err)
-	}
+	requireWorksAfterPrune(t, projectStore, root)
 }
 
 func TestPruneWithFileLockedThenUnlockedAndEdited(t *testing.T) {
@@ -72,10 +60,7 @@ func TestPruneWithFileLockedThenUnlockedAndEdited(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "x")
 	take(t, projectStore, "3")
 
-	if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	take(t, projectStore, "4")
+	requireWorksAfterPrune(t, projectStore, root)
 }
 
 func TestRestoreKeepsFileLockedInFinder(t *testing.T) {
