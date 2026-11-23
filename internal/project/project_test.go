@@ -47,14 +47,34 @@ func TestRootWithoutGit(t *testing.T) {
 }
 
 func TestIDStable(t *testing.T) {
-	a := ID("/projects/a")
-	if a != ID("/projects/a") {
+	id := ID("/projects/a")
+	if id != ID("/projects/a") {
 		t.Fatal("ID is not stable for the same root")
 	}
-	if len(a) != 32 {
-		t.Fatalf("len(ID) = %d, want 32", len(a))
+	if len(id) != 32 {
+		t.Fatalf("len(ID) = %d, want 32", len(id))
 	}
-	if a == ID("/projects/b") {
+	if id == ID("/projects/b") {
 		t.Fatal("different roots share an ID")
+	}
+}
+
+func TestRootUsesStoredSpelling(t *testing.T) {
+	parent := resolved(t, t.TempDir())
+	stored := filepath.Join(parent, "MyProj")
+	if err := os.Mkdir(stored, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	typed := filepath.Join(parent, "myproj")
+	if _, err := os.Stat(typed); err != nil {
+		t.Skip("the filesystem is case-sensitive")
+	}
+
+	root, err := Root(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != stored {
+		t.Fatalf("Root(%s) = %s, want %s", typed, root, stored)
 	}
 }

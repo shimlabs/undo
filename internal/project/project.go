@@ -10,7 +10,7 @@ import (
 
 // Root returns the root of the git repository that contains dir. If dir is
 // not inside a repository, it returns dir itself. The result is an absolute
-// path with symlinks resolved.
+// path with symlinks resolved, spelled the way the filesystem stores it.
 func Root(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -18,6 +18,9 @@ func Root(dir string) (string, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
+		return "", err
+	}
+	if resolved, err = canonicalCase(resolved); err != nil {
 		return "", err
 	}
 	for current := resolved; ; {
