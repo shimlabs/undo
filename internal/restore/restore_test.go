@@ -728,3 +728,34 @@ func TestRestoreKeepsDirectoryWithExcludedContentWhereFileWas(t *testing.T) {
 		t.Errorf("the excluded content in cache is gone: %v", err)
 	}
 }
+
+func TestRestoreReportsStoredFilesThatAreGone(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "first")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# second")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package second\n")
+	take(t, projectStore, "second")
+	state, err := projectStore.State(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A power cut can lose the newest checkpoint's copies.
+	if err := os.Remove(filepath.Join(projectStore.Dir(), "layers", "2", "files", "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	if state["README.md"].Layer != 2 {
+		t.Fatalf("README.md is stored in layer %d, want 2", state["README.md"].Layer)
+	}
+	os.RemoveAll(filepath.Join(root, "src"))
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	changes := apply(t, projectStore, 2)
+	if !slices.Equal(changes.Lost, []string{"README.md"}) {
+		t.Fatalf("Lost = %v, want README.md", changes.Lost)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package second\n" {
+		t.Fatalf("src/main.go = %q; the restore stopped at the missing copy", data)
+	}
+}

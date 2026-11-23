@@ -96,9 +96,9 @@ func checkLocal(paths []string) error {
 // source, to dst. An existing dst is replaced in one rename, so it is never
 // left half written.
 func (s *Store) Extract(rel string, source Source, dst string) error {
-	src := s.basePath(rel)
-	if source.Layer > 0 {
-		src = s.layerFile(source.Layer, rel)
+	src, err := s.storedPath(rel, source)
+	if err != nil {
+		return err
 	}
 	if _, err := os.Lstat(dst); errors.Is(err, fs.ErrNotExist) {
 		return s.clone(src, dst)
@@ -112,9 +112,9 @@ func (s *Store) Extract(rel string, source Source, dst string) error {
 // in source, to name in dir, like Extract. It works relative to dir, so a
 // symlink that replaced a directory above dir is never followed.
 func (s *Store) ExtractAt(rel string, source Source, dir *os.File, name string) error {
-	src := s.basePath(rel)
-	if source.Layer > 0 {
-		src = s.layerFile(source.Layer, rel)
+	src, err := s.storedPath(rel, source)
+	if err != nil {
+		return err
 	}
 	dirFd := int(dir.Fd())
 	var stat unix.Stat_t
@@ -129,6 +129,19 @@ func (s *Store) ExtractAt(rel string, source Source, dir *os.File, name string) 
 		return errors.Join(&os.LinkError{Op: "renameat", Old: tempName, New: name, Err: err}, unix.Unlinkat(dirFd, tempName, 0))
 	}
 	return nil
+}
+
+// storedPath returns where the copy of rel recorded in source is. It returns
+// an error wrapping ErrStoredFileMissing if the copy is gone.
+func (s *Store) storedPath(rel string, source Source) (string, error) {
+	src := s.basePath(rel)
+	if source.Layer > 0 {
+		src = s.layerFile(source.Layer, rel)
+	}
+	if _, err := os.Lstat(src); errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
+	}
+	return src, nil
 }
 
 // ExtractBaseDir writes the whole directory rel from the base to name in

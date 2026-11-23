@@ -31,6 +31,10 @@ var (
 	// ErrUnsafeStore means a store directory exists that is not a private
 	// directory of the current user, so someone else could change it.
 	ErrUnsafeStore = errors.New("the store directory must be a directory owned by you and private to you")
+	// ErrStoredFileMissing means the stored copy of a file is gone. The
+	// newest checkpoint's copies can be lost in a power cut, since they are
+	// not flushed to disk.
+	ErrStoredFileMissing = errors.New("the stored copy of this file is missing")
 	// ErrStoreInsideProject means the project holds the store home, and no
 	// folder next to it can hold the store instead.
 	ErrStoreInsideProject = errors.New("this folder holds the undo store and has no writable parent on the same volume")

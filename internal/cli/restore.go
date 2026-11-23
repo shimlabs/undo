@@ -201,6 +201,9 @@ func printNotRestored(out io.Writer, applied restore.Changes) {
 	for _, rel := range applied.Kept {
 		fmt.Fprintf(out, "  kept     %s  (never saved: unreadable, or excluded since the checkpoint)\n", printable(rel))
 	}
+	for _, rel := range applied.Lost {
+		fmt.Fprintf(out, "  lost     %s  (its saved copy is gone, as after a power cut)\n", printable(rel))
+	}
 	for _, rel := range applied.Unstable {
 		fmt.Fprintf(out, "  check    %s  (it was changing while it was saved)\n", printable(rel))
 	}

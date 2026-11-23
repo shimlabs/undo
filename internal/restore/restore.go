@@ -37,6 +37,9 @@ type Changes struct {
 	// Unstable are files that kept changing while the checkpoint saved them,
 	// so their restored content may be a mix of two writes.
 	Unstable []string
+	// Lost are files whose stored copy is gone, as the newest checkpoint's
+	// copies can be after a power cut.
+	Lost []string
 }
 
 // Len returns the number of paths the restore writes or removes.
@@ -422,11 +425,23 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 		}
 	}
 	// Every directory exists now, so the files can be written in any order.
-	return skipped, parallel.For(len(files), func(i int) error {
-		return p.inParent(files[i], func(dir *os.File, name string) error {
+	isLost := make([]bool, len(files))
+	err = parallel.For(len(files), func(i int) error {
+		err := p.inParent(files[i], func(dir *os.File, name string) error {
 			return projectStore.ExtractAt(files[i], p.target[files[i]], dir, name)
 		})
+		if errors.Is(err, store.ErrStoredFileMissing) {
+			isLost[i] = true
+			return nil
+		}
+		return err
 	})
+	for i, rel := range files {
+		if isLost[i] {
+			p.changes.Lost = append(p.changes.Lost, rel)
+		}
+	}
+	return skipped, err
 }
 
 // inParent opens the directory that holds rel through the project root and

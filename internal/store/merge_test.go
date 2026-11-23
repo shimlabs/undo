@@ -174,3 +174,34 @@ func TestFinishMergeRemovesFilesLeftByInterruptedMerge(t *testing.T) {
 		t.Fatalf("base still holds the interrupted merge's temporary file: %v", err)
 	}
 }
+
+// After a power cut, the newest layer's cloned files may be missing even
+// though its manifest was flushed. Once that layer is merged, the merge
+// fails, merge.json stays, and every State call returns ErrMergePending.
+func TestMissingLayerFileDoesNotBlockStore(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a1", "b.txt": "b1"})
+	take := func(label string) Checkpoint {
+		c, err := projectStore.Take(CheckpointOptions{Label: label, Dir: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	take("1")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
+	second := take("2")
+	os.Remove(projectStore.layerFile(second.ID, "a.txt"))
+	for i := range 3 {
+		testutil.WriteFile(t, filepath.Join(root, "b.txt"), "b"+string(rune('2'+i)))
+		take("later")
+	}
+	_, pruneErr := projectStore.Prune(time.Now(), Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40})
+	latest, _, _ := projectStore.Latest()
+	testutil.WriteFile(t, filepath.Join(root, "c.txt"), "new work")
+	if _, err := projectStore.Take(CheckpointOptions{Label: "after", Dir: root}); err != nil {
+		t.Errorf("Take after the failed merge: %v", err)
+	}
+	if _, err := projectStore.State(latest.ID); err != nil {
+		t.Fatalf("prune error %v; State(latest=%d) = %v", pruneErr, latest.ID, err)
+	}
+}

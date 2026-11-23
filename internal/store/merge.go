@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -132,6 +133,17 @@ func (s *Store) mergeLayer(id int, base tree.Listing, parents *tree.ParentChecke
 			size, err = s.mergeDir(rel, parents)
 		case tree.File, tree.Symlink:
 			size, err = s.mergeFile(id, rel, parents)
+			if errors.Is(err, ErrStoredFileMissing) {
+				// The checkpoints that held this version cannot restore it
+				// either, so the merge drops it instead of stopping for good.
+				s.LogError(fmt.Errorf("merging checkpoint %d: %w", id, err))
+				if size, err = s.removeFromBase(rel, parents); err != nil {
+					return freed, err
+				}
+				freed += size
+				delete(base, rel)
+				continue
+			}
 		}
 		if err != nil {
 			return freed, err
