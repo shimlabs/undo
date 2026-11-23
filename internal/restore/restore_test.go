@@ -499,6 +499,28 @@ func TestRestoreKeepsChangedFileItCannotReadNow(t *testing.T) {
 	}
 }
 
+func TestPlanRightAfterRestoreIsEmpty(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "first")
+	os.RemoveAll(filepath.Join(root, "src"))
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "changed")
+	if _, err := Apply(projectStore, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := Plan(projectStore, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes.Len() != 0 {
+		t.Fatalf("restoring checkpoint 1 again would write %v and remove %v", changes.Written, changes.Removed)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "changed again")
+	if changes, err := Plan(projectStore, 1); err != nil || !slices.Equal(changes.Written, []string{"README.md"}) {
+		t.Fatalf("after a later edit, Plan = %v, %v; want README.md written", changes.Written, err)
+	}
+}
+
 func TestRestoreReplacesChangedNamedPipe(t *testing.T) {
 	projectStore, root := newProject(t)
 	syscall.Mkfifo(filepath.Join(root, "pipe"), 0o640)
