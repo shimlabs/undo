@@ -16,6 +16,10 @@ type Event struct {
 	Path string
 	// ID is the event's FSEvents ID. It is 0 on Linux.
 	ID EventID
+	// IsRenamed is set when Path was renamed, into its place or away. A
+	// directory moved into place brings files that have no events of their
+	// own. It is only set on macOS; inotify reports those files itself.
+	IsRenamed bool
 	// IsHistoryDone marks the end of the earlier changes a resumed stream
 	// delivers. Events after it are new, and may arrive before it.
 	IsHistoryDone bool

@@ -159,6 +159,7 @@ func undoStreamEvents(handle C.uintptr_t, count C.size_t, paths **C.char, flags 
 			Path:         C.GoString(pathList[i]),
 			ID:           EventID(idList[i]),
 			ShouldRescan: flagList[i]&rescanFlags != 0,
+			IsRenamed:    flagList[i]&C.kFSEventStreamEventFlagItemRenamed != 0,
 		})
 	}
 	onEvents(events)

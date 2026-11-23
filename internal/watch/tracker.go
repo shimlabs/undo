@@ -40,7 +40,9 @@ type tracker struct {
 	sequence  atomic.Uint64
 	closeOnce sync.Once
 
-	mu             sync.Mutex
+	mu sync.Mutex
+	// dirty maps each path reported since the last checkpoint to whether
+	// it was renamed.
 	dirty          map[string]bool
 	shouldRescan   bool
 	hasRulesChange bool
@@ -184,12 +186,12 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 			continue
 		}
 		if t.isInRoot(event.Path) {
-			t.dirty[event.Path] = true
+			t.dirty[event.Path] = t.dirty[event.Path] || event.IsRenamed
 		}
 		// Creating, removing or renaming a path also changes its directory's
 		// times, but the event names only the path itself.
-		if t.isInRoot(parent) {
-			t.dirty[parent] = true
+		if _, isDirty := t.dirty[parent]; !isDirty && t.isInRoot(parent) {
+			t.dirty[parent] = false
 		}
 	}
 }
@@ -362,8 +364,8 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 	changes := newChangeSet(t.listing)
 	matcher := t.matcher.Load()
 	parents := tree.NewParentChecker(t.root)
-	for fullPath := range t.withHardLinks(dirty) {
-		if err := t.applyPath(changes, matcher, parents, fullPath); err != nil {
+	for fullPath, isRenamed := range t.withHardLinks(dirty) {
+		if err := t.applyPath(changes, matcher, parents, fullPath, isRenamed); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -393,7 +395,9 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 	}
 	for rel, entry := range t.listing {
 		if entry.Kind == tree.File && inodes[entry.Inode] {
-			dirty[filepath.Join(t.root, filepath.FromSlash(rel))] = true
+			if fullPath := filepath.Join(t.root, filepath.FromSlash(rel)); !dirty[fullPath] {
+				dirty[fullPath] = false
+			}
 		}
 	}
 	return dirty
@@ -402,7 +406,7 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 // applyPath updates the listing for one reported path. A path below a
 // symlink or a file is gone from the project, even if a stat through the
 // link would find something.
-func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parents *tree.ParentChecker, fullPath string) error {
+func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parents *tree.ParentChecker, fullPath string, isRenamed bool) error {
 	rel, err := filepath.Rel(t.root, fullPath)
 	if err != nil {
 		return nil
@@ -442,16 +446,16 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 		// The event names the path before a rename that changed only case or
 		// Unicode form, and the stat reached the renamed file.
 		removeRel()
-		return t.applyPath(changes, matcher, parents, filepath.Join(filepath.Dir(fullPath), storedName))
+		return t.applyPath(changes, matcher, parents, filepath.Join(filepath.Dir(fullPath), storedName), isRenamed)
 	}
 	if matcher.Excludes(rel, entry.Kind == tree.Dir) {
 		return nil
 	}
-	// A directory renamed over this one has the same name but other contents,
-	// and its files have no events of their own.
-	isReplaced := wasDir && (entry.Kind != tree.Dir || previous.Inode != entry.Inode)
+	// A directory renamed into place, even the one that was here before, can
+	// hold files that changed elsewhere and have no events of their own.
+	isReplaced := wasDir && (entry.Kind != tree.Dir || previous.Inode != entry.Inode || isRenamed)
 	if isReplaced {
-		changes.removeUnder(rel)
+		changes.replaceUnder(rel)
 	}
 	changes.update(rel, entry)
 	// A directory that is new or replaced, or whose mode changed and may have

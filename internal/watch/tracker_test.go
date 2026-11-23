@@ -536,3 +536,72 @@ func TestScanDoesNotRestoreOldContentOfUnreadableFile(t *testing.T) {
 		t.Fatalf("scan mode: secret.txt = %q", data)
 	}
 }
+
+// A file edited inside a directory, then the directory renamed by case only,
+// both before one checkpoint. The event for the old file path still stats.
+func TestTrackerSeesEditThenCaseRenameOfParent(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "v2")
+	if err := os.Rename(filepath.Join(root, "src"), filepath.Join(root, "Src")); err != nil {
+		t.Fatal(err)
+	}
+	renamed := takeCheckpoint(t, projectTracker, "2")
+	checkMatchesScan(t, projectStore, root, renamed.ID)
+}
+
+func TestRestoreAfterEditThenCaseRenameOfParent(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "v2")
+	os.Rename(filepath.Join(root, "src"), filepath.Join(root, "Src"))
+	takeCheckpoint(t, projectTracker, "2")
+	testutil.WriteFile(t, filepath.Join(root, "Src", "main.go"), "v3")
+	edited := takeCheckpoint(t, projectTracker, "3")
+	os.RemoveAll(filepath.Join(root, "Src"))
+	takeCheckpoint(t, projectTracker, "4")
+	if _, err := restore.Apply(projectStore, edited.ID, checkpointThroughTracker(projectTracker)); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "Src", "main.go")); string(data) != "v3" {
+		t.Fatalf("Src/main.go = %q after restore, want v3", data)
+	}
+}
+
+// A directory moved out of the project, edited there, and moved back keeps
+// its inode and mode, and the edit inside it has no event under the root.
+func TestTrackerSeesDirectoryMovedOutEditedAndBack(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	outside := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-aside")
+	if err := os.Rename(filepath.Join(root, "docs"), outside); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(outside) })
+	testutil.WriteFile(t, filepath.Join(outside, "guide.md"), "edited while outside")
+	testutil.WriteFile(t, filepath.Join(outside, "added.md"), "added while outside")
+	if err := os.Rename(outside, filepath.Join(root, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := takeCheckpoint(t, projectTracker, "2")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
+
+func TestRestoreOfDirectoryMovedOutEditedAndBack(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	outside := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-aside")
+	os.Rename(filepath.Join(root, "docs"), outside)
+	t.Cleanup(func() { os.RemoveAll(outside) })
+	testutil.WriteFile(t, filepath.Join(outside, "guide.md"), "edited while outside")
+	os.Rename(outside, filepath.Join(root, "docs"))
+	saved := takeCheckpoint(t, projectTracker, "2")
+	os.RemoveAll(filepath.Join(root, "docs"))
+	takeCheckpoint(t, projectTracker, "3")
+	if _, err := restore.Apply(projectStore, saved.ID, checkpointThroughTracker(projectTracker)); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "docs", "guide.md")); string(data) != "edited while outside" {
+		t.Fatalf("docs/guide.md = %q after restoring checkpoint 2", data)
+	}
+}
