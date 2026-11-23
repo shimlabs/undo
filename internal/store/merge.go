@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
@@ -147,7 +149,9 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 		delete(lost, rel)
 	}
 	paths := slices.Collect(maps.Keys(manifest.Changed))
-	slices.SortFunc(paths, func(a, b string) int { return tree.Depth(a) - tree.Depth(b) })
+	// Sorting by name within a depth writes the paths of one directory one
+	// after another, so the open directories stay under the cache's limit.
+	slices.SortFunc(paths, func(a, b string) int { return cmp.Or(tree.Depth(a)-tree.Depth(b), strings.Compare(a, b)) })
 	for _, rel := range paths {
 		entry := manifest.Changed[rel]
 		if err := m.makeBaseParents(rel); err != nil {
