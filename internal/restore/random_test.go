@@ -102,7 +102,7 @@ func runRandomHistory(t *testing.T, seed uint64, projectStore *store.Store, chec
 			}
 		}
 		want, got := states[target.ID], testutil.Snapshot(t, root, testutil.SnapshotOptions{ShouldSkipExcluded: true})
-		if differences := unexpectedDifferences(t, projectStore, target.ID, changes, want, got); len(differences) > 0 {
+		if differences := unexpectedDifferences(t, projectStore, target.ID, changes, want, got, isScanning); len(differences) > 0 {
 			t.Fatalf("seed %d: %v\nkept %v, lost %v, skipped %v\nproject differs from checkpoint %d:\n%s",
 				seed, log, changes.Kept, changes.Lost, changes.Skipped, target.ID, describeDifferences(want, got, differences))
 		}
@@ -151,14 +151,18 @@ func describeDifferences(want, got map[string]string, paths []string) string {
 // unexpectedDifferences returns the paths where the project, got, differs
 // from checkpoint id, want, other than those the restore kept. A restore
 // also leaves alone what the checkpoint could not read, as it does excluded
-// paths.
-func unexpectedDifferences(t *testing.T, projectStore *store.Store, id int, changes Changes, want, got map[string]string) []string {
+// paths. Without isExact, named pipes are left out, as listingDifferences
+// leaves them out.
+func unexpectedDifferences(t *testing.T, projectStore *store.Store, id int, changes Changes, want, got map[string]string, isExact bool) []string {
 	t.Helper()
 	manifest, err := projectStore.Manifest(id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return slices.DeleteFunc(testutil.SnapshotDiff(want, got), func(rel string) bool {
+		if !isExact && (strings.HasPrefix(want[rel], "fifo ") || strings.HasPrefix(got[rel], "fifo ")) {
+			return true
+		}
 		rel = filepath.ToSlash(rel)
 		return isAtOrInside(rel, changes.Kept) || isAtOrInside(rel, manifest.Unreadable) || isAroundKept(rel, want, got, changes.Kept)
 	})
