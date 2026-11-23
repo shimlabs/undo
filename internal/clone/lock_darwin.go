@@ -35,7 +35,7 @@ func UnlockAt(dir *os.File, name string) error {
 	// O_SYMLINK opens a symlink itself, which clonefile also locks.
 	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_RDONLY|unix.O_SYMLINK|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return &os.PathError{Op: "openat", Path: name, Err: err}
+		return openatError(name, err)
 	}
 	defer unix.Close(fd)
 	// The name may point to another file since the first stat, so the flags

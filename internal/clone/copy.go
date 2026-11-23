@@ -63,7 +63,7 @@ func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, 
 	// plain open, and is no longer the file to copy.
 	inFd, err := unix.Openat(srcFd, srcName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return &os.PathError{Op: "openat", Path: srcName, Err: err}
+		return openatError(srcName, err)
 	}
 	in := os.NewFile(uintptr(inFd), srcName)
 	defer in.Close()
@@ -76,7 +76,7 @@ func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, 
 	}
 	outFd, err := unix.Openat(dirFd, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	if err != nil {
-		return &os.PathError{Op: "openat", Path: name, Err: err}
+		return openatError(name, err)
 	}
 	out := os.NewFile(uintptr(outFd), name)
 	err = copyData(in, out)
@@ -139,7 +139,7 @@ func copySymlinkAt(srcFd int, srcName string, dirFd int, name string) error {
 func openDirAt(dirFd int, name string) (*os.File, error) {
 	fd, err := unix.Openat(dirFd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, &os.PathError{Op: "openat", Path: name, Err: err}
+		return nil, openatError(name, err)
 	}
 	return os.NewFile(uintptr(fd), name), nil
 }
@@ -152,4 +152,8 @@ func toUint32[T ~uint16 | ~uint32](mode T) uint32 {
 // PermissionBits returns the part of mode that chmod sets.
 func PermissionBits(mode fs.FileMode) fs.FileMode {
 	return mode & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky)
+}
+
+func openatError(name string, err error) error {
+	return &os.PathError{Op: "openat", Path: name, Err: err}
 }
