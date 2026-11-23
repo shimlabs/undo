@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,13 +29,28 @@ func serverProject(t *testing.T) (*store.Store, string) {
 	return s, root
 }
 
+// runServer runs Serve until the test ends and returns the channel that
+// receives its result.
+func runServer(t *testing.T, s *store.Store, options Options) chan error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	stopped := make(chan struct{})
+	go func() {
+		done <- Serve(ctx, s, options)
+		close(stopped)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-stopped
+	})
+	return done
+}
+
 func startServer(t *testing.T, s *store.Store, idle time.Duration) chan error {
 	t.Helper()
-	done := make(chan error, 1)
 	ready := make(chan struct{})
-	go func() {
-		done <- Serve(s, Options{Idle: idle, Limits: store.DefaultLimits, Ready: func() { close(ready) }})
-	}()
+	done := runServer(t, s, Options{Idle: idle, Limits: store.DefaultLimits, Ready: func() { close(ready) }})
 	select {
 	case <-ready:
 	case err := <-done:
@@ -85,7 +101,7 @@ func TestCheckpointStartsServer(t *testing.T) {
 	started := false
 	start := func() error {
 		started = true
-		go Serve(s, Options{Idle: time.Minute, Limits: store.DefaultLimits})
+		runServer(t, s, Options{Idle: time.Minute, Limits: store.DefaultLimits})
 		return nil
 	}
 
@@ -115,11 +131,33 @@ func TestServeStopsWhenIdle(t *testing.T) {
 	}
 }
 
+func TestServeStopsWhenCanceled(t *testing.T) {
+	s, _ := serverProject(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, s, Options{Idle: time.Minute, Ready: func() { close(ready) }}) }()
+	<-ready
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server kept running after its context was canceled")
+	}
+	if status, _ := Status(s); status.Running {
+		t.Fatal("server still answers after stopping")
+	}
+}
+
 func TestSecondServerExits(t *testing.T) {
 	s, _ := serverProject(t)
 	startServer(t, s, time.Minute)
 
-	if err := Serve(s, Options{Idle: time.Minute, Limits: store.DefaultLimits}); err != ErrRunning {
+	if err := Serve(context.Background(), s, Options{Idle: time.Minute, Limits: store.DefaultLimits}); err != ErrRunning {
 		t.Fatalf("second Serve = %v, want ErrRunning", err)
 	}
 }
@@ -128,10 +166,9 @@ func TestServerPrunesAfterCheckpoints(t *testing.T) {
 	s, root := serverProject(t)
 	pruneInterval, pruneQuiet = 0, 20*time.Millisecond
 	t.Cleanup(func() { pruneInterval, pruneQuiet = time.Hour, 30*time.Second })
-	done := make(chan error, 1)
 	ready := make(chan struct{})
 	limits := store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
-	go func() { done <- Serve(s, Options{Idle: time.Minute, Limits: limits, Ready: func() { close(ready) }}) }()
+	runServer(t, s, Options{Idle: time.Minute, Limits: limits, Ready: func() { close(ready) }})
 	<-ready
 
 	for i := range 3 {
@@ -163,7 +200,7 @@ func TestServerPrunesOnlyWhenQuiet(t *testing.T) {
 	t.Cleanup(func() { pruneInterval, pruneQuiet = time.Hour, 30*time.Second })
 	ready := make(chan struct{})
 	limits := store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}
-	go Serve(s, Options{Idle: time.Minute, Limits: limits, Ready: func() { close(ready) }})
+	runServer(t, s, Options{Idle: time.Minute, Limits: limits, Ready: func() { close(ready) }})
 	<-ready
 
 	for i := range 3 {

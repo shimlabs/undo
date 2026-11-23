@@ -3,14 +3,17 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/shimlabs/undo/internal/exclude"
@@ -523,7 +526,9 @@ func serve(env Env) error {
 	if err != nil {
 		return err
 	}
-	if err := watch.Serve(s, watch.Options{Idle: time.Hour, Limits: store.DefaultLimits}); err != nil && !errors.Is(err, watch.ErrRunning) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := watch.Serve(ctx, s, watch.Options{Idle: time.Hour, Limits: store.DefaultLimits}); err != nil && !errors.Is(err, watch.ErrRunning) {
 		s.LogError(fmt.Errorf("watcher stopped: %w", err))
 		return err
 	}

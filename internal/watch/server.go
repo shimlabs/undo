@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -45,11 +46,11 @@ type Options struct {
 	Ready func()
 }
 
-// Serve watches the project of s and takes checkpoints for clients until no
-// request arrives for options.Idle. After checkpoints it prunes the store in
-// the background once it has been quiet for pruneQuiet, at most once per
-// pruneInterval.
-func Serve(s *store.Store, options Options) error {
+// Serve watches the project of s and takes checkpoints for clients until ctx
+// is canceled or no request arrives for options.Idle. After checkpoints it
+// prunes the store in the background once it has been quiet for pruneQuiet, at
+// most once per pruneInterval.
+func Serve(ctx context.Context, s *store.Store, options Options) error {
 	path, err := SocketPath(s)
 	if err != nil {
 		return err
@@ -69,6 +70,8 @@ func Serve(s *store.Store, options Options) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
+	stop := context.AfterFunc(ctx, func() { listener.Close() })
+	defer stop()
 
 	tracker, err := NewTracker(s)
 	if err != nil {
@@ -116,6 +119,9 @@ func Serve(s *store.Store, options Options) error {
 			default:
 			}
 			continue
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 		if err != nil {
 			return err
