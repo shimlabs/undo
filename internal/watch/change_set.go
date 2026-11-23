@@ -18,9 +18,11 @@ type changeSet struct {
 	// found again in the directory that replaced them.
 	goneDirs     map[string]bool
 	replacedDirs map[string]bool
-	// goneUntracked are paths reported gone that the listing does not hold
-	// under that spelling.
-	goneUntracked []string
+	// uncertainDirs are the directories where a name the listing did not
+	// hold appeared or disappeared. On a filesystem that ignores case and
+	// Unicode form, the listing may still hold that name in another
+	// spelling.
+	uncertainDirs map[string]bool
 	// hasLinkCountChange is set when a listed path gained or lost a name.
 	// The other name can be anywhere, and only a full comparison finds it.
 	hasLinkCountChange bool
@@ -28,12 +30,13 @@ type changeSet struct {
 
 func newChangeSet(listing tree.Listing) *changeSet {
 	return &changeSet{
-		listing:      listing,
-		changed:      map[string]bool{},
-		deleted:      map[string]bool{},
-		seen:         map[string]bool{},
-		goneDirs:     map[string]bool{},
-		replacedDirs: map[string]bool{},
+		listing:       listing,
+		changed:       map[string]bool{},
+		deleted:       map[string]bool{},
+		seen:          map[string]bool{},
+		goneDirs:      map[string]bool{},
+		replacedDirs:  map[string]bool{},
+		uncertainDirs: map[string]bool{},
 	}
 }
 
@@ -50,6 +53,16 @@ func (c *changeSet) removeTree(rel string, wasDir bool) {
 	c.remove(rel)
 	if wasDir {
 		c.removeUnder(rel)
+	}
+}
+
+// removeGone removes rel, which is gone. A path the listing does not hold
+// may be listed in another spelling, so its directory becomes uncertain.
+func (c *changeSet) removeGone(rel string, wasTracked, wasDir bool) {
+	if wasTracked {
+		c.removeTree(rel, wasDir)
+	} else {
+		c.uncertainDirs[path.Dir(rel)] = true
 	}
 }
 

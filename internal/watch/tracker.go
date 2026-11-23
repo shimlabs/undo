@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -459,34 +460,55 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 		return nil, nil, errNeedsFullComparison
 	}
 	if t.ignoresCase {
-		t.removeGoneCaseVariants(changes)
+		t.removeStaleSpellings(changes)
 	}
 	changes.finish()
 	return slices.Sorted(maps.Keys(changes.changed)), slices.Sorted(maps.Keys(changes.deleted)), nil
 }
 
-// removeGoneCaseVariants removes the listed paths that are gone and differ
-// only in case from a path reported gone. On a filesystem that ignores case,
-// an event can spell a removed or renamed path as the command did, not as
-// the listing does.
-func (t *tracker) removeGoneCaseVariants(changes *changeSet) {
-	if len(changes.goneUntracked) == 0 {
+// removeStaleSpellings removes the listed paths in changes.uncertainDirs that
+// their directory no longer holds under that exact name.
+func (t *tracker) removeStaleSpellings(changes *changeSet) {
+	if len(changes.uncertainDirs) == 0 {
 		return
 	}
-	lengths := map[int]bool{}
-	folded := map[string]bool{}
-	for _, rel := range changes.goneUntracked {
-		lengths[len(rel)] = true
-		folded[strings.ToLower(rel)] = true
+	namesInDir := make(map[string]map[string]bool, len(changes.uncertainDirs))
+	for dir := range changes.uncertainDirs {
+		// A directory that is gone or cannot be read is left alone: its own
+		// event or the next full comparison updates what it held.
+		if names, err := readNames(t.root, dir); err == nil {
+			namesInDir[dir] = names
+		}
 	}
 	for rel, entry := range changes.listing {
-		if !lengths[len(rel)] || !folded[strings.ToLower(rel)] {
+		if rel == "." {
 			continue
 		}
-		if _, err := os.Lstat(t.path(rel)); isGone(err) {
+		if names, ok := namesInDir[path.Dir(rel)]; ok && !names[path.Base(rel)] {
 			changes.removeTree(rel, entry.Kind == tree.Dir)
 		}
 	}
+}
+
+// readNames returns the names the directory dir below root holds, as it
+// stores them. The directory is opened one name at a time, so a named pipe
+// or symlink in its place fails at once instead of blocking or leading
+// elsewhere.
+func readNames(root, dir string) (map[string]bool, error) {
+	file, err := tree.OpenDir(root, dir)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	list, err := file.Readdirnames(-1)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]bool, len(list))
+	for _, name := range list {
+		names[name] = true
+	}
+	return names, nil
 }
 
 // withHardLinks adds the other names of every dirty file, named pipe or
@@ -539,11 +561,7 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 	entry, storedName, err := lookUp(parents, rel, fullPath)
 	switch {
 	case errors.Is(err, errPathGone):
-		if wasTracked {
-			changes.removeTree(rel, wasDir)
-		} else {
-			changes.goneUntracked = append(changes.goneUntracked, rel)
-		}
+		changes.removeGone(rel, wasTracked, wasDir)
 		return nil
 	case err != nil:
 		return err
@@ -551,6 +569,7 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 		// The event names the path before a rename that changed only case or
 		// Unicode form, and the stat reached the renamed file.
 		changes.removeTree(rel, wasDir)
+		changes.uncertainDirs[path.Dir(rel)] = true
 		return t.applyPath(changes, matcher, parents, filepath.Join(filepath.Dir(fullPath), storedName), isRenamed)
 	case matcher.Excludes(rel, entry.Kind == tree.Dir):
 		// What the listing held here, such as a file where an excluded
@@ -566,6 +585,9 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 	}
 	if wasTracked && hasLinkCountChange(previous, entry) {
 		changes.hasLinkCountChange = true
+	}
+	if !wasTracked {
+		changes.uncertainDirs[path.Dir(rel)] = true
 	}
 	changes.update(rel, entry)
 	if mayHoldUnseenFiles(entry, previous, wasDir, isReplaced) {
