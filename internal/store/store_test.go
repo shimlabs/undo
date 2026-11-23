@@ -62,9 +62,14 @@ func TestOpenFindsStoreNextToDeletedProject(t *testing.T) {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	home := filepath.Join(root, "Library", "undo")
-	created, err := Create(home, root)
+	created, err := Create(filepath.Join(root, "Library", "undo"), root)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// A project on another volume than home keeps its store next to it and
+	// its record in home, which survives deleting the project.
+	home := t.TempDir()
+	if err := recordLocation(home, created.Dir()); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(root); err != nil {
@@ -197,5 +202,43 @@ func TestStoredPathsCannotLeaveProject(t *testing.T) {
 	take(t, projectStore, "second")
 	if _, err := os.Stat(filepath.Join(outside, "precious")); err != nil {
 		t.Fatalf("a planted merge deleted a file outside the store: %v", err)
+	}
+}
+
+func TestOpenIgnoresStoreNextToProjectThatHomeDidNotCreate(t *testing.T) {
+	parent := testutil.TempDir(t)
+	root := filepath.Join(parent, "proj")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A private store with valid settings, unpacked from an archive or
+	// written by an agent, is still not one this user's undo created.
+	planted := filepath.Join(parent, ".undo-"+project.ID(root))
+	if err := os.Mkdir(planted, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(planted, "config.json"), config{Format: format, Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+
+	if _, err := Open(home, root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Open = %v, want no store", err)
+	}
+	projectStore, err := Create(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectStore.Dir() == planted {
+		t.Fatal("Create adopted a store it did not create")
+	}
+	stores, err := StoresUnder(home, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, found := range stores {
+		if found.Dir() == planted {
+			t.Fatal("StoresUnder listed a store it did not create")
+		}
 	}
 }

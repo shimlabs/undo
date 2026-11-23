@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/project"
 )
@@ -80,8 +81,16 @@ func DefaultHome() (string, error) {
 // Open returns the existing store of the project at root, whether it lives
 // under home or next to the project. It returns an error matching
 // fs.ErrNotExist if the project has no store yet, and never creates one.
+//
+// A store next to the project is only used if home recorded creating it.
+// Its name is predictable, so anyone who can write next to the project, or
+// an archive unpacked there, could otherwise plant one.
 func Open(home, root string) (*Store, error) {
-	for _, dir := range []string{filepath.Join(home, project.ID(root)), nextToProject(root)} {
+	dirs := []string{filepath.Join(home, project.ID(root))}
+	if isRecorded(home, nextToProject(root)) {
+		dirs = append(dirs, nextToProject(root))
+	}
+	for _, dir := range dirs {
 		if _, err := os.Stat(filepath.Join(dir, configFile)); err != nil {
 			continue
 		}
@@ -91,6 +100,19 @@ func Open(home, root string) (*Store, error) {
 		return openAt(dir, root)
 	}
 	return nil, fmt.Errorf("no store for %s: %w", root, fs.ErrNotExist)
+}
+
+// isRecorded reports whether home recorded creating the store dir next to a
+// project.
+func isRecorded(home, dir string) bool {
+	recorded, err := os.ReadFile(locationPath(home, dir))
+	return err == nil && string(recorded) == dir
+}
+
+// recordLocation records in home that it created the store dir next to a
+// project.
+func recordLocation(home, dir string) error {
+	return atomicfile.WriteFile(locationPath(home, dir), []byte(dir), 0o600)
 }
 
 // Create returns the store of the project at root, creating it if needed.
@@ -152,10 +174,14 @@ func locate(home, root string) (string, error) {
 	dir := nextToProject(root)
 	if parent := filepath.Dir(root); parent != root && isSameVolume(root, parent) {
 		err := os.Mkdir(dir, 0o700)
+		if errors.Is(err, fs.ErrExist) && !isRecorded(home, dir) {
+			return "", fmt.Errorf("%s was not created by undo: %w", dir, ErrUnsafeStore)
+		}
 		if err == nil || errors.Is(err, fs.ErrExist) {
-			// Its name is predictable, so in a shared parent another user
-			// could create it first.
-			return dir, checkPrivateDir(dir)
+			if err := checkPrivateDir(dir); err != nil {
+				return "", err
+			}
+			return dir, recordLocation(home, dir)
 		}
 	}
 	if isInside {
@@ -167,7 +193,7 @@ func locate(home, root string) (string, error) {
 // nextToProject returns where the store of the project at root lives when it
 // cannot live under home.
 func nextToProject(root string) string {
-	return filepath.Join(filepath.Dir(root), ".undo-"+project.ID(root))
+	return filepath.Join(filepath.Dir(root), storeDirPrefix+project.ID(root))
 }
 
 // checkPrivateDir returns ErrUnsafeStore unless dir is a directory, not a
@@ -261,8 +287,9 @@ func StoresUnder(home, dir string) ([]*Store, error) {
 			return nil, err
 		}
 		for _, entry := range entries {
-			if entry.IsDir() && (parent == home || strings.HasPrefix(entry.Name(), ".undo-")) {
-				candidates = append(candidates, filepath.Join(parent, entry.Name()))
+			candidate := filepath.Join(parent, entry.Name())
+			if entry.IsDir() && (parent == home || strings.HasPrefix(entry.Name(), storeDirPrefix) && isRecorded(home, candidate)) {
+				candidates = append(candidates, candidate)
 			}
 		}
 	}

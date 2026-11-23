@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // The store's folder holds these files. Changing any of them needs a new
@@ -19,6 +20,8 @@ const (
 	manifestFile        = "manifest.json"
 	restoreFile         = "restored.gob"
 	usageFile           = "usage.json"
+	locationSuffix      = ".location"
+	storeDirPrefix      = ".undo-"
 	baseDirName         = "base"
 	layersDirName       = "layers"
 	markersDirName      = "markers"
@@ -108,4 +111,10 @@ func (s *Store) restorePath() string {
 
 func (s *Store) usagePath() string {
 	return filepath.Join(s.dir, usageFile)
+}
+
+// locationPath is where home records the store dir it created next to a
+// project, named after the store dir.
+func locationPath(home, dir string) string {
+	return filepath.Join(home, strings.TrimPrefix(filepath.Base(dir), storeDirPrefix)+locationSuffix)
 }
