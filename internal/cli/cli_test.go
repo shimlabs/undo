@@ -520,3 +520,12 @@ func TestUndoFindsDeletedProjectThroughSymlinkedFolder(t *testing.T) {
 		t.Fatalf("list in a symlinked parent does not point to the deleted project:\n%s", out)
 	}
 }
+
+func TestNotProjectMessageNamesTheRefusedFolder(t *testing.T) {
+	home := testutil.AgentHome(t)
+	root := newProject(t)
+	code, out := run(t, root, "", "status", "--project", home)
+	if code != 1 || !strings.Contains(out, "Error: ~ is your home folder, not a project.") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}

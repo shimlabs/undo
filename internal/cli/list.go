@@ -125,7 +125,7 @@ func printNoCheckpoints(env Env, parsed flags) {
 	}
 	root, err := projectRoot(env, parsed)
 	if errors.Is(err, project.ErrNotProject) {
-		out.Println(sentence(notProjectError(env.Dir).Error()))
+		out.Println(sentence(notProjectMessage(err)))
 		out.Printf("Run %s inside a project folder.\n", out.Bold("undo"))
 		return
 	}

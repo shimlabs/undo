@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -50,11 +49,31 @@ func Root(dir string) (string, error) {
 	return resolved, Check(resolved)
 }
 
-// Check returns an error wrapping ErrNotProject if root is the user's home
-// directory or the disk root. root must have its symlinks resolved.
+// NotProjectError is the folder undo refused as a project, and why.
+type NotProjectError struct {
+	Dir string
+	// IsHome is set when Dir is the user's home directory, and otherwise
+	// it is the disk root.
+	IsHome bool
+}
+
+func (e *NotProjectError) Error() string {
+	return e.Dir + ": " + ErrNotProject.Error()
+}
+
+// Is makes the error match ErrNotProject.
+func (e *NotProjectError) Is(target error) bool {
+	return target == ErrNotProject
+}
+
+// Check returns a *NotProjectError if root is the user's home directory or
+// the disk root. root must have its symlinks resolved.
 func Check(root string) error {
-	if root == "/" || root == resolvedUserHome() {
-		return fmt.Errorf("%s: %w", root, ErrNotProject)
+	if root == resolvedUserHome() {
+		return &NotProjectError{Dir: root, IsHome: true}
+	}
+	if root == "/" {
+		return &NotProjectError{Dir: root}
 	}
 	return nil
 }

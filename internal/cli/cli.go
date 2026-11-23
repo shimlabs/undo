@@ -80,8 +80,8 @@ func Run(args []string, env Env) int {
 		printError(errOut, withHint(fmt.Errorf("%w, so undo cannot protect this project cheaply", err),
 			fmt.Sprintf("Run %s once to keep full copies instead. They take as much disk as the project.", errOut.Bold("undo checkpoint --copy"))))
 	case errors.Is(err, project.ErrNotProject):
-		printError(errOut, withHint(notProjectError(env.Dir),
-			fmt.Sprintf("Run %s, or start your agent, inside a project folder.", errOut.Bold("undo"))))
+		errOut.Errorf("%s", sentence(notProjectMessage(err)))
+		errOut.Printf("Run %s, or start your agent, inside a project folder.\n", errOut.Bold("undo"))
 	default:
 		printError(errOut, err)
 	}

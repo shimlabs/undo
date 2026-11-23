@@ -2,14 +2,13 @@ package cli
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
@@ -55,7 +54,6 @@ var (
 	// errAlreadyReported means the command explained the failure itself,
 	// so only the exit code is left to set.
 	errAlreadyReported = errors.New("already reported")
-	errNotAProject     = errors.New("not a project")
 	// errNeedsTerminal means undo would ask before restoring, but no one
 	// can answer.
 	errNeedsTerminal           = errors.New("undo asks before it restores, and its input is not a terminal")
@@ -116,16 +114,16 @@ func printUsageError(out *terminal.Writer, err usageError) {
 	out.Printf("Run %s for more.\n", out.Bold(help))
 }
 
-// notProjectError says why dir, which undo refused as a project, is not
-// one: it is the user's home folder or the disk root.
-func notProjectError(dir string) error {
-	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = resolved
+// notProjectMessage says why undo refused the folder in err as a project:
+// it is the user's home folder or the disk root.
+func notProjectMessage(err error) string {
+	notProject, ok := errors.AsType[*project.NotProjectError](err)
+	switch {
+	case !ok:
+		return err.Error()
+	case notProject.IsHome:
+		return "~ is your home folder, not a project"
+	default:
+		return displayPath(notProject.Dir) + " is the disk root, not a project"
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if resolvedHome, err := filepath.EvalSymlinks(home); err == nil && resolvedHome == dir {
-			return fmt.Errorf("~ is your home folder, %w", errNotAProject)
-		}
-	}
-	return fmt.Errorf("%s is the disk root, %w", displayPath(dir), errNotAProject)
 }
