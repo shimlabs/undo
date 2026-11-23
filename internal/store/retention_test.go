@@ -44,7 +44,10 @@ func TestPruneMergesOldestIntoBase(t *testing.T) {
 	if merged != 2 {
 		t.Fatalf("merged %d checkpoints, want 2", merged)
 	}
-	checkpoints, _ := projectStore.List()
+	checkpoints, err := projectStore.List()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(checkpoints) != 2 || checkpoints[0].ID != 3 || checkpoints[1].ID != 4 {
 		t.Fatalf("remaining checkpoints = %+v", checkpoints)
 	}
@@ -65,7 +68,10 @@ func TestPruneByAgeKeepsLatest(t *testing.T) {
 	if _, err := projectStore.Prune(time.Now().Add(8*24*time.Hour), store.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
-	checkpoints, _ := projectStore.List()
+	checkpoints, err := projectStore.List()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(checkpoints) != 1 || checkpoints[0].ID != 4 {
 		t.Fatalf("remaining checkpoints = %+v, want only 4", checkpoints)
 	}
@@ -110,7 +116,10 @@ func TestPruneBySizeMergesUntilUnder(t *testing.T) {
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: "write d", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := projectStore.Usage()
+	before, err := projectStore.Usage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if before < 6<<20 {
 		t.Fatalf("usage %d before pruning, want at least 6 MiB of old versions", before)
 	}
@@ -119,11 +128,17 @@ func TestPruneBySizeMergesUntilUnder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, _ := projectStore.Usage()
+	after, err := projectStore.Usage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if merged == 0 || after > 3<<20 {
 		t.Fatalf("merged %d, usage %d after pruning, want at most 3 MiB", merged, after)
 	}
-	checkpoints, _ := projectStore.List()
+	checkpoints, err := projectStore.List()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if checkpoints[len(checkpoints)-1].ID != 4 {
 		t.Fatalf("latest checkpoint is %d, want 4", checkpoints[len(checkpoints)-1].ID)
 	}

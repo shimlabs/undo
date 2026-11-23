@@ -23,7 +23,10 @@ func TestCloneFileRefusesExisting(t *testing.T) {
 	if err := File(src, dst); err == nil {
 		t.Fatal("File overwrote an existing destination")
 	}
-	data, _ := os.ReadFile(dst)
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(data) != "old" {
 		t.Fatalf("destination changed to %q", data)
 	}

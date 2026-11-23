@@ -73,7 +73,10 @@ func TestChangedDetectsCopyWithPreservedTimes(t *testing.T) {
 	testutil.WriteFile(t, path, "aaaa")
 	before := scan(t, root)
 
-	info, _ := os.Stat(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(10 * time.Millisecond)
 	testutil.WriteFile(t, path, "bbbb")
 	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
@@ -134,26 +137,32 @@ func walkScan(t *testing.T, root string, matcher *exclude.Matcher) (Listing, []s
 	t.Helper()
 	listing := Listing{}
 	var excluded []string
-	filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, dirEntry fs.DirEntry, err error) error {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rel, _ := filepath.Rel(root, path)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
 		rel = filepath.ToSlash(rel)
-		if rel != "." && matcher.Match(rel, entry.IsDir()) {
+		if rel != "." && matcher.Match(rel, dirEntry.IsDir()) {
 			excluded = append(excluded, rel)
-			if entry.IsDir() {
+			if dirEntry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		treeEntry, err := Stat(path)
+		entry, err := Stat(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		listing[rel] = treeEntry
+		listing[rel] = entry
 		return nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	slices.Sort(excluded)
 	return listing, excluded
 }
@@ -191,7 +200,10 @@ func TestScanSkipsUnreadableDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
-	matcher, _ := exclude.New(root)
+	matcher, err := exclude.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	listing, skipped, err := Scan(root, matcher)
 	if err != nil {
@@ -209,7 +221,10 @@ func TestScanSkipsUnreadableDirectories(t *testing.T) {
 }
 
 func TestScanMissingRoot(t *testing.T) {
-	matcher, _ := exclude.New(t.TempDir())
+	matcher, err := exclude.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	listing, _, err := Scan(filepath.Join(t.TempDir(), "gone"), matcher)
 	if err != nil || len(listing) != 0 {
 		t.Fatalf("Scan = %v, %v; want an empty listing", listing, err)
@@ -218,7 +233,10 @@ func TestScanMissingRoot(t *testing.T) {
 
 func BenchmarkScan(b *testing.B) {
 	root := buildTree(b, 500, 20)
-	matcher, _ := exclude.New(root)
+	matcher, err := exclude.New(root)
+	if err != nil {
+		b.Fatal(err)
+	}
 	for b.Loop() {
 		if _, _, err := Scan(root, matcher); err != nil {
 			b.Fatal(err)
@@ -237,7 +255,10 @@ func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "noexec"), 0o755) })
-	matcher, _ := exclude.New(root)
+	matcher, err := exclude.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	_, skipped, err := Scan(root, matcher)
 	if err != nil {

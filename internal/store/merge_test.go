@@ -25,7 +25,12 @@ func stateHashes(t *testing.T, projectStore *Store, id int) map[string][32]byte 
 		if source.Layer > 0 {
 			path = projectStore.layerFile(source.Layer, rel)
 		}
-		data, _ := os.ReadFile(path)
+		var data []byte
+		if source.Entry.Kind == tree.File {
+			if data, err = os.ReadFile(path); err != nil {
+				t.Fatal(err)
+			}
+		}
 		hashes[rel] = sha256.Sum256(append([]byte(source.Entry.Mode.String()), data...))
 	}
 	return hashes
@@ -51,7 +56,10 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	if _, err := projectStore.Prune(time.Now(), unlimited); err != nil {
 		t.Fatal(err)
 	}
-	checkpoints, _ := projectStore.List()
+	checkpoints, err := projectStore.List()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(checkpoints) != 2 || checkpoints[0].ID != 3 {
 		t.Fatalf("checkpoints = %+v, want 3 and 4", checkpoints)
 	}
@@ -78,8 +86,10 @@ func TestPruneWaitsForReaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
+	pruneErr := make(chan error, 1)
 	go func() {
-		projectStore.Prune(time.Now(), DefaultLimits())
+		_, err := projectStore.Prune(time.Now(), DefaultLimits())
+		pruneErr <- err
 		close(done)
 	}()
 	select {
@@ -92,6 +102,9 @@ func TestPruneWaitsForReaders(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Prune did not run after the reader finished")
+	}
+	if err := <-pruneErr; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -180,23 +193,21 @@ func TestFinishMergeRemovesFilesLeftByInterruptedMerge(t *testing.T) {
 // fails, merge.json stays, and every State call returns ErrMergePending.
 func TestMissingLayerFileDoesNotBlockStore(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a1", "b.txt": "b1"})
-	take := func(label string) Checkpoint {
-		c, err := projectStore.Take(CheckpointOptions{Label: label, Dir: root})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c
-	}
-	take("1")
+	take(t, projectStore, "1")
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
-	second := take("2")
-	os.Remove(projectStore.layerFile(second.ID, "a.txt"))
+	second := take(t, projectStore, "2")
+	if err := os.Remove(projectStore.layerFile(second.ID, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
 	for i := range 3 {
 		testutil.WriteFile(t, filepath.Join(root, "b.txt"), "b"+string(rune('2'+i)))
-		take("later")
+		take(t, projectStore, "later")
 	}
 	_, pruneErr := projectStore.Prune(time.Now(), Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40})
-	latest, _, _ := projectStore.Latest()
+	latest, _, err := projectStore.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, filepath.Join(root, "c.txt"), "new work")
 	if _, err := projectStore.Take(CheckpointOptions{Label: "after", Dir: root}); err != nil {
 		t.Errorf("Take after the failed merge: %v", err)

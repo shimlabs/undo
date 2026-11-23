@@ -110,8 +110,14 @@ func TestCheckpointUsesRunningServer(t *testing.T) {
 	if count := checkpointCount(t, client, projectStore); count != 2 {
 		t.Fatalf("the server took %d checkpoints, want 2", count)
 	}
-	latest, _, _ := projectStore.Latest()
-	manifest, _ := projectStore.Manifest(latest.ID)
+	latest, _, err := projectStore.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := projectStore.Manifest(latest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := manifest.Changed["main.go"]; !ok {
 		t.Fatalf("layer %d = %+v, want main.go", latest.ID, manifest)
 	}
@@ -278,7 +284,10 @@ func TestServerStopsWhenStreamCannotRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client.Checkpoint(projectStore, store.CheckpointOptions{Label: "rules changed", Dir: root})
+	// The scan the client falls back to cannot read the rules either.
+	if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "rules changed", Dir: root}); err == nil {
+		t.Fatal("a checkpoint with an unreadable .undoignore succeeded")
+	}
 	select {
 	case err := <-done:
 		if !errors.Is(err, errStreamStopped) {

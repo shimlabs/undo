@@ -188,7 +188,10 @@ func TestStoredPathsCannotLeaveProject(t *testing.T) {
 	outside := testutil.TempDir(t)
 	testutil.WriteFile(t, filepath.Join(outside, "precious"), "data")
 	take(t, projectStore, "first")
-	escape, _ := filepath.Rel(projectStore.baseDir(), outside)
+	escape, err := filepath.Rel(projectStore.baseDir(), outside)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := writeJSON(projectStore.manifestPath(1), Manifest{Deleted: []string{escape}}); err != nil {
 		t.Fatal(err)
 	}

@@ -70,21 +70,30 @@ func snapshot(t *testing.T, root string) map[string]string {
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(root, path)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
 		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
 		switch {
 		case info.Mode()&fs.ModeSymlink != 0:
-			target, _ := os.Readlink(path)
+			target, err := os.Readlink(path)
+			if err != nil {
+				t.Fatal(err)
+			}
 			entries[rel] = "link " + target
 		case info.Mode()&fs.ModeNamedPipe != 0:
 			entries[rel] = fmt.Sprintf("fifo %v", info.Mode().Perm())
 		case info.IsDir():
 			entries[rel] = fmt.Sprintf("dir %v %d", info.Mode().Perm(), info.ModTime().UnixNano())
 		default:
-			data, _ := os.ReadFile(path)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
 			entries[rel] = fmt.Sprintf("file %v %d %q", info.Mode().Perm(), info.ModTime().UnixNano(), data)
 		}
 		return nil
@@ -154,7 +163,10 @@ func TestRestoreSedInPlace(t *testing.T) {
 	restoreAfter(t, func(root string) {
 		for _, path := range []string{"README.md", "src/main.go", "src/util/str.go"} {
 			full := filepath.Join(root, path)
-			data, _ := os.ReadFile(full)
+			data, err := os.ReadFile(full)
+			if err != nil {
+				t.Fatal(err)
+			}
 			testutil.WriteFile(t, full, strings.ReplaceAll(string(data), "package", "pkg"))
 		}
 	})
@@ -638,9 +650,15 @@ func TestRestoreAfterXargsDeletion(t *testing.T) {
 func TestRestoreReportsUnstableFiles(t *testing.T) {
 	projectStore, root := newProject(t)
 	take(t, projectStore, "first")
-	manifest, _ := projectStore.Manifest(1)
+	manifest, err := projectStore.Manifest(1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	manifest.Unstable = []string{"README.md"}
-	data, _ := json.Marshal(manifest)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(projectStore.Dir(), "layers", "1", "manifest.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -746,7 +764,9 @@ func TestRestoreReportsStoredFilesThatAreGone(t *testing.T) {
 	if state["README.md"].Layer != 2 {
 		t.Fatalf("README.md is stored in layer %d, want 2", state["README.md"].Layer)
 	}
-	os.RemoveAll(filepath.Join(root, "src"))
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
 		t.Fatal(err)
 	}

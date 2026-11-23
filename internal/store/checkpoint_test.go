@@ -204,7 +204,10 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, _ := tree.Stat(filepath.Join(root, "a.txt"))
+	entry, err := tree.Stat(filepath.Join(root, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	current["a.txt"] = entry
 	delete(current, "b.txt")
 
@@ -212,7 +215,10 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, _ := projectStore.Manifest(checkpoint.ID)
+	manifest, err := projectStore.Manifest(checkpoint.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := manifest.Changed["a.txt"]; !ok || !slices.Equal(manifest.Deleted, []string{"b.txt"}) {
 		t.Fatalf("manifest = %+v", manifest)
 	}
@@ -225,7 +231,10 @@ func TestCommitRefusesStaleChanges(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha"})
 	first := take(t, projectStore, "first")
 	take(t, projectStore, "second")
-	current, _ := projectStore.ListingAt(first.ID)
+	current, err := projectStore.ListingAt(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := projectStore.Commit(first.ID, CheckpointOptions{Label: "stale", Dir: root}, Changes{Listing: current}); !errors.Is(err, ErrStale) {
 		t.Fatalf("err = %v, want ErrStale", err)
@@ -246,7 +255,10 @@ func TestTakeSkipsUnreadableDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("one unreadable directory failed the checkpoint: %v", err)
 	}
-	manifest, _ := projectStore.Manifest(checkpoint.ID)
+	manifest, err := projectStore.Manifest(checkpoint.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !slices.Equal(manifest.Unreadable, []string{"pgdata"}) {
 		t.Fatalf("unreadable = %v, want [pgdata]", manifest.Unreadable)
 	}
@@ -256,7 +268,10 @@ func TestTakeProtectsFilesNamedLikeExcludedDirectories(t *testing.T) {
 	projectStore, _ := newProject(t, map[string]string{"target": "important", ".cache": "x"})
 
 	checkpoint := take(t, projectStore, "first")
-	state, _ := projectStore.State(checkpoint.ID)
+	state, err := projectStore.State(checkpoint.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := state["target"]; !ok {
 		t.Fatal("a regular file named target is not protected")
 	}
@@ -290,9 +305,16 @@ func TestTakeClearsLeftoverLayer(t *testing.T) {
 func TestLatestIgnoresLineCutOffByCrash(t *testing.T) {
 	projectStore, _ := newProject(t, map[string]string{"a.txt": "a"})
 	first := take(t, projectStore, "first")
-	file, _ := os.OpenFile(projectStore.indexPath(), os.O_APPEND|os.O_WRONLY, 0)
-	file.WriteString(`{"id":2,"time":"2026-`)
-	file.Close()
+	file, err := os.OpenFile(projectStore.indexPath(), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"id":2,"time":"2026-`); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	latest, ok, err := projectStore.Latest()
 	if err != nil || !ok || latest.ID != first.ID {
@@ -388,7 +410,9 @@ func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
 			}
 			defer file.Close()
 			for !stop.Load() {
-				file.WriteString("line\n")
+				if _, err := file.WriteString("line\n"); err != nil {
+					return
+				}
 			}
 		}()
 		checkpoint, err := projectStore.Take(CheckpointOptions{Label: fmt.Sprint(attempt), Dir: root})
@@ -413,8 +437,14 @@ func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		saved, _ := os.ReadFile(projectStore.layerFile(state["log.txt"].Layer, "log.txt"))
-		current, _ := os.ReadFile(path)
+		saved, err := os.ReadFile(projectStore.layerFile(state["log.txt"].Layer, "log.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(saved) != len(current) {
 			t.Fatalf("checkpoint after the file settled holds %d bytes, the file has %d", len(saved), len(current))
 		}

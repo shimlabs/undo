@@ -55,7 +55,10 @@ func undoEntries(t *testing.T, agent Agent, settings map[string]any) (all []any,
 	t.Helper()
 	all = hookEntries(settings, settingsEvent(agent))
 	for i, entry := range all {
-		data, _ := json.Marshal(entry)
+		data, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if strings.Contains(string(data), " hook "+agent.Name) {
 			ours = append(ours, i)
 		}
@@ -113,7 +116,10 @@ func TestReinstallUpdatesInPlace(t *testing.T) {
 			}
 
 			all, ours := undoEntries(t, tc.agent, readJSONFile(t, path))
-			data, _ := json.Marshal(all)
+			data, err := json.Marshal(all)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if len(all) != 3 || len(ours) != 1 || ours[0] != 1 || !strings.Contains(string(data), "'"+updated+"' hook "+tc.agent.Name) {
 				t.Fatalf("hook entries = %s, want the undo entry updated in place", data)
 			}
@@ -249,7 +255,10 @@ func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 	if _, err := claude.Install(binary); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{"dcg check", "notify hook claude-code", "'" + binary + "' hook claude"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("after install, %q is missing:\n%s", want, data)
@@ -276,7 +285,9 @@ func TestInstallKeepsOtherProgramsNamedLikeHooks(t *testing.T) {
 	if _, err := claude.Install(testutil.PrivateBinary(t, "bin")); err != nil {
 		t.Fatal(err)
 	}
-	claude.Uninstall()
+	if _, err := claude.Uninstall(); err != nil {
+		t.Fatal(err)
+	}
 
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "guard.sh hook claude") {
 		t.Fatalf("a user's own hook was treated as undo's:\n%s", data)
@@ -289,7 +300,10 @@ func TestInstallQuotesBinaryPath(t *testing.T) {
 	if _, err := claude.Install(binary); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(string(data), strings.ReplaceAll("\"'"+binary+"' hook claude\"", "&", `\u0026`)) {
 		t.Fatalf("binary path is not quoted:\n%s", data)
 	}
