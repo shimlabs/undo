@@ -77,66 +77,79 @@ func ScanWithSkipped(root string, matcher *exclude.Matcher) (Listing, Skipped, e
 	if entry.Kind != Dir {
 		return listing, Skipped{}, nil
 	}
-	var mu sync.Mutex
-	var skipped Skipped
-	err = walk.Dirs(directory{path: root, rel: "."}, func(dir directory) ([]directory, error) {
-		children, err := os.ReadDir(dir.path)
+	scan := scanner{matcher: matcher, listing: listing}
+	if err := walk.Dirs(directory{path: root, rel: "."}, scan.readDir); err != nil {
+		return nil, Skipped{}, err
+	}
+	slices.Sort(scan.skipped.Excluded)
+	slices.Sort(scan.skipped.Unreadable)
+	return scan.listing, scan.skipped, nil
+}
+
+// scanner collects a listing from directories read at the same time.
+type scanner struct {
+	matcher *exclude.Matcher
+	mu      sync.Mutex
+	listing Listing
+	skipped Skipped
+}
+
+// readDir adds dir's children to the listing and returns its subdirectories.
+// A directory that cannot be listed, or whose children cannot be looked at,
+// is recorded as unreadable instead.
+func (s *scanner) readDir(dir directory) ([]directory, error) {
+	children, err := os.ReadDir(dir.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		s.addUnreadable(dir.rel)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	found := make(Listing, len(children))
+	var excluded []string
+	var subdirs []directory
+	for _, child := range children {
+		rel := child.Name()
+		if dir.rel != "." {
+			rel = dir.rel + "/" + child.Name()
+		}
+		if s.matcher.Match(rel, child.IsDir()) {
+			excluded = append(excluded, rel)
+			continue
+		}
+		path := filepath.Join(dir.path, child.Name())
+		entry, err := Stat(path)
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			continue
 		}
 		if errors.Is(err, fs.ErrPermission) {
-			mu.Lock()
-			skipped.Unreadable = append(skipped.Unreadable, dir.rel)
-			mu.Unlock()
+			// The directory can be listed but not entered.
+			s.addUnreadable(dir.rel)
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		found := make(Listing, len(children))
-		var excluded []string
-		var subdirs []directory
-		for _, child := range children {
-			rel := child.Name()
-			if dir.rel != "." {
-				rel = dir.rel + "/" + child.Name()
-			}
-			if matcher.Match(rel, child.IsDir()) {
-				excluded = append(excluded, rel)
-				continue
-			}
-			path := filepath.Join(dir.path, child.Name())
-			entry, err := Stat(path)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			if errors.Is(err, fs.ErrPermission) {
-				// The directory can be listed but not entered.
-				mu.Lock()
-				skipped.Unreadable = append(skipped.Unreadable, dir.rel)
-				mu.Unlock()
-				return nil, nil
-			}
-			if err != nil {
-				return nil, err
-			}
-			found[rel] = entry
-			if entry.Kind == Dir {
-				subdirs = append(subdirs, directory{path: path, rel: rel})
-			}
+		found[rel] = entry
+		if entry.Kind == Dir {
+			subdirs = append(subdirs, directory{path: path, rel: rel})
 		}
-		mu.Lock()
-		maps.Copy(listing, found)
-		skipped.Excluded = append(skipped.Excluded, excluded...)
-		mu.Unlock()
-		return subdirs, nil
-	})
-	if err != nil {
-		return nil, Skipped{}, err
 	}
-	slices.Sort(skipped.Excluded)
-	slices.Sort(skipped.Unreadable)
-	return listing, skipped, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	maps.Copy(s.listing, found)
+	s.skipped.Excluded = append(s.skipped.Excluded, excluded...)
+	return subdirs, nil
+}
+
+func (s *scanner) addUnreadable(rel string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.skipped.Unreadable = append(s.skipped.Unreadable, rel)
 }
 
 type directory struct {
