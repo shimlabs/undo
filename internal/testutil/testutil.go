@@ -48,3 +48,14 @@ func Fingerprint(t testing.TB, root string) map[string]string {
 	}
 	return fingerprints
 }
+
+// TempDir returns a new temporary directory with symlinks in its path
+// resolved, as undo resolves project roots.
+func TempDir(t testing.TB) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}

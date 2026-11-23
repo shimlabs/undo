@@ -136,7 +136,7 @@ func printNoCheckpoints(env Env, parsed flags) {
 		}
 		if latest, hasLatest, err := other.Latest(); err == nil && hasLatest {
 			fmt.Fprintf(env.Stdout, "%s was deleted. Bring it back with: undo to %d --project %s\n",
-				printable(root), latest.ID, strconv.Quote(root))
+				printable(root), latest.ID, printable(shellQuote(root)))
 		}
 	}
 }

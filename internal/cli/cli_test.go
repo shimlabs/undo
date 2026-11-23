@@ -12,6 +12,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/testutil"
 	"github.com/shimlabs/undo/internal/watch"
 )
 
@@ -393,6 +394,23 @@ func TestUndoFindsDeletedProject(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "main.go")); string(data) != "package main" {
 		t.Fatalf("main.go = %q after restoring the deleted project", data)
+	}
+}
+
+func TestDeletedProjectHintIsQuotedForTheShell(t *testing.T) {
+	t.Setenv("UNDO_HOME", t.TempDir())
+	parent := testutil.TempDir(t)
+	root := filepath.Join(parent, "it's $(app)")
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
+	if code, out := run(t, root, "", "checkpoint"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	os.RemoveAll(root)
+
+	_, out := run(t, parent, "", "list")
+	want := "--project '" + strings.ReplaceAll(root, "'", `'\''`) + "'"
+	if !strings.Contains(out, want) {
+		t.Fatalf("hint is not quoted for the shell, want %s in:\n%s", want, out)
 	}
 }
 
