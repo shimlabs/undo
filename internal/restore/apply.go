@@ -1,7 +1,6 @@
 package restore
 
 import (
-	"cmp"
 	"errors"
 	"io/fs"
 	"maps"
@@ -9,7 +8,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 	"time"
 
@@ -89,7 +87,7 @@ func (p *restorePlan) removals() []string {
 // removeAll deletes paths, deepest first. A directory that still holds
 // excluded files is left in place.
 func (p *restorePlan) removeAll(paths []string) error {
-	slices.SortFunc(paths, func(a, b string) int { return tree.Depth(b) - tree.Depth(a) })
+	tree.SortDeepestFirst(paths)
 	parents := tree.NewParentChecker(p.root)
 	for _, rel := range paths {
 		if err := parents.Check(rel); err != nil {
@@ -113,7 +111,7 @@ func (p *restorePlan) removeAll(paths []string) error {
 // cannot recreate.
 func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err error) {
 	paths := slices.Clone(p.changes.Written)
-	slices.SortFunc(paths, func(a, b string) int { return cmp.Or(tree.Depth(a)-tree.Depth(b), strings.Compare(a, b)) })
+	tree.SortParentsFirst(paths)
 	clonable, err := p.clonableDirs(projectStore, paths)
 	if err != nil {
 		return nil, err
@@ -326,7 +324,7 @@ func (p *restorePlan) restoreDirModeAndTimes(paths []string) ([]string, error) {
 		}
 	}
 	sorted := slices.Collect(maps.Keys(dirs))
-	slices.SortFunc(sorted, func(a, b string) int { return tree.Depth(b) - tree.Depth(a) })
+	tree.SortDeepestFirst(sorted)
 	parents := tree.NewParentChecker(p.root)
 	for _, rel := range sorted {
 		source, ok := p.target[rel]
