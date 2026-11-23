@@ -176,7 +176,11 @@ func Stat(path string) (Entry, error) {
 	switch {
 	case info.Mode().IsRegular():
 		entry.Kind = File
-		entry.LinkCount = toUint64(stat.Nlink)
+		// Only a count above one is recorded, so a file with a single name
+		// compares equal to listings saved before the count existed.
+		if stat.Nlink > 1 {
+			entry.LinkCount = toUint64(stat.Nlink)
+		}
 	case info.IsDir():
 		entry.Kind = Dir
 		entry.Size = 0
