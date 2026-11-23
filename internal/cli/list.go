@@ -15,6 +15,9 @@ import (
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
+// newestShown is how many checkpoints undo list shows without --all.
+const newestShown = 20
+
 func listCommand(parsed flags, env Env) error {
 	projectStore, err := openStore(env, parsed)
 	if isMissingProject(err) {
@@ -33,7 +36,17 @@ func listCommand(parsed flags, env Env) error {
 		printNoCheckpoints(env, parsed)
 		return nil
 	}
-	printCheckpoints(env.stdout(), checkpoints, projectStore.Root())
+	out := env.stdout()
+	older := 0
+	if !parsed.isAll && len(checkpoints) > newestShown {
+		older = len(checkpoints) - newestShown
+		checkpoints = checkpoints[older:]
+	}
+	printCheckpoints(out, checkpoints, projectStore.Root())
+	if older > 0 {
+		out.Println()
+		out.Printf("%s older. Run %s to see them.\n", pluralize(older, "checkpoint"), out.Bold(projectCommand(parsed, "undo list --all")))
+	}
 	return nil
 }
 

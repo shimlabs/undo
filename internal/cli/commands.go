@@ -53,6 +53,7 @@ type flagDefinition struct {
 type flags struct {
 	isConfirmed bool
 	isCopyMode  bool
+	isAll       bool
 	label       string
 	project     string
 	args        []string
@@ -63,6 +64,7 @@ const (
 	flagProject = "--project"
 	flagLabel   = "--label"
 	flagCopy    = "--copy"
+	flagAll     = "--all"
 	flagHelp    = "--help"
 )
 
@@ -85,6 +87,10 @@ func flagDefinitions() []flagDefinition {
 		{
 			name: flagCopy, summary: "Keep full copies, on filesystems that cannot clone",
 			set: func(parsed *flags, _ string) { parsed.isCopyMode = true },
+		},
+		{
+			name: flagAll, summary: "List every checkpoint, not only the newest 20",
+			set: func(parsed *flags, _ string) { parsed.isAll = true },
 		},
 	}
 }
@@ -140,7 +146,7 @@ func commands() []command {
 			aliases:     []string{"ls"},
 			summary:     "List checkpoints, the newest last",
 			group:       groupRestore,
-			flags:       []string{flagProject},
+			flags:       []string{flagAll, flagProject},
 			run:         listCommand,
 			examples:    []example{{"undo list", "See every checkpoint of this project"}},
 			description: "Lists each checkpoint with its id, its age, the command that followed it, and the folder and agent it came from.",
