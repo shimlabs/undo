@@ -3,23 +3,22 @@ version: 2
 builds:
   # FSEvents needs cgo, so macOS builds run on a macOS machine.
   - id: darwin
-    main: ./cmd/undo
-    binary: undo
+    main: &main ./cmd/undo
+    binary: &binary undo
     env:
       - CGO_ENABLED=1
     goos: [darwin]
-    goarch: [amd64, arm64]
-    ldflags:
+    goarch: &goarch [amd64, arm64]
+    ldflags: &ldflags
       - -s -w -X github.com/shimlabs/undo/internal/cli.Version={{ .Version }}
   - id: linux
-    main: ./cmd/undo
-    binary: undo
+    main: *main
+    binary: *binary
     env:
       - CGO_ENABLED=0
     goos: [linux]
-    goarch: [amd64, arm64]
-    ldflags:
-      - -s -w -X github.com/shimlabs/undo/internal/cli.Version={{ .Version }}
+    goarch: *goarch
+    ldflags: *ldflags
 
 archives:
   - formats: [tar.gz]
