@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -868,4 +870,65 @@ func TestRestoreNeverDeletesFileWhoseCopyWasLostAndMerged(t *testing.T) {
 	if string(data) != "precious v2" {
 		t.Fatalf("guide.md = %q", data)
 	}
+}
+
+// A file cloned into the project (cp -c, Finder duplicate) must be seen.
+func TestTrackerSeesFilesClonedIntoProject(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("clonefile")
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	if out, err := exec.Command("cp", "-c", filepath.Join(root, "README.md"), filepath.Join(root, "copy.md")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	second := takeCheckpoint(t, projectTracker, "2")
+	checkMatchesScan(t, projectStore, root, second.ID)
+	testutil.WriteFile(t, filepath.Join(root, "other.md"), "other content")
+	takeCheckpoint(t, projectTracker, "3")
+	os.Remove(filepath.Join(root, "other.md"))
+	if out, err := exec.Command("cp", "-c", filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "other.md")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	fourth := takeCheckpoint(t, projectTracker, "4")
+	checkMatchesScan(t, projectStore, root, fourth.ID)
+}
+
+// The project folder is deleted and made again while no watcher runs.
+func TestTrackerResumesAfterProjectRecreated(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, filepath.Join(root, "x.txt"), "x")
+	takeCheckpoint(t, projectTracker, "2")
+	projectTracker.Close()
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "# other project")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package other")
+	tracker2, err := newTracker(projectStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker2.Close)
+	third := takeCheckpoint(t, tracker2, "3")
+	checkMatchesScan(t, projectStore, root, third.ID)
+}
+
+// A directory renamed away, and another directory renamed into its place,
+// while no watcher runs.
+func TestTrackerResumesAfterDirectorySwapped(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	projectTracker.Close()
+	os.Rename(filepath.Join(root, "docs"), filepath.Join(root, "..", filepath.Base(root)+"-docs"))
+	testutil.WriteFile(t, filepath.Join(root, "..", filepath.Base(root)+"-docs", "added.md"), "added outside")
+	os.Rename(filepath.Join(root, "..", filepath.Base(root)+"-docs"), filepath.Join(root, "docs"))
+	tracker2, err := newTracker(projectStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracker2.Close)
+	second := takeCheckpoint(t, tracker2, "2")
+	checkMatchesScan(t, projectStore, root, second.ID)
 }
