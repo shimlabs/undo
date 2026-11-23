@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/exclude"
@@ -85,7 +86,7 @@ func printStore(out *terminal.Writer, env Env, projectStore *store.Store) error 
 		printField(out, "Watcher", out.Yellow("not running")+", so checkpoints scan the project")
 	}
 	if line := projectStore.LastError(); line != "" {
-		printField(out, "Last error", out.Red(terminal.Printable(line)))
+		printField(out, "Last error", out.Red(logLine(line)))
 	}
 	return nil
 }
@@ -120,4 +121,15 @@ func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store) err
 		printField(out, "Changing", out.Yellow(pluralize(unstableCount, "checkpoint"))+" hold files that changed while they were saved; a restore lists them")
 	}
 	return nil
+}
+
+// logLine returns a line of the error log for people: its time as an age,
+// then its message as a sentence.
+func logLine(line string) string {
+	stamp, message, hasStamp := strings.Cut(line, " ")
+	moment, err := time.Parse(time.RFC3339, stamp)
+	if !hasStamp || err != nil {
+		return terminal.Printable(line)
+	}
+	return timeAgo(moment) + ": " + sentence(terminal.Printable(message))
 }

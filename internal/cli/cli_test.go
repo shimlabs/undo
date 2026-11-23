@@ -301,7 +301,7 @@ func TestStatusShowsLastError(t *testing.T) {
 	projectStore.LogError(errors.New("disk full"))
 
 	_, out := run(t, root, "", "status")
-	if !strings.Contains(out, "Last error   ") || !strings.Contains(out, " disk full\n") {
+	if !strings.Contains(out, "Last error   just now: Disk full.\n") {
 		t.Fatalf("status does not show the last hook error:\n%s", out)
 	}
 }
