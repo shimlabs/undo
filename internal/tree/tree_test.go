@@ -350,3 +350,16 @@ func TestScanDirOfNamedPipeListsNothing(t *testing.T) {
 		t.Fatalf("ScanDir of a named pipe = %v, %v; want nothing", listing, err)
 	}
 }
+
+func TestScanDirUnderSymlinkedParentListsNothing(t *testing.T) {
+	outside := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(outside, ".ssh", "id_secret"), "k")
+	root := testutil.TempDir(t)
+	if err := os.Symlink(outside, filepath.Join(root, "x")); err != nil {
+		t.Fatal(err)
+	}
+	listing, _, err := ScanDir(root, "x/.ssh", exclude.FromPatterns(nil))
+	if err != nil || len(listing) > 0 {
+		t.Fatalf("ScanDir through a symlinked parent = %v, %v; want nothing", listing, err)
+	}
+}

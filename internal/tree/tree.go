@@ -77,17 +77,25 @@ func Scan(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
 }
 
 // ScanDir lists every path inside the directory rel below root, as Scan
-// does, with paths relative to root. rel itself is left out.
+// does, with paths relative to root. rel itself is left out. The directory
+// is reached one name at a time, so a symlink anywhere on the way to it
+// means it is gone.
 func ScanDir(root, rel string, matcher *exclude.Matcher) (Listing, Skipped, error) {
-	dirPath := filepath.Join(root, filepath.FromSlash(rel))
-	entry, id, err := statAt(unix.AT_FDCWD, dirPath)
-	if errors.Is(err, fs.ErrNotExist) || err == nil && entry.Kind != Dir {
+	file, err := OpenDir(root, rel)
+	if errors.Is(err, fs.ErrNotExist) {
 		return Listing{}, Skipped{}, nil
 	}
 	if err != nil {
 		return nil, Skipped{}, err
 	}
-	return scanFrom(directory{path: dirPath, rel: rel, id: id}, matcher, Listing{})
+	var stat unix.Stat_t
+	err = unix.Fstat(int(file.Fd()), &stat)
+	file.Close()
+	if err != nil {
+		return nil, Skipped{}, &fs.PathError{Op: "fstat", Path: file.Name(), Err: err}
+	}
+	dir := directory{path: filepath.Join(root, filepath.FromSlash(rel)), rel: rel, id: fileID{device: toUint64(stat.Dev), inode: stat.Ino}}
+	return scanFrom(dir, matcher, Listing{})
 }
 
 // scanFrom adds everything under dir to listing.

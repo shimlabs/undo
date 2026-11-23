@@ -978,3 +978,20 @@ func loseNewestCopyAndPrune(t *testing.T, projectTracker *tracker, projectStore 
 		t.Fatal(err)
 	}
 }
+
+func TestAddUnderSymlinkedParentAddsNothing(t *testing.T) {
+	outside := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(outside, ".ssh", "id_secret"), "k")
+	projectTracker, _, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	if err := os.Symlink(outside, filepath.Join(root, "x")); err != nil {
+		t.Fatal(err)
+	}
+	changes := newChangeSet(tree.Listing{})
+	if err := projectTracker.addUnder(changes, exclude.FromPatterns(nil), filepath.Join(root, "x", ".ssh")); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.changed) > 0 {
+		t.Fatalf("addUnder through a symlinked parent added %v", changes.changed)
+	}
+}
