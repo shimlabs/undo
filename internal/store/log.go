@@ -19,7 +19,14 @@ const maxLogSize = 1 << 20
 // it starts over. Logging is best effort: if the log cannot be written, the
 // failure is lost.
 func (s *Store) LogError(failure error) {
-	appendLog(s.logPath(), failure)
+	name := s.storeName(s.logPath())
+	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY
+	if info, err := s.files.Lstat(name); err == nil && info.Size() > maxLogSize {
+		flags |= os.O_TRUNC
+	}
+	if file, err := s.files.OpenFile(name, flags, 0o600); err == nil {
+		writeLogLine(file, failure)
+	}
 }
 
 // LogHomeError records a failure that happened before a project's store
@@ -32,15 +39,17 @@ func LogHomeError(home string, failure error) {
 
 func appendLog(path string, failure error) {
 	// O_NOFOLLOW: a symlink planted in place of the log must not lead the
-	// write outside the store.
+	// write elsewhere.
 	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY | unix.O_NOFOLLOW
 	if info, err := os.Lstat(path); err == nil && info.Size() > maxLogSize {
 		flags |= os.O_TRUNC
 	}
-	file, err := os.OpenFile(path, flags, 0o600)
-	if err != nil {
-		return
+	if file, err := os.OpenFile(path, flags, 0o600); err == nil {
+		writeLogLine(file, failure)
 	}
+}
+
+func writeLogLine(file *os.File, failure error) {
 	defer file.Close()
 	fmt.Fprintf(file, "%s %v\n", time.Now().Format(time.RFC3339), failure)
 }
@@ -48,7 +57,7 @@ func appendLog(path string, failure error) {
 // LastError returns the most recent line written by LogError, or "" if there
 // is none.
 func (s *Store) LastError() string {
-	data, err := os.ReadFile(s.logPath())
+	data, err := s.readFile(s.logPath())
 	if err != nil {
 		return ""
 	}

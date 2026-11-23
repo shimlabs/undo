@@ -356,7 +356,7 @@ func TestMergeIntoReadOnlyDirectory(t *testing.T) {
 func TestFailedMergeKeepsCheckpointsWorking(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
 	take(t, projectStore, "first")
-	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
+	if err := projectStore.writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(projectStore.manifestPath(1)); err != nil {

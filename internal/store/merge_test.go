@@ -45,7 +45,7 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 2}); err != nil {
+	if err := projectStore.writeJSON(projectStore.mergePath(), pendingMerge{Through: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := projectStore.mergeLayer(2, base, map[string]bool{}, tree.NewParentChecker(projectStore.baseDir())); err != nil {
@@ -128,7 +128,7 @@ func TestFinishMergeNeverRemovesThroughBaseSymlink(t *testing.T) {
 	if err := os.Symlink(outside, projectStore.basePath("a")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 2}); err != nil {
+	if err := projectStore.writeJSON(projectStore.mergePath(), pendingMerge{Through: 2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestFinishMergeRemovesFilesLeftByInterruptedMerge(t *testing.T) {
 	}
 	leftover := projectStore.basePath("dir/.a.txt.undo-0123456789ab")
 	testutil.WriteFile(t, leftover, "half written")
-	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
+	if err := projectStore.writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -3,10 +3,8 @@ package watch
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/fsnotify"
 )
 
@@ -32,7 +30,7 @@ func (t *tracker) resume() fsnotify.EventID {
 		return fsnotify.SinceNow
 	}
 	var position streamPosition
-	data, err := os.ReadFile(t.store.WatcherPositionPath())
+	data, err := t.store.WatcherPosition()
 	if err != nil || json.Unmarshal(data, &position) != nil || time.Since(position.SavedAt) > maxPositionAge {
 		return fsnotify.SinceNow
 	}
@@ -65,7 +63,7 @@ func (t *tracker) savePosition() {
 	t.position.SavedAt = time.Now()
 	data, err := json.Marshal(t.position)
 	if err == nil {
-		err = atomicfile.WriteFile(t.store.WatcherPositionPath(), data, 0o600)
+		err = t.store.SaveWatcherPosition(data)
 	}
 	if err != nil {
 		t.store.LogError(fmt.Errorf("saving the watcher position: %w", err))

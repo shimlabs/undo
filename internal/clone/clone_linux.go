@@ -10,27 +10,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// CanCloneDirs reports whether File and FileAt clone a whole directory in one
-// call. FICLONE clones one file at a time.
+// CanCloneDirs reports whether FileAt clones a whole directory in one call.
+// FICLONE clones one file at a time.
 const CanCloneDirs = false
 
-// File clones src to dst with FICLONE, so the copy shares its data with src.
-// Directories are cloned file by file. A symlink is cloned as a link, not
-// followed. It fails if dst already exists, and returns an error matching
-// errors.ErrUnsupported when the filesystem cannot clone.
-func File(src, dst string) error {
-	err := copyTree(src, dst, cloneContent)
-	if err != nil && errors.Is(err, errors.ErrUnsupported) {
-		os.RemoveAll(dst)
-	}
-	return err
-}
-
-// FileAt clones the file or symlink src to name in dir with FICLONE. It works
-// relative to dir, so it never follows a symlink that replaced a directory
-// above dir.
-func FileAt(src string, dir *os.File, name string) error {
-	return copyAt(src, dir, name, cloneContent)
+// FileAt clones srcName in srcDir to name in dir with FICLONE, so the copy
+// shares its data with the source. A directory is cloned file by file, and a
+// symlink is cloned as a link. It works relative to both directories, so no
+// symlink above either name is followed. It fails if name already exists,
+// and returns an error matching errors.ErrUnsupported when the filesystem
+// cannot clone.
+func FileAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
+	return copyTreeAt(srcDir, srcName, dir, name, cloneContent)
 }
 
 // markUnsupported marks the errors FICLONE returns on filesystems without

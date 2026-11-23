@@ -30,23 +30,6 @@ const (
 	watcherPositionFile = "watcher-position"
 )
 
-// MarkerDir is where the watcher writes the marker files it waits for.
-func (s *Store) MarkerDir() string {
-	return filepath.Join(s.dir, markersDirName)
-}
-
-// WatcherFailurePath is where the watcher client records why the watcher
-// last failed to start.
-func (s *Store) WatcherFailurePath() string {
-	return filepath.Join(s.dir, watcherFailureFile)
-}
-
-// WatcherPositionPath is where the watcher records where a new watcher can
-// resume the filesystem events.
-func (s *Store) WatcherPositionPath() string {
-	return filepath.Join(s.dir, watcherPositionFile)
-}
-
 func (s *Store) configPath() string {
 	return filepath.Join(s.dir, configFile)
 }

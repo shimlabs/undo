@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/tree"
 )
 
@@ -24,10 +23,10 @@ type pendingMerge struct {
 // next lock finishes it.
 func (s *Store) merge(through int) (int64, error) {
 	// The usage record no longer matches once layers are merged.
-	if err := os.Remove(s.usagePath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := s.remove(s.usagePath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return 0, err
 	}
-	if err := writeJSON(s.mergePath(), pendingMerge{Through: through}); err != nil {
+	if err := s.writeJSON(s.mergePath(), pendingMerge{Through: through}); err != nil {
 		return 0, err
 	}
 	return s.mergeRecorded()
@@ -37,7 +36,7 @@ func (s *Store) merge(through int) (int64, error) {
 // leave a half-written temporary file in the base, which the replay does not
 // know about, so it is removed too.
 func (s *Store) finishMerge() error {
-	if _, err := os.Stat(s.mergePath()); errors.Is(err, fs.ErrNotExist) {
+	if _, err := s.lstat(s.mergePath()); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if _, err := s.mergeRecorded(); err != nil {
@@ -56,7 +55,7 @@ func (s *Store) finishMerge() error {
 // left behind.
 func (s *Store) mergeRecorded() (int64, error) {
 	var pending pendingMerge
-	if err := readJSON(s.mergePath(), &pending); err != nil {
+	if err := s.readJSON(s.mergePath(), &pending); err != nil {
 		return 0, err
 	}
 	base, err := s.baseListing()
@@ -94,7 +93,7 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err := s.writeLost(record); err != nil {
 		return freed, err
 	}
-	if err := writeGob(s.baseListingPath(), base); err != nil {
+	if err := s.writeGob(s.baseListingPath(), base); err != nil {
 		return freed, err
 	}
 	remaining := slices.DeleteFunc(checkpoints, func(checkpoint Checkpoint) bool { return checkpoint.ID <= pending.Through })
@@ -104,17 +103,17 @@ func (s *Store) mergeRecorded() (int64, error) {
 	if err := s.removeLayersThrough(pending.Through); err != nil {
 		return freed, err
 	}
-	return freed, os.Remove(s.mergePath())
+	return freed, s.remove(s.mergePath())
 }
 
 func (s *Store) removeLayersThrough(through int) error {
-	layers, err := os.ReadDir(s.layersDir())
+	layers, err := s.readDir(s.layersDir())
 	if err != nil {
 		return err
 	}
 	for _, layer := range layers {
 		if id, err := strconv.Atoi(layer.Name()); err == nil && id <= through {
-			if err := removeAll(s.layerDir(id)); err != nil {
+			if err := s.removeAll(s.layerDir(id)); err != nil {
 				return err
 			}
 		}
@@ -184,41 +183,46 @@ func (s *Store) mergeLayer(id int, base tree.Listing, lost map[string]bool, pare
 func (s *Store) mergeDir(rel string, parents *tree.ParentChecker) (int64, error) {
 	dst := s.basePath(rel)
 	var freed int64
-	if info, err := os.Lstat(dst); err == nil && !info.IsDir() {
+	if info, err := s.lstat(dst); err == nil && !info.IsDir() {
 		size, err := s.removeFromBase(rel, parents)
 		if err != nil {
 			return 0, err
 		}
 		freed = size
 	}
-	if err := makeWritable(filepath.Dir(dst)); err != nil {
+	if err := s.makeWritable(filepath.Dir(dst)); err != nil {
 		return freed, err
 	}
-	return freed, os.MkdirAll(dst, 0o700)
+	return freed, s.mkdirAll(dst)
 }
 
 // mergeFile replaces rel in the base with the copy in layer id.
 func (s *Store) mergeFile(id int, rel string, parents *tree.ParentChecker) (int64, error) {
 	dst := s.basePath(rel)
-	if err := makeWritable(filepath.Dir(dst)); err != nil {
+	if err := s.makeWritable(filepath.Dir(dst)); err != nil {
 		return 0, err
 	}
 	size, err := diskUsage(dst)
 	if err != nil {
 		return 0, err
 	}
-	if info, err := os.Lstat(dst); err == nil && info.IsDir() {
-		if err := removeAll(dst); err != nil {
+	if info, err := s.lstat(dst); err == nil && info.IsDir() {
+		if err := s.removeAll(dst); err != nil {
 			return 0, err
 		}
 		parents.Forget(rel)
 	} else if err == nil {
 		// A whole-directory clone of the base keeps lock flags.
-		if err := clone.Unlock(dst); err != nil {
+		if err := s.unlock(dst); err != nil {
 			return 0, err
 		}
 	}
-	return size, s.Extract(rel, Source{Layer: id}, dst)
+	dir, err := s.openDir(filepath.Dir(dst))
+	if err != nil {
+		return 0, err
+	}
+	defer dir.Close()
+	return size, s.ExtractAt(rel, Source{Layer: id}, dir, filepath.Base(dst))
 }
 
 // removeFromBase removes rel from the base. A path below something that is
@@ -235,7 +239,7 @@ func (s *Store) removeFromBase(rel string, parents *tree.ParentChecker) (int64, 
 		return 0, err
 	}
 	parents.Forget(rel)
-	return size, removeAll(basePath)
+	return size, s.removeAll(basePath)
 }
 
 // makeBaseParents makes every parent of rel in the base a real directory,
@@ -251,7 +255,7 @@ func (s *Store) makeBaseParents(rel string, parents *tree.ParentChecker) error {
 		dirs = append(dirs, dir)
 	}
 	for _, dir := range slices.Backward(dirs) {
-		info, err := os.Lstat(s.basePath(dir))
+		info, err := s.lstat(s.basePath(dir))
 		if errors.Is(err, fs.ErrNotExist) {
 			break
 		}
@@ -259,7 +263,7 @@ func (s *Store) makeBaseParents(rel string, parents *tree.ParentChecker) error {
 			return err
 		}
 		if !info.IsDir() {
-			if err := removeAll(s.basePath(dir)); err != nil {
+			if err := s.removeAll(s.basePath(dir)); err != nil {
 				return err
 			}
 			parents.Forget(dir)

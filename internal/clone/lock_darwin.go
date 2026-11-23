@@ -21,22 +21,6 @@ func IsLocked(path string) bool {
 	return unix.Lstat(path, &stat) == nil && stat.Flags&lockFlags != 0
 }
 
-// Unlock clears the lock flags the owner may clear from path. A symlink is
-// left alone, since chflags would follow it.
-func Unlock(path string) error {
-	var stat unix.Stat_t
-	if err := unix.Lstat(path, &stat); err != nil {
-		return &os.PathError{Op: "lstat", Path: path, Err: err}
-	}
-	if stat.Flags&userLockFlags == 0 || stat.Mode&unix.S_IFMT == unix.S_IFLNK {
-		return nil
-	}
-	if err := unix.Chflags(path, int(stat.Flags&^userLockFlags)); err != nil {
-		return &os.PathError{Op: "chflags", Path: path, Err: err}
-	}
-	return nil
-}
-
 // UnlockAt clears the lock flags the owner may clear from name in dir,
 // without following a symlink.
 func UnlockAt(dir *os.File, name string) error {

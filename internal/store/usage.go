@@ -98,7 +98,7 @@ func (s *Store) usageBound() (int64, error) {
 		bound += checkpoint.StoredBytes
 	}
 	for _, path := range []string{s.indexPath(), s.baseListingPath(), s.listingPath(), s.restorePath(), s.logPath()} {
-		if info, err := os.Stat(path); err == nil {
+		if info, err := s.lstat(path); err == nil {
 			bound += info.Size() + blockSize
 		}
 	}
@@ -126,7 +126,7 @@ func (s *Store) UsageEstimate() (int64, error) {
 		return 0, err
 	}
 	var record usageRecord
-	if err := readJSON(s.usagePath(), &record); err == nil {
+	if err := s.readJSON(s.usagePath(), &record); err == nil {
 		estimate := record.Bytes
 		for _, checkpoint := range checkpoints {
 			if checkpoint.ID > record.LatestID {
@@ -143,5 +143,5 @@ func (s *Store) UsageEstimate() (int64, error) {
 	if len(checkpoints) > 0 {
 		record.LatestID = checkpoints[len(checkpoints)-1].ID
 	}
-	return usage, writeJSON(s.usagePath(), record)
+	return usage, s.writeJSON(s.usagePath(), record)
 }

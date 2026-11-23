@@ -34,7 +34,7 @@ var ErrMergePending = errors.New("an earlier cleanup of old checkpoints has not 
 // State returns every path of the project as it was at checkpoint id. It
 // starts from the base and applies each layer up to id.
 func (s *Store) State(id int) (map[string]Source, error) {
-	if _, err := os.Stat(s.mergePath()); err == nil {
+	if _, err := s.lstat(s.mergePath()); err == nil {
 		return nil, ErrMergePending
 	}
 	if _, err := s.Checkpoint(id); err != nil {
@@ -78,7 +78,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 // Manifest returns the manifest of checkpoint id.
 func (s *Store) Manifest(id int) (Manifest, error) {
 	var manifest Manifest
-	if err := readJSON(s.manifestPath(id), &manifest); err != nil {
+	if err := s.readJSON(s.manifestPath(id), &manifest); err != nil {
 		return Manifest{}, err
 	}
 	paths := slices.Concat(manifest.Deleted, manifest.Unstable, manifest.Unreadable, slices.Collect(maps.Keys(manifest.Changed)))
@@ -100,37 +100,23 @@ func checkLocal(paths []string) error {
 	return nil
 }
 
-// Extract writes the stored copy of the file or symlink rel, as recorded in
-// source, to dst. An existing dst is replaced in one rename, so it is never
-// left half written.
-func (s *Store) Extract(rel string, source Source, dst string) error {
-	src, err := s.storedPath(rel, source)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Lstat(dst); errors.Is(err, fs.ErrNotExist) {
-		return s.clone(src, dst)
-	}
-	return atomicfile.Replace(dst, func(tempPath string) error {
-		return s.clone(src, tempPath)
-	})
-}
-
 // ExtractAt writes the stored copy of the file or symlink rel, as recorded
-// in source, to name in dir, like Extract. It works relative to dir, so a
-// symlink that replaced a directory above dir is never followed.
+// in source, to name in dir. An existing name is replaced in one rename, so
+// it is never left half written. It works relative to dir and reads the
+// copy through the store's root, so no symlink on either side is followed.
 func (s *Store) ExtractAt(rel string, source Source, dir *os.File, name string) error {
-	src, err := s.storedPath(rel, source)
+	srcDir, srcName, err := s.openStored(rel, source)
 	if err != nil {
 		return err
 	}
+	defer srcDir.Close()
 	dirFd := int(dir.Fd())
 	var stat unix.Stat_t
 	if err := unix.Fstatat(dirFd, name, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
-		return s.cloneAt(src, dir, name)
+		return s.cloneAt(srcDir, srcName, dir, name)
 	}
 	tempName := atomicfile.TempName(name)
-	if err := s.cloneAt(src, dir, tempName); err != nil {
+	if err := s.cloneAt(srcDir, srcName, dir, tempName); err != nil {
 		return err
 	}
 	if err := unix.Renameat(dirFd, tempName, dirFd, name); err != nil {
@@ -139,24 +125,34 @@ func (s *Store) ExtractAt(rel string, source Source, dir *os.File, name string) 
 	return nil
 }
 
-// storedPath returns where the copy of rel recorded in source is. It returns
-// an error wrapping ErrStoredFileMissing if the copy is gone.
-func (s *Store) storedPath(rel string, source Source) (string, error) {
+// openStored opens the directory that holds the copy of rel recorded in
+// source, and returns it with the copy's name. It returns an error wrapping
+// ErrStoredFileMissing if the copy is gone.
+func (s *Store) openStored(rel string, source Source) (*os.File, string, error) {
 	src := s.basePath(rel)
 	if source.Layer > 0 {
 		src = s.layerFile(source.Layer, rel)
 	}
-	if _, err := os.Lstat(src); errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
+	if _, err := s.lstat(src); errors.Is(err, fs.ErrNotExist) {
+		return nil, "", fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
 	}
-	return src, nil
+	dir, err := s.openDir(filepath.Dir(src))
+	if err != nil {
+		return nil, "", err
+	}
+	return dir, filepath.Base(src), nil
 }
 
 // ExtractBaseDir writes the whole directory rel from the base to name in
 // dir, which must not exist, in one clone. Only use it for a directory
 // UnchangedDirs returned.
 func (s *Store) ExtractBaseDir(rel string, dir *os.File, name string) error {
-	return clone.FileAt(s.basePath(rel), dir, name)
+	srcDir, srcName, err := s.openStored(rel, Source{})
+	if err != nil {
+		return err
+	}
+	defer srcDir.Close()
+	return clone.FileAt(srcDir, srcName, dir, name)
 }
 
 // UnchangedDirs returns the directories among dirs whose whole content in

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -111,7 +112,7 @@ func TestOpenRefusesNewerFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(projectStore.configPath(), config{Format: format + 1, Root: root}); err != nil {
+	if err := projectStore.writeJSON(projectStore.configPath(), config{Format: format + 1, Root: root}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -193,14 +194,14 @@ func TestStoredPathsCannotLeaveProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(projectStore.manifestPath(1), Manifest{Deleted: []string{escape}}); err != nil {
+	if err := projectStore.writeJSON(projectStore.manifestPath(1), Manifest{Deleted: []string{escape}}); err != nil {
 		t.Fatal(err)
 	}
 
 	if _, err := projectStore.State(1); err == nil {
 		t.Fatal("State accepted a stored path outside the project")
 	}
-	if err := writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
+	if err := projectStore.writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
 		t.Fatal(err)
 	}
 	take(t, projectStore, "second")
@@ -221,7 +222,7 @@ func TestOpenIgnoresStoreNextToProjectThatHomeDidNotCreate(t *testing.T) {
 	if err := os.Mkdir(planted, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(filepath.Join(planted, configFile), config{Format: format, Root: root}); err != nil {
+	if err := writeJSONFile(filepath.Join(planted, configFile), config{Format: format, Root: root}); err != nil {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
@@ -289,5 +290,67 @@ func TestStoreNeverWritesThroughSymlinkedFiles(t *testing.T) {
 				t.Fatalf("file outside the store = %q, %v", data, err)
 			}
 		})
+	}
+}
+
+// writeJSONFile writes value as JSON to path, for a folder that is no open
+// store.
+func writeJSONFile(path string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func TestOpenStoreNeverDeletesThroughSwappedBase(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"secret": "s", "docs/guide.md": "g"})
+	take(t, projectStore, "first")
+	outside := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(outside, "secret"), "do not delete")
+	testutil.WriteFile(t, filepath.Join(outside, "docs", "guide.md"), "do not delete")
+	// The store is already open, as the watcher keeps it, when base is
+	// swapped and a merge that deletes from it is planted.
+	if err := os.Rename(projectStore.baseDir(), projectStore.baseDir()+".aside"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, projectStore.baseDir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectStore.writeJSON(projectStore.manifestPath(1), Manifest{Deleted: []string{"secret"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectStore.writeJSON(projectStore.mergePath(), pendingMerge{Through: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "n")
+	_, _ = projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
+	for _, rel := range []string{"secret", "docs/guide.md"} {
+		if data, err := os.ReadFile(filepath.Join(outside, rel)); err != nil || string(data) != "do not delete" {
+			t.Errorf("%s outside the store = %q, %v", rel, data, err)
+		}
+	}
+}
+
+func TestExtractNeverReadsThroughSymlinkInLayer(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+	take(t, projectStore, "first")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "changed")
+	second := take(t, projectStore, "second")
+	secrets := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(secrets, "id_ed25519"), "private key")
+	if err := os.Symlink(secrets, projectStore.layerFile(second.ID, "leak")); err != nil {
+		t.Fatal(err)
+	}
+
+	dir, err := os.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	_ = projectStore.ExtractAt("leak/id_ed25519", Source{Layer: second.ID}, dir, "id_ed25519")
+	if data, err := os.ReadFile(filepath.Join(root, "id_ed25519")); err == nil {
+		t.Fatalf("a file from outside the store reached the project: %q", data)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"os"
 	"slices"
 
 	"github.com/shimlabs/undo/internal/tree"
@@ -21,7 +20,7 @@ var errNoBase = fmt.Errorf("no checkpoints yet: %w", fs.ErrNotExist)
 // baseListing returns the listing of what the base holds.
 func (s *Store) baseListing() (tree.Listing, error) {
 	var listing tree.Listing
-	err := readGob(s.baseListingPath(), &listing)
+	err := s.readGob(s.baseListingPath(), &listing)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, errNoBase
 	}
@@ -64,7 +63,7 @@ func (s *Store) ListingAt(id int) (tree.Listing, error) {
 // listingForward applies the layers after checkpoint from to listing, which
 // is the listing at from, up to checkpoint to.
 func (s *Store) listingForward(from int, listing tree.Listing, to int) (tree.Listing, error) {
-	if _, err := os.Stat(s.mergePath()); err == nil {
+	if _, err := s.lstat(s.mergePath()); err == nil {
 		return nil, ErrMergePending
 	}
 	checkpoints, err := s.List()
@@ -104,7 +103,7 @@ func (s *Store) SaveListing(id int, listing tree.Listing) error {
 	if err := encoder.Encode(listing); err != nil {
 		return err
 	}
-	return writeFileAtomic(s.listingPath(), buffer.Bytes())
+	return s.writeFileAtomic(s.listingPath(), buffer.Bytes())
 }
 
 // IsListingBehind reports whether the saved listing is missing or more than
@@ -117,7 +116,7 @@ func (s *Store) IsListingBehind(id int) bool {
 // savedListingID returns the checkpoint the saved listing belongs to. The ID
 // is encoded first, so this does not decode the listing.
 func (s *Store) savedListingID() (int, error) {
-	file, err := os.Open(s.listingPath())
+	file, err := s.files.Open(s.storeName(s.listingPath()))
 	if err != nil {
 		return 0, err
 	}
@@ -128,7 +127,7 @@ func (s *Store) savedListingID() (int, error) {
 }
 
 func (s *Store) savedListing() (int, tree.Listing, error) {
-	data, err := os.ReadFile(s.listingPath())
+	data, err := s.readFile(s.listingPath())
 	if err != nil {
 		return 0, nil, err
 	}

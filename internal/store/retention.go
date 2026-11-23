@@ -1,11 +1,7 @@
 package store
 
 import (
-	"os"
 	"time"
-
-	"github.com/shimlabs/undo/internal/atomicfile"
-	"golang.org/x/sys/unix"
 )
 
 // Limits bound how much history a store keeps.
@@ -29,18 +25,13 @@ const pruneInterval = time.Hour
 // is cheap to call after every checkpoint.
 func (s *Store) PruneIfDue(now time.Time, limits Limits) (int, error) {
 	marker := s.pruneMarkerPath()
-	if info, err := os.Lstat(marker); err == nil && now.Sub(info.ModTime()) < pruneInterval {
+	if info, err := s.lstat(marker); err == nil && now.Sub(info.ModTime()) < pruneInterval {
 		return 0, nil
 	}
-	// Replacing the marker in one rename, and setting its times without
-	// following a link, keeps a symlink planted in its place from leading
-	// outside the store.
-	if err := atomicfile.WriteFile(marker, nil, 0o600); err != nil {
+	if err := s.writeFileAtomic(marker, nil); err != nil {
 		return 0, err
 	}
-	pruneTime := unix.NsecToTimespec(now.UnixNano())
-	times := []unix.Timespec{pruneTime, pruneTime}
-	if err := unix.UtimesNanoAt(unix.AT_FDCWD, marker, times, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+	if err := s.files.Chtimes(s.storeName(marker), now, now); err != nil {
 		return 0, err
 	}
 	return s.Prune(now, limits)

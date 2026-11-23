@@ -15,7 +15,7 @@ type lostRecord struct {
 // readLost returns the lost record, which is empty when no copy was lost.
 func (s *Store) readLost() (lostRecord, error) {
 	var record lostRecord
-	if err := readJSON(s.lostPath(), &record); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := s.readJSON(s.lostPath(), &record); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return lostRecord{}, err
 	}
 	return record, nil
@@ -31,5 +31,5 @@ func setOf(paths []string) map[string]bool {
 }
 
 func (s *Store) writeLost(record lostRecord) error {
-	return writeJSON(s.lostPath(), record)
+	return s.writeJSON(s.lostPath(), record)
 }

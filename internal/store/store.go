@@ -15,7 +15,6 @@ import (
 	"syscall"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
-	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/project"
 )
 
@@ -47,6 +46,8 @@ var (
 type Store struct {
 	root string
 	dir  string
+	// files is the store directory, opened once; see openFiles.
+	files *os.Root
 	// config is read again whenever the store is locked, so it is replaced
 	// as a whole.
 	config atomic.Pointer[config]
@@ -130,17 +131,24 @@ func Create(home, root string) (*Store, error) {
 // openAt opens the store in dir for the project at root, writing its
 // settings if the store is new.
 func openAt(dir, root string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Join(dir, layersDirName), 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	// Merges and restores work on paths below these, so a symlink in their
-	// place would lead them outside the store.
-	for _, name := range []string{baseDirName, layersDirName} {
-		if info, err := os.Lstat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
-			return nil, fmt.Errorf("%s: %w", filepath.Join(dir, name), ErrUnsafeStore)
+	files, err := openFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{root: root, dir: dir, files: files}
+	// The root already stops a symlink in place of these from leading
+	// outside the store; refusing it here says so plainly.
+	for _, path := range []string{s.baseDir(), s.layersDir()} {
+		if info, err := s.lstat(path); err == nil && !info.IsDir() {
+			return nil, fmt.Errorf("%s: %w", path, ErrUnsafeStore)
 		}
 	}
-	s := &Store{root: root, dir: dir}
+	if err := s.mkdirAll(s.layersDir()); err != nil {
+		return nil, err
+	}
 	if err := s.loadConfig(); err != nil {
 		return nil, err
 	}
@@ -150,7 +158,7 @@ func openAt(dir, root string) (*Store, error) {
 	}
 	if settings.Format == 0 {
 		settings.Format, settings.Root = format, root
-		if err := writeJSON(s.configPath(), settings); err != nil {
+		if err := s.writeJSON(s.configPath(), settings); err != nil {
 			return nil, err
 		}
 		s.config.Store(&settings)
@@ -246,46 +254,18 @@ func (s *Store) IsCopyMode() bool { return s.config.Load().IsCopyMode }
 func (s *Store) SetCopyMode(isEnabled bool) error {
 	settings := *s.config.Load()
 	settings.IsCopyMode = isEnabled
-	if err := writeJSON(s.configPath(), settings); err != nil {
+	if err := s.writeJSON(s.configPath(), settings); err != nil {
 		return err
 	}
 	s.config.Store(&settings)
 	return nil
 }
 
-// clone copies src to dst the way the store keeps files: as a clone, or as a
-// full copy in copy mode.
-//
-// A clone keeps a locked file's lock flags, which would stop the store from
-// replacing or removing its copy, so they are cleared on the copy.
-func (s *Store) clone(src, dst string) error {
-	copyFile := clone.File
-	if s.IsCopyMode() {
-		copyFile = clone.Copy
-	}
-	if err := copyFile(src, dst); err != nil {
-		return err
-	}
-	return clone.Unlock(dst)
-}
-
-// cloneAt is clone relative to dir.
-func (s *Store) cloneAt(src string, dir *os.File, name string) error {
-	copyFile := clone.FileAt
-	if s.IsCopyMode() {
-		copyFile = clone.CopyAt
-	}
-	if err := copyFile(src, dir, name); err != nil {
-		return err
-	}
-	return clone.UnlockAt(dir, name)
-}
-
 // loadConfig reads the saved settings. It runs whenever the store is locked,
 // so a long-running watcher sees copy mode turned on by another process.
 func (s *Store) loadConfig() error {
 	var settings config
-	if err := readJSON(s.configPath(), &settings); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := s.readJSON(s.configPath(), &settings); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	s.config.Store(&settings)
@@ -314,8 +294,15 @@ func StoresUnder(home, dir string) ([]*Store, error) {
 	}
 	var stores []*Store
 	for _, storeDir := range candidates {
-		s := &Store{dir: storeDir}
-		if s.loadConfig() != nil || checkPrivateDir(storeDir) != nil {
+		if checkPrivateDir(storeDir) != nil {
+			continue
+		}
+		files, err := openFiles(storeDir)
+		if err != nil {
+			continue
+		}
+		s := &Store{dir: storeDir, files: files}
+		if s.loadConfig() != nil {
 			continue
 		}
 		settings := s.config.Load()

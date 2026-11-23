@@ -20,7 +20,7 @@ import (
 
 // List returns the checkpoints in the order they were taken.
 func (s *Store) List() ([]Checkpoint, error) {
-	data, err := os.ReadFile(s.indexPath())
+	data, err := s.readFile(s.indexPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -46,7 +46,7 @@ func (s *Store) Checkpoint(id int) (Checkpoint, error) {
 // Latest returns the most recent checkpoint, and false if there is none. It
 // reads only the end of the index.
 func (s *Store) Latest() (Checkpoint, bool, error) {
-	file, err := os.Open(s.indexPath())
+	file, err := s.files.Open(s.storeName(s.indexPath()))
 	if errors.Is(err, fs.ErrNotExist) {
 		return Checkpoint{}, false, nil
 	}
@@ -100,7 +100,7 @@ func (s *Store) appendIndex(checkpoint Checkpoint) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(s.indexPath(), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
+	file, err := s.files.OpenFile(s.storeName(s.indexPath()), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return err
 	}
@@ -147,5 +147,5 @@ func (s *Store) writeIndex(checkpoints []Checkpoint) error {
 		}
 		buf.Write(append(line, '\n'))
 	}
-	return writeFileAtomic(s.indexPath(), buf.Bytes())
+	return s.writeFileAtomic(s.indexPath(), buf.Bytes())
 }

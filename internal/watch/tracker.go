@@ -78,11 +78,12 @@ var errStreamStopped = errors.New("watching stopped")
 // checkpoint. Otherwise its first checkpoint compares the whole project,
 // because changes made before it started are not known.
 func newTracker(projectStore *store.Store) (*tracker, error) {
-	markerDir := projectStore.MarkerDir()
-	if err := os.MkdirAll(markerDir, 0o700); err != nil {
+	markerDir, err := projectStore.MarkerDir()
+	if err != nil {
 		return nil, err
 	}
-	markerDir, err := filepath.EvalSymlinks(markerDir)
+	// FSEvents reports resolved paths, such as /private/var for /var.
+	markerDir, err = filepath.EvalSymlinks(markerDir)
 	if err != nil {
 		return nil, err
 	}

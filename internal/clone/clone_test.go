@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestCloneFileRefusesExisting(t *testing.T) {
+func TestFileAtRefusesExisting(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
 	dst := filepath.Join(dir, "dst")
@@ -20,8 +20,8 @@ func TestCloneFileRefusesExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := File(src, dst); err == nil {
-		t.Fatal("File overwrote an existing destination")
+	if err := copyByPath(t, FileAt, src, dst); err == nil {
+		t.Fatal("FileAt overwrote an existing destination")
 	}
 	data, err := os.ReadFile(dst)
 	if err != nil {
@@ -86,25 +86,25 @@ func checkSameTree(t *testing.T, src, dst string) {
 	}
 }
 
-func TestCloneFileClonesDirectories(t *testing.T) {
+func TestFileAtClonesDirectories(t *testing.T) {
 	src := sourceTree(t)
 	dst := filepath.Join(filepath.Dir(src), "dst")
-	if err := File(src, dst); err != nil {
+	if err := copyByPath(t, FileAt, src, dst); err != nil {
 		t.Fatal(err)
 	}
 	checkSameTree(t, src, dst)
 }
 
-func TestCopyMatchesSource(t *testing.T) {
+func TestCopyAtMatchesSource(t *testing.T) {
 	src := sourceTree(t)
 	dst := filepath.Join(filepath.Dir(src), "dst")
-	if err := Copy(src, dst); err != nil {
+	if err := copyByPath(t, CopyAt, src, dst); err != nil {
 		t.Fatal(err)
 	}
 	checkSameTree(t, src, dst)
 
-	if err := Copy(src, dst); err == nil {
-		t.Fatal("Copy overwrote an existing destination")
+	if err := copyByPath(t, CopyAt, src, dst); err == nil {
+		t.Fatal("CopyAt overwrote an existing destination")
 	}
 }
 
@@ -133,4 +133,39 @@ func umask() fs.FileMode {
 	mask := syscall.Umask(0)
 	syscall.Umask(mask)
 	return fs.FileMode(mask)
+}
+
+// copyByPath calls copyFile with the parent directories of src and dst
+// opened.
+func copyByPath(t *testing.T, copyFile func(srcDir *os.File, srcName string, dir *os.File, name string) error, src, dst string) error {
+	t.Helper()
+	srcDir, err := os.Open(filepath.Dir(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srcDir.Close()
+	dir, err := os.Open(filepath.Dir(dst))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	return copyFile(srcDir, filepath.Base(src), dir, filepath.Base(dst))
+}
+
+func TestFileAtNeverFollowsSymlinkInSourceName(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(root, "outside")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyByPath(t, FileAt, filepath.Join(root, "link"), filepath.Join(root, "copy")); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "copy")); err != nil || target != outside {
+		t.Fatalf("copy = %q, %v; want a symlink to %s", target, err, outside)
+	}
 }

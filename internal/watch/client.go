@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
-	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/store"
 )
 
@@ -93,23 +91,18 @@ func (c Client) startFor(projectStore *store.Store) startFunc {
 // StartFailure returns why the project's server last failed to start, and
 // whether that was recent enough that checkpoints still scan instead.
 func StartFailure(projectStore *store.Store) (reason string, isRecent bool) {
-	path := projectStore.WatcherFailurePath()
-	info, err := os.Stat(path)
+	reason, failedAt, err := projectStore.WatcherFailure()
 	if err != nil {
 		return "", false
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	return string(data), time.Since(info.ModTime()) < startBackoff
+	return reason, time.Since(failedAt) < startBackoff
 }
 
 func recordStartFailure(projectStore *store.Store, failure error) {
 	if failure == nil {
 		failure = errors.New("exit status 0")
 	}
-	if err := atomicfile.WriteFile(projectStore.WatcherFailurePath(), []byte(failure.Error()), 0o600); err != nil {
+	if err := projectStore.SaveWatcherFailure(failure.Error()); err != nil {
 		projectStore.LogError(err)
 	}
 }

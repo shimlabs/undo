@@ -7,16 +7,17 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 
 	"golang.org/x/sys/unix"
 )
 
-// Copy copies src to dst, including whole directories, keeping modes and
-// modification times. A symlink is copied as a link, not followed. It fails if
-// dst already exists. It is for filesystems that cannot clone.
-func Copy(src, dst string) error {
-	return copyTree(src, dst, copyContent)
+// CopyAt copies srcName in srcDir to name in dir, including a whole
+// directory, keeping modes and modification times. It is for filesystems
+// that cannot clone. It works relative to both directories and never follows
+// a symlink, so a symlink placed in either tree cannot lead it elsewhere. It
+// fails if name already exists.
+func CopyAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
+	return copyTreeAt(srcDir, srcName, dir, name, copyContent)
 }
 
 // copyContent copies the bytes of in to out.
@@ -25,76 +26,118 @@ func copyContent(in, out *os.File) error {
 	return err
 }
 
-// copyTree recreates src at dst and fills each regular file with copyData.
-func copyTree(src, dst string, copyData func(in, out *os.File) error) error {
-	info, err := os.Lstat(src)
-	if err != nil {
-		return err
+// copyTreeAt recreates srcName in srcDir as name in dir and fills each
+// regular file with copyData. Sockets and devices are skipped.
+func copyTreeAt(srcDir *os.File, srcName string, dir *os.File, name string, copyData func(in, out *os.File) error) error {
+	srcFd, dirFd := int(srcDir.Fd()), int(dir.Fd())
+	var stat unix.Stat_t
+	if err := unix.Fstatat(srcFd, srcName, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return &os.PathError{Op: "fstatat", Path: srcName, Err: err}
 	}
-	switch {
-	case info.Mode().IsRegular():
-		err = copyFile(src, dst, info, copyData)
-	case info.IsDir():
-		err = copyDir(src, dst, info, copyData)
-	case info.Mode()&fs.ModeSymlink != 0:
-		var target string
-		if target, err = os.Readlink(src); err == nil {
-			err = os.Symlink(target, dst)
-		}
-	case info.Mode()&fs.ModeNamedPipe != 0:
-		err = unix.Mkfifo(dst, uint32(info.Mode().Perm()))
+	perm := toUint32(stat.Mode) & 0o7777
+	var err error
+	switch stat.Mode & unix.S_IFMT {
+	case unix.S_IFREG:
+		err = copyFileAt(srcFd, srcName, dirFd, name, perm, copyData)
+	case unix.S_IFDIR:
+		err = copyDirAt(srcFd, srcName, dir, name, perm, copyData)
+	case unix.S_IFLNK:
+		err = copySymlinkAt(srcFd, srcName, dirFd, name)
+	case unix.S_IFIFO:
+		err = MkfifoAt(dir, name, fs.FileMode(perm))
 	default:
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return setTimes(dst, info)
+	modTime := stat.Mtim
+	if err := unix.UtimesNanoAt(dirFd, name, []unix.Timespec{modTime, modTime}, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return &os.PathError{Op: "utimensat", Path: name, Err: err}
+	}
+	return nil
 }
 
-func copyFile(src, dst string, info fs.FileInfo, copyData func(in, out *os.File) error) error {
-	in, err := os.Open(src)
+func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, copyData func(in, out *os.File) error) error {
+	inFd, err := unix.Openat(srcFd, srcName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return err
+		return &os.PathError{Op: "openat", Path: srcName, Err: err}
 	}
+	in := os.NewFile(uintptr(inFd), srcName)
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	outFd, err := unix.Openat(dirFd, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	if err != nil {
-		return err
+		return &os.PathError{Op: "openat", Path: name, Err: err}
 	}
+	out := os.NewFile(uintptr(outFd), name)
 	err = copyData(in, out)
 	if err == nil {
-		err = out.Chmod(PermissionBits(info.Mode()))
+		if chmodErr := unix.Fchmod(outFd, perm); chmodErr != nil {
+			err = &os.PathError{Op: "fchmod", Path: name, Err: chmodErr}
+		}
 	}
-	if closeErr := out.Close(); err == nil {
-		err = closeErr
-	}
+	err = errors.Join(err, out.Close())
 	if err != nil {
-		os.Remove(dst)
+		err = errors.Join(err, unix.Unlinkat(dirFd, name, 0))
 	}
 	return err
 }
 
-func copyDir(src, dst string, info fs.FileInfo, copyData func(in, out *os.File) error) error {
-	if err := os.Mkdir(dst, 0o700); err != nil {
+func copyDirAt(srcFd int, srcName string, dir *os.File, name string, perm uint32, copyData func(in, out *os.File) error) error {
+	dirFd := int(dir.Fd())
+	if err := unix.Mkdirat(dirFd, name, 0o700); err != nil {
+		return &os.PathError{Op: "mkdirat", Path: name, Err: err}
+	}
+	src, err := openDirAt(srcFd, srcName)
+	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(src)
+	defer src.Close()
+	dst, err := openDirAt(dirFd, name)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	entries, err := src.ReadDir(-1)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
-		err := copyTree(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name()), copyData)
+		err := copyTreeAt(src, entry.Name(), dst, entry.Name(), copyData)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
-	return os.Chmod(dst, PermissionBits(info.Mode()))
+	if err := unix.Fchmod(int(dst.Fd()), perm); err != nil {
+		return &os.PathError{Op: "fchmod", Path: name, Err: err}
+	}
+	return nil
 }
 
-func setTimes(path string, info fs.FileInfo) error {
-	modTime := unix.NsecToTimespec(info.ModTime().UnixNano())
-	return unix.UtimesNanoAt(unix.AT_FDCWD, path, []unix.Timespec{modTime, modTime}, unix.AT_SYMLINK_NOFOLLOW)
+func copySymlinkAt(srcFd int, srcName string, dirFd int, name string) error {
+	buffer := make([]byte, unix.PathMax)
+	n, err := unix.Readlinkat(srcFd, srcName, buffer)
+	if err != nil {
+		return &os.PathError{Op: "readlinkat", Path: srcName, Err: err}
+	}
+	if err := unix.Symlinkat(string(buffer[:n]), dirFd, name); err != nil {
+		return &os.PathError{Op: "symlinkat", Path: name, Err: err}
+	}
+	return nil
+}
+
+// openDirAt opens the directory name in dirFd without following a symlink.
+func openDirAt(dirFd int, name string) (*os.File, error) {
+	fd, err := unix.Openat(dirFd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "openat", Path: name, Err: err}
+	}
+	return os.NewFile(uintptr(fd), name), nil
+}
+
+// toUint32 converts a file mode, whose type differs between platforms.
+func toUint32[T ~uint16 | ~uint32](mode T) uint32 {
+	return uint32(mode)
 }
 
 // PermissionBits returns the part of mode that chmod sets.

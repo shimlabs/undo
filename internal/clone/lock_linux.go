@@ -9,11 +9,6 @@ func IsLocked(string) bool {
 	return false
 }
 
-// Unlock does nothing on Linux; see IsLocked.
-func Unlock(string) error {
-	return nil
-}
-
 // UnlockAt does nothing on Linux; see IsLocked.
 func UnlockAt(*os.File, string) error {
 	return nil

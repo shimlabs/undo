@@ -14,6 +14,7 @@ import (
 	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/tree"
 	"github.com/shimlabs/undo/internal/walk"
+	"golang.org/x/sys/unix"
 )
 
 // CheckpointOptions describe a checkpoint: the command that is about to run,
@@ -166,18 +167,17 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 	changes.Changed = withPending(changes, record.Pending)
 	// A layer left behind by an interrupted checkpoint would mix old files
 	// into this one.
-	if err := os.RemoveAll(s.layerDir(id)); err != nil {
+	if err := s.removeAll(s.layerDir(id)); err != nil {
 		return Checkpoint{}, err
 	}
 	manifest, err := s.cloneChanged(id, changes)
 	if err != nil {
-		os.RemoveAll(s.layerDir(id))
-		return Checkpoint{}, toCloneError(err)
+		return Checkpoint{}, errors.Join(toCloneError(err), s.removeAll(s.layerDir(id)))
 	}
-	if err := os.MkdirAll(s.layerDir(id), 0o700); err != nil {
+	if err := s.mkdirAll(s.layerDir(id)); err != nil {
 		return Checkpoint{}, err
 	}
-	if err := writeJSON(s.manifestPath(id), manifest); err != nil {
+	if err := s.writeJSON(s.manifestPath(id), manifest); err != nil {
 		return Checkpoint{}, err
 	}
 	options.Label = shortLabel(options.Label)
@@ -247,7 +247,7 @@ func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
 		return nil, err
 	}
 	base := s.baseDir()
-	if err := removeAll(base); err != nil {
+	if err := s.removeAll(base); err != nil {
 		return nil, err
 	}
 	plan := basePlan{
@@ -268,13 +268,13 @@ func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
 		}
 	}
 	if err := s.cloneInto(".", base, &plan); err != nil {
-		return nil, errors.Join(toCloneError(err), removeAll(base))
+		return nil, errors.Join(toCloneError(err), s.removeAll(base))
 	}
 	// The listing records each directory's mode. In the base, read-only
 	// directories would stop merges and keep the store from being deleted.
 	for rel, entry := range before {
 		if entry.Kind == tree.Dir && entry.Mode.Perm()&0o700 != 0o700 {
-			if err := makeWritable(s.basePath(rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := s.makeWritable(s.basePath(rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return nil, err
 			}
 		}
@@ -285,7 +285,7 @@ func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
 	if err := s.removeUnlisted(before); err != nil {
 		return nil, err
 	}
-	if err := writeGob(s.baseListingPath(), before); err != nil {
+	if err := s.writeGob(s.baseListingPath(), before); err != nil {
 		return nil, err
 	}
 	return before, nil
@@ -294,7 +294,7 @@ func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
 // removeUnlisted removes every path in the base that listing does not hold.
 func (s *Store) removeUnlisted(listing tree.Listing) error {
 	return walk.Dirs(".", func(dir string) ([]string, error) {
-		entries, err := os.ReadDir(s.basePath(dir))
+		entries, err := s.readDir(s.basePath(dir))
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
@@ -310,7 +310,7 @@ func (s *Store) removeUnlisted(listing tree.Listing) error {
 			listed, isListed := listing[rel]
 			switch {
 			case !isListed:
-				if err := removeAll(s.basePath(rel)); err != nil {
+				if err := s.removeAll(s.basePath(rel)); err != nil {
 					return nil, err
 				}
 			case listed.Kind == tree.Dir && entry.IsDir():
@@ -344,7 +344,7 @@ func (p *basePlan) markAncestors(rel string) {
 // unreadable files are left out of the listing.
 func (s *Store) cloneInto(rel, dst string, plan *basePlan) error {
 	if !plan.hasSkippedDescendant[rel] {
-		err := s.clone(filepath.Join(s.root, filepath.FromSlash(rel)), dst)
+		err := s.cloneIntoStore(filepath.Join(s.root, filepath.FromSlash(rel)), dst)
 		switch {
 		case err == nil || errors.Is(err, fs.ErrNotExist):
 			return nil
@@ -354,11 +354,11 @@ func (s *Store) cloneInto(rel, dst string, plan *basePlan) error {
 			delete(plan.listing, rel)
 			return nil
 		}
-		if err := removeAll(dst); err != nil {
+		if err := s.removeAll(dst); err != nil {
 			return err
 		}
 	}
-	if err := os.MkdirAll(dst, 0o700); err != nil {
+	if err := s.mkdirAll(dst); err != nil {
 		return err
 	}
 	for _, child := range plan.children[rel] {
@@ -390,18 +390,28 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		return Manifest{}, err
 	}
 	defer layer.Close()
-	// Many changed files share a directory, so each one is created once.
-	dirs := map[string]bool{}
-	for _, rel := range files {
-		if dir := path.Dir(rel); !dirs[dir] {
-			dirs[dir] = true
-			if err := layer.MkdirAll(dir, 0o700); err != nil {
-				return Manifest{}, err
-			}
+	// Many changed files share a directory, so each one is created and
+	// opened once, in the project and in the layer.
+	dirs := map[string]dirPair{}
+	defer func() {
+		for _, pair := range dirs {
+			pair.project.Close()
+			pair.layer.Close()
 		}
+	}()
+	for _, rel := range files {
+		dir := path.Dir(rel)
+		if _, isOpen := dirs[dir]; isOpen {
+			continue
+		}
+		pair, err := s.openDirPair(layer, dir)
+		if err != nil {
+			return Manifest{}, err
+		}
+		dirs[dir] = pair
 	}
 	err = parallel.For(len(files), func(i int) error {
-		entry, isStable, err := s.cloneStable(layer, id, files[i], changes.Listing[files[i]])
+		entry, isStable, err := s.cloneStable(dirs[path.Dir(files[i])], files[i], changes.Listing[files[i]])
 		clonedFiles[i] = clonedFile{entry, isStable, err}
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			return nil
@@ -475,27 +485,50 @@ func hasDirParents(listing tree.Listing, rel string) bool {
 // so creating parents and removing files there never follows a symlink that
 // was cloned into the layer.
 func (s *Store) openLayer(id int) (*os.Root, error) {
-	if err := os.MkdirAll(s.layerFile(id, "."), 0o700); err != nil {
+	if err := s.mkdirAll(s.layerFile(id, ".")); err != nil {
 		return nil, err
 	}
-	return os.OpenRoot(s.layerFile(id, "."))
+	return s.files.OpenRoot(s.storeName(s.layerFile(id, ".")))
 }
 
-// cloneStable clones rel into the layer, whose directory for rel must exist,
-// and checks that the source did not change during the clone. If it did, it
-// tries again a few times.
-func (s *Store) cloneStable(layer *os.Root, id int, rel string, entry tree.Entry) (tree.Entry, bool, error) {
+// dirPair is one directory open in the project and in a layer.
+type dirPair struct {
+	project *os.File
+	layer   *os.File
+}
+
+// openDirPair creates the directory dir in layer and opens it there and in
+// the project.
+func (s *Store) openDirPair(layer *os.Root, dir string) (dirPair, error) {
+	if err := layer.MkdirAll(dir, 0o700); err != nil {
+		return dirPair{}, err
+	}
+	layerDir, err := layer.Open(dir)
+	if err != nil {
+		return dirPair{}, err
+	}
+	projectDir, err := os.Open(filepath.Join(s.root, filepath.FromSlash(dir)))
+	if err != nil {
+		return dirPair{}, errors.Join(err, layerDir.Close())
+	}
+	return dirPair{project: projectDir, layer: layerDir}, nil
+}
+
+// cloneStable clones rel from the project into the layer, through the
+// directory pair that holds it, and checks that the source did not change
+// during the clone. If it did, it tries again a few times.
+func (s *Store) cloneStable(dirs dirPair, rel string, entry tree.Entry) (tree.Entry, bool, error) {
 	src := filepath.Join(s.root, filepath.FromSlash(rel))
-	dst := s.layerFile(id, rel)
+	name := path.Base(rel)
 	for attempt := 1; ; attempt++ {
 		// The layer starts empty, so only a retry has an earlier clone to
 		// remove.
 		if attempt > 1 {
-			if err := layer.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return entry, false, err
+			if err := unix.Unlinkat(int(dirs.layer.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+				return entry, false, &os.PathError{Op: "unlinkat", Path: name, Err: err}
 			}
 		}
-		if err := s.clone(src, dst); err != nil {
+		if err := s.cloneAt(dirs.project, name, dirs.layer, name); err != nil {
 			return entry, false, err
 		}
 		after, err := tree.Stat(src)
