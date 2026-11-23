@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
-	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/fsnotify"
 )
 
@@ -71,22 +70,4 @@ func (t *tracker) savePosition() {
 	if err != nil {
 		t.store.LogError(fmt.Errorf("saving the watcher position: %w", err))
 	}
-}
-
-// startStream reads the exclude rules and starts watching with them. On Linux
-// the stream does not watch excluded directories, so it has to start over
-// when the rules change.
-func (t *tracker) startStream(since fsnotify.EventID) error {
-	matcher, err := exclude.New(t.root)
-	if err != nil {
-		return err
-	}
-	previous := t.matcher.Swap(matcher)
-	stream, err := fsnotify.NewStream([]string{t.root, t.markerDir}, since, t.shouldSkip, t.handleEvents)
-	if err != nil {
-		t.matcher.Store(previous)
-		return err
-	}
-	t.stream = stream
-	return nil
 }

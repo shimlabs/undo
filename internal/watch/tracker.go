@@ -97,6 +97,24 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 	return t, nil
 }
 
+// startStream reads the exclude rules and starts watching with them. On Linux
+// the stream does not watch excluded directories, so it has to start over
+// when the rules change.
+func (t *tracker) startStream(since fsnotify.EventID) error {
+	matcher, err := exclude.New(t.root)
+	if err != nil {
+		return err
+	}
+	previous := t.matcher.Swap(matcher)
+	stream, err := fsnotify.NewStream([]string{t.root, t.markerDir}, since, t.shouldSkip, t.handleEvents)
+	if err != nil {
+		t.matcher.Store(previous)
+		return err
+	}
+	t.stream = stream
+	return nil
+}
+
 // loadListing starts tracking from the stored listing at checkpoint id. The
 // directories that checkpoint could not read stay unreadable until an event
 // shows otherwise, so later checkpoints keep reporting them.
