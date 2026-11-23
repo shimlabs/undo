@@ -568,6 +568,121 @@ func TestRestoreAfterEditThenCaseRenameOfParent(t *testing.T) {
 	}
 }
 
+// The watcher is killed (no Close), scans take checkpoints, files change,
+// then a new watcher resumes.
+func TestTrackerResumesAfterKillAndScans(t *testing.T) {
+	if !fsnotify.CanResume {
+		t.Skip()
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "a")
+	takeCheckpoint(t, projectTracker, "2")
+	projectTracker.SaveState()
+	projectTracker.stream.Close()
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "b")
+	testutil.WriteFile(t, filepath.Join(root, "docs", "x.md"), "x")
+	projectStore.Take(store.CheckpointOptions{Label: "scan3", Dir: root})
+	os.RemoveAll(filepath.Join(root, "docs"))
+	projectStore.Take(store.CheckpointOptions{Label: "scan4", Dir: root})
+	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "back")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "changed after scans")
+
+	resumed, err := newTracker(projectStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(resumed.Close)
+	if resumed.shouldRescan {
+		t.Fatal("expected resume")
+	}
+	checkpoint := takeCheckpoint(t, resumed, "5")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
+
+// A rules change made while no watcher ran.
+func TestTrackerResumesAfterRulesChange(t *testing.T) {
+	if !fsnotify.CanResume {
+		t.Skip()
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	projectTracker.Close()
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "docs/\n")
+	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "edited")
+
+	resumed, err := newTracker(projectStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(resumed.Close)
+	checkpoint := takeCheckpoint(t, resumed, "2")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
+
+// A directory unreadable at a rescan stays in every later manifest's
+// unreadable list after it becomes readable, so restores skip its files.
+func TestRestoreOfDirectoryReadableAgain(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	locked := filepath.Join(root, "docs")
+	os.Chmod(locked, 0)
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	projectTracker.mu.Lock()
+	projectTracker.shouldRescan = true
+	projectTracker.mu.Unlock()
+	takeCheckpoint(t, projectTracker, "2 rescan")
+	os.Chmod(locked, 0o755)
+	readable := takeCheckpoint(t, projectTracker, "3 readable")
+	testutil.WriteFile(t, filepath.Join(locked, "guide.md"), "damaged")
+	takeCheckpoint(t, projectTracker, "4")
+	manifest, _ := projectStore.Manifest(readable.ID)
+	changes, err := restore.Apply(projectStore, readable.ID, checkpointThroughTracker(projectTracker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(locked, "guide.md")); string(data) != "guide" {
+		t.Fatalf("docs/guide.md = %q after restoring checkpoint %d (manifest unreadable %v, changes %+v)", data, readable.ID, manifest.Unreadable, changes)
+	}
+}
+
+// An unreadable directory, then a watcher restart that resumes events.
+// The resumed projectTracker forgets the directory was never saved.
+func TestTrackerKeepsUnreadableDirectoryAcrossResume(t *testing.T) {
+	if os.Getuid() == 0 || !fsnotify.CanResume {
+		t.Skip()
+	}
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	locked := filepath.Join(root, "docs")
+	os.Chmod(locked, 0)
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	projectTracker.mu.Lock()
+	projectTracker.shouldRescan = true
+	projectTracker.mu.Unlock()
+	takeCheckpoint(t, projectTracker, "2 rescan")
+	projectTracker.Close()
+	resumed, err := newTracker(projectStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(resumed.Close)
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "edit")
+	third := takeCheckpoint(t, resumed, "3")
+	os.Chmod(locked, 0o755)
+	takeCheckpoint(t, resumed, "4")
+	changes, err := restore.Apply(projectStore, third.ID, checkpointThroughTracker(resumed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(locked, "guide.md")); err != nil {
+		t.Fatalf("restoring checkpoint 3 removed docs/guide.md, which existed then but was unreadable (removed %v)", changes.Removed)
+	}
+}
+
 // A directory moved out of the project, edited there, and moved back keeps
 // its inode and mode, and the edit inside it has no event under the root.
 func TestTrackerSeesDirectoryMovedOutEditedAndBack(t *testing.T) {
