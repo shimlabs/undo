@@ -179,3 +179,27 @@ func TestPruneWithSymlinkLockedInFinder(t *testing.T) {
 
 	requireWorksAfterPrune(t, projectStore, root)
 }
+
+func TestRestoreKeepsFilesInFolderLockedInFinder(t *testing.T) {
+	projectStore, root := newProject(t)
+	docs := filepath.Join(root, "docs")
+	testutil.WriteFile(t, filepath.Join(docs, "a.txt"), "v1")
+	lockFile(t, docs, root, projectStore.Dir())
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(docs, "a.txt"), "v2")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	take(t, projectStore, "2")
+
+	changes := apply(t, projectStore, 1)
+	if !slices.Contains(changes.Kept, "docs/a.txt") {
+		t.Errorf("Kept = %v, want docs/a.txt, which sits in a locked folder", changes.Kept)
+	}
+	for rel, want := range map[string]string{"src/main.go": "package main\n", "README.md": "# demo\n"} {
+		if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))); err != nil || string(data) != want {
+			t.Errorf("%s = %q, %v", rel, data, err)
+		}
+	}
+}
