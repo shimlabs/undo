@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shimlabs/undo/internal/testutil"
+
 	"github.com/shimlabs/undo/internal/store"
 )
 
@@ -24,7 +26,7 @@ func newServerProject(t *testing.T) (*store.Store, string, string) {
 	}
 	t.Cleanup(func() { os.RemoveAll(socketDir) })
 	root, _ := filepath.EvalSymlinks(t.TempDir())
-	writeFile(t, filepath.Join(root, "main.go"), "package main")
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +93,7 @@ func waitForCheckpointCount(t *testing.T, s *store.Store, want int) {
 func takeEdits(t *testing.T, client Client, s *store.Store, root string, count int) {
 	t.Helper()
 	for i := range count {
-		writeFile(t, filepath.Join(root, "main.go"), fmt.Sprintf("package main // %d", i))
+		testutil.WriteFile(t, filepath.Join(root, "main.go"), fmt.Sprintf("package main // %d", i))
 		if _, err := client.Checkpoint(s, store.CheckpointOptions{Label: "edit", Dir: root}); err != nil {
 			t.Fatal(err)
 		}

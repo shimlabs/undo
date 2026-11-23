@@ -1,15 +1,15 @@
 package store_test
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/shimlabs/undo/internal/testutil"
 
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
@@ -25,45 +25,23 @@ func newProject(t *testing.T) (*store.Store, string) {
 	return s, root
 }
 
-func writeFile(t *testing.T, path string, data []byte) {
-	t.Helper()
-	os.MkdirAll(filepath.Dir(path), 0o755)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func fingerprint(root string) map[string]string {
-	prints := map[string]string{}
-	filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, path)
-		data, _ := os.ReadFile(path)
-		prints[rel] = fmt.Sprintf("%v %x", entry.IsDir(), sha256.Sum256(data))
-		return nil
-	})
-	return prints
-}
-
 // history takes four checkpoints with different files and returns the
 // project's fingerprint at each of them.
 func history(t *testing.T, s *store.Store, root string) []map[string]string {
 	t.Helper()
 	var states []map[string]string
 	steps := []func(){
-		func() { writeFile(t, filepath.Join(root, "a.txt"), []byte("one")) },
-		func() { writeFile(t, filepath.Join(root, "dir", "b.txt"), []byte("two")) },
+		func() { testutil.WriteFile(t, filepath.Join(root, "a.txt"), "one") },
+		func() { testutil.WriteFile(t, filepath.Join(root, "dir", "b.txt"), "two") },
 		func() { os.Remove(filepath.Join(root, "a.txt")) },
 		func() {
 			os.RemoveAll(filepath.Join(root, "dir"))
-			writeFile(t, filepath.Join(root, "dir"), []byte("now a file"))
+			testutil.WriteFile(t, filepath.Join(root, "dir"), "now a file")
 		},
 	}
 	for i, step := range steps {
 		step()
-		states = append(states, fingerprint(root))
+		states = append(states, testutil.Fingerprint(t, root))
 		if _, err := s.Take(store.CheckpointOptions{Label: fmt.Sprintf("step %d", i+1), Dir: root}); err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +68,7 @@ func TestPruneMergesOldestIntoBase(t *testing.T) {
 		if _, err := restore.Apply(s, id, (*store.Store).Take); err != nil {
 			t.Fatal(err)
 		}
-		if got := fingerprint(root); !maps.Equal(got, states[id-1]) {
+		if got := testutil.Fingerprint(t, root); !maps.Equal(got, states[id-1]) {
 			t.Fatalf("restore to %d after pruning:\n got %v\nwant %v", id, got, states[id-1])
 		}
 	}
@@ -111,8 +89,8 @@ func TestPruneByAgeKeepsLatest(t *testing.T) {
 
 func TestUsageCountsOnlyUnsharedData(t *testing.T) {
 	s, root := newProject(t)
-	data := bytes.Repeat([]byte("x"), 4<<20)
-	writeFile(t, filepath.Join(root, "big.bin"), data)
+	data := strings.Repeat("x", 4<<20)
+	testutil.WriteFile(t, filepath.Join(root, "big.bin"), data)
 	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +103,7 @@ func TestUsageCountsOnlyUnsharedData(t *testing.T) {
 		t.Fatalf("usage %d bytes while the base shares all data with the project", shared)
 	}
 
-	writeFile(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte("y"), 4<<20))
+	testutil.WriteFile(t, filepath.Join(root, "big.bin"), strings.Repeat("y", 4<<20))
 	private, err := s.Usage()
 	if err != nil {
 		t.Fatal(err)
@@ -138,13 +116,13 @@ func TestUsageCountsOnlyUnsharedData(t *testing.T) {
 func TestPruneBySizeMergesUntilUnder(t *testing.T) {
 	s, root := newProject(t)
 	for _, fill := range []string{"a", "b", "c"} {
-		writeFile(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte(fill), 2<<20))
+		testutil.WriteFile(t, filepath.Join(root, "big.bin"), strings.Repeat(fill, 2<<20))
 		if _, err := s.Take(store.CheckpointOptions{Label: "write " + fill, Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	writeFile(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte("d"), 2<<20))
-	want := fingerprint(root)
+	testutil.WriteFile(t, filepath.Join(root, "big.bin"), strings.Repeat("d", 2<<20))
+	want := testutil.Fingerprint(t, root)
 	if _, err := s.Take(store.CheckpointOptions{Label: "write d", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +146,7 @@ func TestPruneBySizeMergesUntilUnder(t *testing.T) {
 	if _, err := restore.Apply(s, 4, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if got := fingerprint(root); !maps.Equal(got, want) {
+	if got := testutil.Fingerprint(t, root); !maps.Equal(got, want) {
 		t.Fatal("restore to the latest checkpoint differs after pruning by size")
 	}
 }

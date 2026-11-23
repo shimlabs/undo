@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shimlabs/undo/internal/testutil"
+
 	"github.com/shimlabs/undo/internal/store"
 )
 
@@ -31,7 +33,7 @@ func newProject(t *testing.T) (*store.Store, string) {
 		".git/objects/ab/c": "blob",
 	}
 	for path, content := range files {
-		writeFile(t, filepath.Join(root, path), content)
+		testutil.WriteFile(t, filepath.Join(root, path), content)
 	}
 	if err := os.Chmod(filepath.Join(root, "src", "main.go"), 0o755); err != nil {
 		t.Fatal(err)
@@ -49,16 +51,6 @@ func newProject(t *testing.T) (*store.Store, string) {
 func take(t *testing.T, projectStore *store.Store, label string) {
 	t.Helper()
 	if _, err := projectStore.Take(store.CheckpointOptions{Label: label, Dir: projectStore.Root()}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -178,12 +170,12 @@ func TestRestoreFileBecameDir(t *testing.T) {
 
 func TestRestoreKeepsNodeModules(t *testing.T) {
 	s, root := newProject(t)
-	writeFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v1")
+	testutil.WriteFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v1")
 	if _, err := s.Take(store.CheckpointOptions{Label: "before damage", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 
-	writeFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v2")
+	testutil.WriteFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v2")
 	os.RemoveAll(filepath.Join(root, "src"))
 
 	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
@@ -204,7 +196,7 @@ func TestRestoreIsUndoable(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
-	writeFile(t, filepath.Join(root, "notes.txt"), "written after the checkpoint")
+	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "written after the checkpoint")
 	damaged := snapshot(t, root)
 
 	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
@@ -222,7 +214,7 @@ func TestPlanListsChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(root, "README.md"))
-	writeFile(t, filepath.Join(root, "new.txt"), "new")
+	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "new")
 
 	changes, err := Plan(s, 1)
 	if err != nil {
@@ -238,7 +230,7 @@ func TestRestoreDirEditedAfterBase(t *testing.T) {
 	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "src", "main.go"), "package main // edited\n")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main // edited\n")
 	want := snapshot(t, root)
 	if _, err := s.Take(store.CheckpointOptions{Label: "after edit", Dir: root}); err != nil {
 		t.Fatal(err)
@@ -271,7 +263,7 @@ func TestRestoreDirKeepsEarlierDeletes(t *testing.T) {
 
 func TestRestoreReadOnlyDirectory(t *testing.T) {
 	s, root := newProject(t)
-	writeFile(t, filepath.Join(root, "ro", "f.txt"), "v1")
+	testutil.WriteFile(t, filepath.Join(root, "ro", "f.txt"), "v1")
 	os.Chmod(filepath.Join(root, "ro"), 0o555)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "ro"), 0o755) })
 	want := snapshot(t, root)
@@ -344,13 +336,13 @@ func TestRestoreAfterPrune(t *testing.T) {
 	if _, err := s.Take(store.CheckpointOptions{Label: "1", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "src", "main.go"), "v2")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "v2")
 	os.Remove(filepath.Join(root, "src", "util", "str.go"))
-	writeFile(t, filepath.Join(root, "newdir", "deep", "x"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "newdir", "deep", "x"), "x")
 	if _, err := s.Take(store.CheckpointOptions{Label: "2", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "README.md"), "v3")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "v3")
 	want := snapshot(t, root)
 	if _, err := s.Take(store.CheckpointOptions{Label: "3", Dir: root}); err != nil {
 		t.Fatal(err)
@@ -387,12 +379,12 @@ func TestRestoreDirWhoseTimesChanged(t *testing.T) {
 
 func TestRestoreLeavesNewlyExcludedPaths(t *testing.T) {
 	s, root := newProject(t)
-	writeFile(t, filepath.Join(root, "build", "out.bin"), "old build")
+	testutil.WriteFile(t, filepath.Join(root, "build", "out.bin"), "old build")
 	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, ".undoignore"), "build/\n")
-	writeFile(t, filepath.Join(root, "build", "out.bin"), "new build")
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "build/\n")
+	testutil.WriteFile(t, filepath.Join(root, "build", "out.bin"), "new build")
 
 	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
@@ -410,7 +402,7 @@ func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
 	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "pgdata", "rows"), "data")
+	testutil.WriteFile(t, filepath.Join(root, "pgdata", "rows"), "data")
 	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
 
@@ -428,14 +420,14 @@ func TestRestoreKeepsUnreadableFiles(t *testing.T) {
 		t.Skip("root can read every file")
 	}
 	s, root := newProject(t)
-	writeFile(t, filepath.Join(root, "secret.key"), "key")
+	testutil.WriteFile(t, filepath.Join(root, "secret.key"), "key")
 	os.Chmod(filepath.Join(root, "secret.key"), 0o000)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "secret.key"), 0o644) })
 	take(t, s, "first")
-	writeFile(t, filepath.Join(root, "later.key"), "key made after the checkpoint")
+	testutil.WriteFile(t, filepath.Join(root, "later.key"), "key made after the checkpoint")
 	os.Chmod(filepath.Join(root, "later.key"), 0o000)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "later.key"), 0o644) })
-	writeFile(t, filepath.Join(root, "README.md"), "damaged")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "damaged")
 
 	changes, err := Apply(s, 1, (*store.Store).Take)
 	if err != nil {
@@ -453,7 +445,7 @@ func TestRestoreLeavesDirectoryUnreadableAtCheckpoint(t *testing.T) {
 		t.Skip("root can read every directory")
 	}
 	s, root := newProject(t)
-	writeFile(t, filepath.Join(root, "pgdata", "rows"), "data")
+	testutil.WriteFile(t, filepath.Join(root, "pgdata", "rows"), "data")
 	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
 	take(t, s, "pgdata unreadable")
 	os.Chmod(filepath.Join(root, "pgdata"), 0o755)
@@ -469,7 +461,7 @@ func TestRestoreLeavesDirectoryUnreadableAtCheckpoint(t *testing.T) {
 func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
 	s, root := newProject(t)
 	take(t, s, "first")
-	writeFile(t, filepath.Join(root, ".undoignore"), "src/\n")
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "src/\n")
 	os.RemoveAll(filepath.Join(root, "src"))
 
 	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
@@ -498,7 +490,7 @@ func TestRestoreKeepsNamedPipeAfterPrune(t *testing.T) {
 	take(t, s, "first")
 	syscall.Mkfifo(filepath.Join(root, "src", "pipe"), 0o640)
 	take(t, s, "with pipe")
-	writeFile(t, filepath.Join(root, "README.md"), "later")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "later")
 	want := snapshot(t, root)
 	take(t, s, "later")
 	if _, err := s.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
@@ -537,7 +529,7 @@ func newGitProject(t *testing.T) (*store.Store, string) {
 
 func TestRestoreAfterGitResetHard(t *testing.T) {
 	s, root := newGitProject(t)
-	writeFile(t, filepath.Join(root, "src", "main.go"), "package main // uncommitted work\n")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main // uncommitted work\n")
 	want := snapshot(t, root)
 	take(t, s, "before reset")
 
@@ -551,8 +543,8 @@ func TestRestoreAfterGitResetHard(t *testing.T) {
 
 func TestRestoreAfterGitCleanFdx(t *testing.T) {
 	s, root := newGitProject(t)
-	writeFile(t, filepath.Join(root, "notes.txt"), "untracked notes\n")
-	writeFile(t, filepath.Join(root, "config.local.json"), "{}\n")
+	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "untracked notes\n")
+	testutil.WriteFile(t, filepath.Join(root, "config.local.json"), "{}\n")
 	want := snapshot(t, root)
 	take(t, s, "before clean")
 
@@ -584,7 +576,7 @@ func TestRestoreReportsUnstableFiles(t *testing.T) {
 	manifest.Unstable = []string{"README.md"}
 	data, _ := json.Marshal(manifest)
 	os.WriteFile(filepath.Join(s.Dir(), "layers", "1", "manifest.json"), data, 0o600)
-	writeFile(t, filepath.Join(root, "README.md"), "damaged")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "damaged")
 
 	changes, err := Apply(s, 1, (*store.Store).Take)
 	if err != nil {

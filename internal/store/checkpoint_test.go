@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shimlabs/undo/internal/testutil"
+
 	"github.com/shimlabs/undo/internal/tree"
 )
 
@@ -21,7 +23,7 @@ func newProject(t *testing.T, files map[string]string) (*Store, string) {
 		t.Fatal(err)
 	}
 	for path, content := range files {
-		writeFile(t, filepath.Join(root, path), content)
+		testutil.WriteFile(t, filepath.Join(root, path), content)
 	}
 	s, err := Create(t.TempDir(), root)
 	if err != nil {
@@ -78,11 +80,11 @@ func TestTakeRecordsChangedAndDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeFile(t, filepath.Join(root, "a.txt"), "alpha two")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
 	if err := os.Remove(filepath.Join(root, "b.txt")); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "c", "d.txt"), "delta")
+	testutil.WriteFile(t, filepath.Join(root, "c", "d.txt"), "delta")
 
 	cp, err := s.Take(CheckpointOptions{Label: "second", Dir: root})
 	if err != nil {
@@ -115,7 +117,7 @@ func TestTakeIgnoresExcluded(t *testing.T) {
 		t.Fatal("node_modules was cloned into the base")
 	}
 
-	writeFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "v2")
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "v2")
 	cp, err := s.Take(CheckpointOptions{Label: "second", Dir: root})
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +165,7 @@ func TestTakeLockedConcurrently(t *testing.T) {
 func TestFirstTakeNeverReadsExcluded(t *testing.T) {
 	s, root := newProject(t, map[string]string{"main.js": "x", "lib/util.js": "u"})
 	locked := filepath.Join(root, "node_modules", "locked")
-	writeFile(t, filepath.Join(locked, "secret.js"), "s")
+	testutil.WriteFile(t, filepath.Join(locked, "secret.js"), "s")
 	if err := os.Chmod(locked, 0o000); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +182,7 @@ func TestFirstTakeNeverReadsExcluded(t *testing.T) {
 func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
 	s, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
 	s.Take(CheckpointOptions{Label: "first", Dir: root})
-	writeFile(t, filepath.Join(root, "a.txt"), "alpha two")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
 	os.Remove(filepath.Join(root, "b.txt"))
 	cp, err := s.Take(CheckpointOptions{Label: "second", Dir: root})
 	if err != nil {
@@ -212,7 +214,7 @@ func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
 func TestCommitRecordsGivenChanges(t *testing.T) {
 	s, root := newProject(t, map[string]string{"a.txt": "alpha", "b.txt": "beta"})
 	first, _ := s.Take(CheckpointOptions{Label: "first", Dir: root})
-	writeFile(t, filepath.Join(root, "a.txt"), "alpha two")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "alpha two")
 	os.Remove(filepath.Join(root, "b.txt"))
 
 	current, err := s.ListingAt(first.ID)
@@ -298,7 +300,7 @@ func TestTakeClearsLeftoverLayer(t *testing.T) {
 	s, root := newProject(t, map[string]string{"a.txt": "a"})
 	s.Take(CheckpointOptions{Label: "first", Dir: root})
 	writeFile(t, s.layerFile(2, "stale.txt"), "left by a crash")
-	writeFile(t, filepath.Join(root, "a.txt"), "a2")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
 
 	cp, err := s.Take(CheckpointOptions{Label: "second", Dir: root})
 	if err != nil {
@@ -353,7 +355,7 @@ func TestFailedMergeKeepsCheckpointsWorking(t *testing.T) {
 	}
 	os.Remove(filepath.Join(s.layerDir(1), "manifest.json"))
 
-	writeFile(t, filepath.Join(root, "a.txt"), "a2")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a2")
 	if _, err := s.Take(CheckpointOptions{Label: "second", Dir: root}); err != nil {
 		t.Fatalf("a failing merge stopped checkpoints: %v", err)
 	}
@@ -368,7 +370,7 @@ func TestFailedMergeKeepsCheckpointsWorking(t *testing.T) {
 func TestPruneIfDueRunsHourly(t *testing.T) {
 	s, root := newProject(t, map[string]string{"a.txt": "a"})
 	for i := range 3 {
-		writeFile(t, filepath.Join(root, "a.txt"), strings.Repeat("a", i+2))
+		testutil.WriteFile(t, filepath.Join(root, "a.txt"), strings.Repeat("a", i+2))
 		s.Take(CheckpointOptions{Label: "edit", Dir: root})
 	}
 	keepOne := Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}

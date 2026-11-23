@@ -11,18 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shimlabs/undo/internal/testutil"
+
 	"github.com/shimlabs/undo/internal/exclude"
 )
-
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func scan(t *testing.T, root string) Listing {
 	t.Helper()
@@ -39,8 +31,8 @@ func scan(t *testing.T, root string) Listing {
 
 func TestScanSkipsExcluded(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "src", "main.go"), "package main")
-	writeFile(t, filepath.Join(root, "node_modules", "left-pad", "index.js"), "")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main")
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "left-pad", "index.js"), "")
 
 	listing := scan(t, root)
 
@@ -60,7 +52,7 @@ func TestScanSkipsExcluded(t *testing.T) {
 func TestScanRecordsSymlinkWithoutFollowing(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	writeFile(t, filepath.Join(outside, "secret.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(outside, "secret.txt"), "x")
 	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
@@ -79,12 +71,12 @@ func TestScanRecordsSymlinkWithoutFollowing(t *testing.T) {
 func TestChangedDetectsCpPreservedTimes(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "a.txt")
-	writeFile(t, path, "aaaa")
+	testutil.WriteFile(t, path, "aaaa")
 	before := scan(t, root)
 
 	info, _ := os.Stat(path)
 	time.Sleep(10 * time.Millisecond)
-	writeFile(t, path, "bbbb")
+	testutil.WriteFile(t, path, "bbbb")
 	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
@@ -98,8 +90,8 @@ func TestChangedDetectsCpPreservedTimes(t *testing.T) {
 
 func TestChangedReportsDeleted(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "keep.txt"), "k")
-	writeFile(t, filepath.Join(root, "gone.txt"), "g")
+	testutil.WriteFile(t, filepath.Join(root, "keep.txt"), "k")
+	testutil.WriteFile(t, filepath.Join(root, "gone.txt"), "g")
 	before := scan(t, root)
 
 	if err := os.Remove(filepath.Join(root, "gone.txt")); err != nil {
@@ -190,8 +182,8 @@ func TestScanSkipsUnreadableDirectories(t *testing.T) {
 		t.Skip("root can read every directory")
 	}
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "a.txt"), "a")
-	writeFile(t, filepath.Join(root, "pgdata", "base", "1"), "rows")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a")
+	testutil.WriteFile(t, filepath.Join(root, "pgdata", "base", "1"), "rows")
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +228,8 @@ func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
 		t.Skip("root can enter every directory")
 	}
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "a.txt"), "a")
-	writeFile(t, filepath.Join(root, "noexec", "f"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a")
+	testutil.WriteFile(t, filepath.Join(root, "noexec", "f"), "x")
 	os.Chmod(filepath.Join(root, "noexec"), 0o644)
 	t.Cleanup(func() { os.Chmod(filepath.Join(root, "noexec"), 0o755) })
 	matcher, _ := exclude.New(root)

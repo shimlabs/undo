@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 // agentHome points every agent's configuration at a fresh home directory and
@@ -54,16 +56,6 @@ func readJSONFile(t *testing.T, path string) map[string]any {
 	return settings
 }
 
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // settingsCases are the agents configured through a JSON settings file, each
 // with a file that already holds a setting and a hook of the user's own.
 var settingsCases = []struct {
@@ -106,7 +98,7 @@ func TestInstallKeepsOtherSettings(t *testing.T) {
 		t.Run(tc.agent.Name, func(t *testing.T) {
 			home := agentHome(t)
 			path := filepath.Join(home, tc.file)
-			writeFile(t, path, tc.existing)
+			testutil.WriteFile(t, path, tc.existing)
 
 			got, err := tc.agent.Install(privateBinary(t, "bin"))
 			if err != nil {
@@ -135,7 +127,7 @@ func TestReinstallUpdatesInPlace(t *testing.T) {
 		t.Run(tc.agent.Name, func(t *testing.T) {
 			home := agentHome(t)
 			path := filepath.Join(home, tc.file)
-			writeFile(t, path, tc.existing)
+			testutil.WriteFile(t, path, tc.existing)
 			tc.agent.Install(privateBinary(t, "bin"))
 			settings := readJSONFile(t, path)
 			setHookEntries(settings, eventOf(tc.agent), append(hookEntries(settings, eventOf(tc.agent)), map[string]any{"matcher": "later"}))
@@ -158,7 +150,7 @@ func TestUninstallRemovesOnlyOurs(t *testing.T) {
 		t.Run(tc.agent.Name, func(t *testing.T) {
 			home := agentHome(t)
 			path := filepath.Join(home, tc.file)
-			writeFile(t, path, tc.existing)
+			testutil.WriteFile(t, path, tc.existing)
 			tc.agent.Install(privateBinary(t, "bin"))
 
 			if _, err := tc.agent.Uninstall(); err != nil {
@@ -196,7 +188,7 @@ func TestInstallCursorCreatesVersion(t *testing.T) {
 func TestInstallRefusesInvalidJSON(t *testing.T) {
 	home := agentHome(t)
 	path := filepath.Join(home, ".cursor", "hooks.json")
-	writeFile(t, path, "{\n  // a comment\n  \"version\": 1\n}")
+	testutil.WriteFile(t, path, "{\n  // a comment\n  \"version\": 1\n}")
 
 	if _, err := cursor.Install(privateBinary(t, "bin")); err == nil {
 		t.Fatal("Install rewrote a file it could not parse")
@@ -240,7 +232,7 @@ func TestInstallOpenCodeWritesPlugin(t *testing.T) {
 func TestUninstallOpenCodeKeepsForeignPlugin(t *testing.T) {
 	home := agentHome(t)
 	path := filepath.Join(home, ".config", "opencode", "plugins", "undo.js")
-	writeFile(t, path, "export const Mine = async () => ({})\n")
+	testutil.WriteFile(t, path, "export const Mine = async () => ({})\n")
 
 	if _, err := openCode.Uninstall(); err == nil {
 		t.Fatal("Uninstall removed a plugin undo did not write")
@@ -267,7 +259,7 @@ func TestFindAgent(t *testing.T) {
 func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 	home := agentHome(t)
 	path := filepath.Join(home, ".claude", "settings.json")
-	writeFile(t, path, `{"hooks": {"PreToolUse": [
+	testutil.WriteFile(t, path, `{"hooks": {"PreToolUse": [
 		{"matcher": "Bash", "hooks": [
 			{"type": "command", "command": "'/usr/local/bin/undo' hook claude"},
 			{"type": "command", "command": "dcg check"}
@@ -301,7 +293,7 @@ func TestInstallKeepsUserHooksInSameGroup(t *testing.T) {
 func TestInstallKeepsOtherProgramsNamedLikeHooks(t *testing.T) {
 	home := agentHome(t)
 	path := filepath.Join(home, ".claude", "settings.json")
-	writeFile(t, path, `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh hook claude"}]}]}}`)
+	testutil.WriteFile(t, path, `{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh hook claude"}]}]}}`)
 
 	claude.Install(privateBinary(t, "bin"))
 	claude.Uninstall()
@@ -335,7 +327,7 @@ func TestInstallRefusesTemporaryBinary(t *testing.T) {
 func TestInstallKeepsSymlinkedSettings(t *testing.T) {
 	home := agentHome(t)
 	dotfiles := filepath.Join(t.TempDir(), "settings.json")
-	writeFile(t, dotfiles, `{"model": "opus"}`)
+	testutil.WriteFile(t, dotfiles, `{"model": "opus"}`)
 	link := filepath.Join(home, ".claude", "settings.json")
 	os.MkdirAll(filepath.Dir(link), 0o755)
 	if err := os.Symlink(dotfiles, link); err != nil {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/shimlabs/undo/internal/testutil"
+
 	"github.com/shimlabs/undo/internal/project"
 )
 
@@ -162,7 +164,7 @@ func TestCreateRefusesSymlinkedHome(t *testing.T) {
 func TestStoredPathsCannotLeaveProject(t *testing.T) {
 	s, root := newProject(t, map[string]string{"a.txt": "a"})
 	outside, _ := filepath.EvalSymlinks(t.TempDir())
-	writeFile(t, filepath.Join(outside, "precious"), "data")
+	testutil.WriteFile(t, filepath.Join(outside, "precious"), "data")
 	s.Take(CheckpointOptions{Label: "first", Dir: root})
 	escape, _ := filepath.Rel(s.baseDir(), outside)
 	writeJSON(filepath.Join(s.layerDir(1), "manifest.json"), Manifest{Deleted: []string{escape}})

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/shimlabs/undo/internal/testutil"
+
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
 )
@@ -16,8 +18,8 @@ func TestCopyModeRestoresExactly(t *testing.T) {
 	if err := s.SetCopyMode(true); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, "src", "main.go"), []byte("package main"))
-	want := fingerprint(root)
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main")
+	want := testutil.Fingerprint(t, root)
 	if _, err := s.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +28,7 @@ func TestCopyModeRestoresExactly(t *testing.T) {
 	if _, err := restore.Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if got := fingerprint(root); !maps.Equal(got, want) {
+	if got := testutil.Fingerprint(t, root); !maps.Equal(got, want) {
 		t.Fatalf("after restore:\n got %v\nwant %v", got, want)
 	}
 	reopened, err := store.Open(filepath.Dir(s.Dir()), root)
@@ -51,7 +53,7 @@ func plainProject(t *testing.T) (*store.Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
-	writeFile(t, filepath.Join(root, "main.go"), []byte("package main"))
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	s, err := store.Create(t.TempDir(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +78,7 @@ func TestCopyModeWorksWithoutClones(t *testing.T) {
 	if err := s.SetCopyMode(true); err != nil {
 		t.Fatal(err)
 	}
-	want := fingerprint(root)
+	want := testutil.Fingerprint(t, root)
 	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func TestCopyModeWorksWithoutClones(t *testing.T) {
 	if _, err := restore.Apply(s, 1, (*store.Store).Take); err != nil {
 		t.Fatal(err)
 	}
-	if got := fingerprint(root); !maps.Equal(got, want) {
+	if got := testutil.Fingerprint(t, root); !maps.Equal(got, want) {
 		t.Fatalf("after restore:\n got %v\nwant %v", got, want)
 	}
 }
@@ -96,7 +98,7 @@ func TestTakeRefusesWhenFilesAppearLater(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeFile(t, filepath.Join(root, "main.go"), []byte("package main"))
+	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	_, err := s.Take(store.CheckpointOptions{Label: "first file", Dir: root})
 	if !errors.Is(err, store.ErrCloneUnsupported) {
 		t.Fatalf("Take = %v, want ErrCloneUnsupported", err)
