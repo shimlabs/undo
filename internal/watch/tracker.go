@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/shimlabs/undo/internal/exclude"
@@ -187,6 +189,14 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 	}
 
 	var changed, deleted []string
+	if !needsFullScan {
+		changed, deleted, err = t.applyDirty(dirty)
+		if errors.Is(err, fs.ErrPermission) {
+			needsFullScan = true
+		} else if err != nil {
+			return store.Checkpoint{}, err
+		}
+	}
 	if needsFullScan {
 		current, skipped, err := tree.ScanWithSkipped(t.root, t.matcher.Load())
 		if err != nil {
@@ -194,8 +204,6 @@ func (t *Tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		}
 		changed, deleted = tree.Changed(t.listing, current)
 		t.listing, t.unreadable = current, skipped.Unreadable
-	} else if changed, deleted, err = t.applyDirty(dirty); err != nil {
-		return store.Checkpoint{}, err
 	}
 
 	cp, err := t.store.Commit(latest.ID, options, store.Changes{
@@ -278,30 +286,46 @@ func (c *changeSet) removeUnder(rel string) {
 }
 
 // applyDirty updates the listing for every path reported since the last
-// checkpoint and returns what changed.
+// checkpoint and returns what changed. A path it has no permission to read
+// returns an error matching fs.ErrPermission, and the caller compares the
+// whole project instead, as a scan handles unreadable paths.
 func (t *Tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, err error) {
 	changes := changeSet{listing: t.listing, changed: map[string]bool{}, deleted: map[string]bool{}}
 	matcher := t.matcher.Load()
-	for path := range dirty {
+	for path := range t.withHardLinks(dirty) {
 		if err := t.applyPath(&changes, matcher, path); err != nil {
 			return nil, nil, err
 		}
 	}
-	changed = slices.Sorted(func(yield func(string) bool) {
-		for rel := range changes.changed {
-			if !yield(rel) {
-				return
-			}
+	return slices.Sorted(maps.Keys(changes.changed)), slices.Sorted(maps.Keys(changes.deleted)), nil
+}
+
+// withHardLinks adds the other names of every dirty file that has several.
+// A write through one name changes the content of all of them, but the
+// event names only the one that was written.
+func (t *Tracker) withHardLinks(dirty map[string]bool) map[string]bool {
+	var inodes map[uint64]bool
+	for path := range dirty {
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
 		}
-	})
-	deleted = slices.Sorted(func(yield func(string) bool) {
-		for rel := range changes.deleted {
-			if !yield(rel) {
-				return
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
+			if inodes == nil {
+				inodes = map[uint64]bool{}
 			}
+			inodes[stat.Ino] = true
 		}
-	})
-	return changed, deleted, nil
+	}
+	if inodes == nil {
+		return dirty
+	}
+	for rel, entry := range t.listing {
+		if entry.Kind == tree.File && inodes[entry.Inode] {
+			dirty[filepath.Join(t.root, filepath.FromSlash(rel))] = true
+		}
+	}
+	return dirty
 }
 
 func (t *Tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path string) error {
@@ -329,7 +353,10 @@ func (t *Tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 		changes.removeUnder(rel)
 	}
 	changes.update(rel, entry)
-	if entry.Kind == tree.Dir && (!existed || previous.Kind != tree.Dir) {
+	// A directory that is new, or whose mode changed and may have become
+	// readable, can hold files that never had events of their own.
+	isNewDir := !existed || previous.Kind != tree.Dir
+	if entry.Kind == tree.Dir && (isNewDir || previous.Mode != entry.Mode) {
 		return t.addUnder(changes, matcher, path)
 	}
 	return nil

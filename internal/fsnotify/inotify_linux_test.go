@@ -37,3 +37,26 @@ func TestOverflowAsksForOneRescan(t *testing.T) {
 		t.Fatal("a later batch still asked for a rescan after the overflow was reported")
 	}
 }
+
+func TestVanishedDirectoryDoesNotForceRescans(t *testing.T) {
+	root := t.TempDir()
+	stream := &Stream{
+		roots:        []string{root},
+		dirsByWatch:  map[int]string{1: root},
+		missingRoots: map[string]bool{},
+	}
+	created := append(inotifyRecord(1, unix.IN_CREATE|unix.IN_ISDIR), nameBytes("gone")...)
+	created[unix.SizeofInotifyEvent-4] = byte(len(nameBytes("gone")))
+
+	stream.parseEvents(created)
+	if hasRescan(stream.parseEvents(inotifyRecord(1, unix.IN_MODIFY))) {
+		t.Fatal("a directory that vanished before it was watched made every batch ask for a rescan")
+	}
+}
+
+// nameBytes pads name to inotify's alignment, as the kernel does.
+func nameBytes(name string) []byte {
+	padded := make([]byte, 16)
+	copy(padded, name)
+	return padded
+}

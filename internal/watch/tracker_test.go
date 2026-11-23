@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/shimlabs/undo/internal/exclude"
+	"github.com/shimlabs/undo/internal/fsnotify"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
@@ -263,4 +264,44 @@ func TestTrackerWithRootTypedInOtherCase(t *testing.T) {
 	cp := checkpoint(t, tracker, "second")
 
 	checkMatchesScan(t, s, stored, cp.ID)
+}
+
+func TestTrackerRecordsDirectoryThatBecomesReadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every directory")
+	}
+	tracker, s, root := newTracker(t)
+	writeFile(t, filepath.Join(root, "data", "rows"), "data")
+	os.Chmod(filepath.Join(root, "data"), 0o000)
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, "data"), 0o755) })
+	checkpoint(t, tracker, "unreadable")
+
+	os.Chmod(filepath.Join(root, "data"), 0o755)
+	cp := checkpoint(t, tracker, "readable")
+
+	checkMatchesScan(t, s, root, cp.ID)
+}
+
+func TestTrackerFollowsHardLinks(t *testing.T) {
+	tracker, s, root := newTracker(t)
+	os.Link(filepath.Join(root, "README.md"), filepath.Join(root, "docs", "README.link"))
+	checkpoint(t, tracker, "first")
+
+	writeFile(t, filepath.Join(root, "docs", "README.link"), "# written through the link")
+	cp := checkpoint(t, tracker, "second")
+
+	checkMatchesScan(t, s, root, cp.ID)
+}
+
+func TestTrackerRescansAfterDroppedEvents(t *testing.T) {
+	tracker, s, root := newTracker(t)
+	checkpoint(t, tracker, "first")
+	writeFile(t, filepath.Join(root, "missed.txt"), "created while events were dropped")
+	checkpoint(t, tracker, "second")
+	delete(tracker.listing, "missed.txt")
+
+	tracker.handleEvents([]fsnotify.Event{{Path: root, ShouldRescan: true}})
+	cp := checkpoint(t, tracker, "after dropped events")
+
+	checkMatchesScan(t, s, root, cp.ID)
 }

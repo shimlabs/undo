@@ -100,47 +100,11 @@ func (s *Stream) parseEvents(buf []byte) []Event {
 	defer s.mu.Unlock()
 	var events []Event
 	for len(buf) >= unix.SizeofInotifyEvent {
-		raw := (*unix.InotifyEvent)(unsafe.Pointer(&buf[0]))
-		end := unix.SizeofInotifyEvent + int(raw.Len)
+		record := (*unix.InotifyEvent)(unsafe.Pointer(&buf[0]))
+		end := unix.SizeofInotifyEvent + int(record.Len)
 		name := string(bytes.TrimRight(buf[unix.SizeofInotifyEvent:end], "\x00"))
 		buf = buf[end:]
-
-		if raw.Mask&unix.IN_Q_OVERFLOW != 0 {
-			s.hasOverflowed = true
-			continue
-		}
-		dir, ok := s.dirsByWatch[int(raw.Wd)]
-		if !ok {
-			continue
-		}
-		if raw.Mask&unix.IN_IGNORED != 0 {
-			delete(s.dirsByWatch, int(raw.Wd))
-			if s.isRoot(dir) {
-				s.missingRoots[dir] = true
-			}
-			continue
-		}
-		if raw.Mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
-			if s.isRoot(dir) {
-				_, _ = unix.InotifyRmWatch(s.fd, uint32(raw.Wd))
-				events = append(events, Event{Path: dir, ShouldRescan: true})
-			}
-			continue
-		}
-		path := dir
-		if name != "" {
-			path = filepath.Join(dir, name)
-		}
-		events = append(events, Event{Path: path})
-		if raw.Mask&unix.IN_ISDIR != 0 && raw.Mask&(unix.IN_CREATE|unix.IN_MOVED_TO) != 0 {
-			found, err := s.watchTree(path)
-			if err != nil {
-				s.hasUnwatchedDirs = true
-			}
-			for _, inside := range found {
-				events = append(events, Event{Path: inside})
-			}
-		}
+		events = append(events, s.handleRecord(record, name)...)
 	}
 	for root := range s.missingRoots {
 		if _, err := s.watchTree(root); err == nil {
@@ -153,6 +117,52 @@ func (s *Stream) parseEvents(buf []byte) []Event {
 			events = append(events, Event{Path: root, ShouldRescan: true})
 		}
 		s.hasOverflowed = false
+	}
+	return events
+}
+
+// handleRecord turns one inotify record into events, and watches directories
+// that appear or whose permissions change, since they may have just become
+// readable.
+func (s *Stream) handleRecord(record *unix.InotifyEvent, name string) []Event {
+	if record.Mask&unix.IN_Q_OVERFLOW != 0 {
+		s.hasOverflowed = true
+		return nil
+	}
+	dir, ok := s.dirsByWatch[int(record.Wd)]
+	if !ok {
+		return nil
+	}
+	if record.Mask&unix.IN_IGNORED != 0 {
+		delete(s.dirsByWatch, int(record.Wd))
+		if s.isRoot(dir) {
+			s.missingRoots[dir] = true
+		}
+		return nil
+	}
+	if record.Mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
+		if s.isRoot(dir) {
+			_, _ = unix.InotifyRmWatch(s.fd, uint32(record.Wd))
+			return []Event{{Path: dir, ShouldRescan: true}}
+		}
+		return nil
+	}
+	path := dir
+	if name != "" {
+		path = filepath.Join(dir, name)
+	}
+	events := []Event{{Path: path}}
+	if record.Mask&unix.IN_ISDIR == 0 || record.Mask&(unix.IN_CREATE|unix.IN_MOVED_TO|unix.IN_ATTRIB) == 0 {
+		return events
+	}
+	// A directory that is already gone or cannot be read needs no watch, and
+	// its own event is enough for the tracker to look at it.
+	found, err := s.watchTree(path)
+	if errors.Is(err, ErrWatchLimit) {
+		s.hasUnwatchedDirs = true
+	}
+	for _, inside := range found {
+		events = append(events, Event{Path: inside})
 	}
 	return events
 }
