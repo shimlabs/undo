@@ -78,3 +78,9 @@ func TestWrap(t *testing.T) {
 		t.Fatalf("wrap = %q", lines)
 	}
 }
+
+func TestListAlias(t *testing.T) {
+	if code, out := run(t, t.TempDir(), "", "ls", "--help"); code != 0 || !strings.Contains(out, "undo list [flags]") {
+		t.Fatalf("undo ls --help: exit %d\n%s", code, out)
+	}
+}

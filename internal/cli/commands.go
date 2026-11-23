@@ -26,9 +26,11 @@ type command struct {
 	// isInternal marks the commands agents and the watcher run, which get
 	// their arguments as they are.
 	isInternal bool
-	flags      []string
-	examples   []example
-	run        func(parsed flags, env Env) error
+	// aliases are other names that run it, such as ls for list.
+	aliases  []string
+	flags    []string
+	examples []example
+	run      func(parsed flags, env Env) error
 }
 
 type example struct {
@@ -135,6 +137,7 @@ func commands() []command {
 		},
 		{
 			name:        "list",
+			aliases:     []string{"ls"},
 			summary:     "List checkpoints, the newest last",
 			group:       groupRestore,
 			flags:       []string{flagProject},
@@ -193,7 +196,7 @@ func commands() []command {
 
 func findCommand(name string) (command, bool) {
 	for _, cmd := range commands() {
-		if cmd.name == name {
+		if cmd.name == name || slices.Contains(cmd.aliases, name) {
 			return cmd, true
 		}
 	}
