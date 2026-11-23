@@ -918,3 +918,38 @@ func TestApplyWithChangesInManyDirectories(t *testing.T) {
 		t.Fatalf("dir0042/file.txt = %q, %v", data, err)
 	}
 }
+
+func TestRestoreWithUnreadableFileTakesOneCheckpoint(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "secret.key"), "k")
+	if err := os.Chmod(filepath.Join(root, "secret.key"), 0); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "secret.key"), 0o644)
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "edited")
+	second := take(t, projectStore, "2")
+	apply(t, projectStore, 1)
+	latest, _, err := projectStore.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.ID != second.ID+1 {
+		t.Fatalf("the restore took %d checkpoints, want 1", latest.ID-second.ID)
+	}
+}
+
+func TestApplyWithNothingToDoTakesNoCheckpoint(t *testing.T) {
+	projectStore, _ := newProject(t)
+	first := take(t, projectStore, "1")
+	changes := apply(t, projectStore, first.ID)
+	if len(changes.Written)+len(changes.Removed) > 0 {
+		t.Fatalf("restoring the project's own state changed %+v", changes)
+	}
+	if latest, _, err := projectStore.Latest(); err != nil || latest.ID != first.ID {
+		t.Fatalf("a restore with nothing to do took checkpoint %d, %v", latest.ID, err)
+	}
+}

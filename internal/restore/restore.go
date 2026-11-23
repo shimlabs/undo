@@ -77,38 +77,92 @@ func Plan(projectStore *store.Store, id int) (Changes, error) {
 	return plan.changes, nil
 }
 
-// Apply makes the project match checkpoint id. It first takes a checkpoint of
-// the current state with checkpoint, so the restore itself can be undone.
-// Paths that are excluded or unreadable now are never touched.
+// Apply makes the project match checkpoint id. Unless nothing would change,
+// it first takes a checkpoint of the current state with checkpoint, so the
+// restore itself can be undone. Paths that are excluded or unreadable now are
+// never touched.
 func Apply(projectStore *store.Store, id int, checkpoint store.Checkpointer) (Changes, error) {
 	if _, err := projectStore.Checkpoint(id); err != nil {
-		return Changes{}, err
-	}
-	options := store.CheckpointOptions{Label: fmt.Sprintf("undo to %d", id), Dir: projectStore.Root()}
-	safety, err := checkpoint(projectStore, options)
-	if err != nil {
 		return Changes{}, err
 	}
 	plan, unlock, err := lockAndPlan(projectStore, id)
 	if err != nil {
 		return Changes{}, err
 	}
-	isCovered, err := isCoveredBy(projectStore, safety.ID, plan.scanned)
+	oldest, err := oldestID(projectStore)
+	unlock()
+	if err != nil {
+		return Changes{}, err
+	}
+	if len(plan.changes.Written)+len(plan.changes.Removed) == 0 {
+		return plan.changes, nil
+	}
+	options := store.CheckpointOptions{Label: fmt.Sprintf("undo to %d", id), Dir: projectStore.Root()}
+	safety, err := checkpoint(projectStore, options)
+	if err != nil {
+		return Changes{}, err
+	}
+	if unlock, err = projectStore.RLock(); err != nil {
+		return Changes{}, err
+	}
+	// The plan still holds if the safety checkpoint saw the project the plan
+	// scanned and no merge changed the stored states in between.
+	isCurrent, err := isPlanCurrent(projectStore, plan, safety.ID, oldest)
 	if err != nil {
 		unlock()
 		return Changes{}, err
 	}
-	if !isCovered {
-		// The watcher missed a change, so the safety checkpoint does not hold
-		// everything the restore would overwrite. A full scan does.
+	if !isCurrent {
 		unlock()
-		if _, err := projectStore.Take(options); err != nil {
-			return Changes{}, err
-		}
-		if plan, unlock, err = lockAndPlan(projectStore, id); err != nil {
+		if plan, unlock, err = planCoveredBy(projectStore, id, safety.ID, options); err != nil {
 			return Changes{}, err
 		}
 	}
 	defer unlock()
 	return plan.changes, plan.apply(projectStore, id)
+}
+
+// isPlanCurrent reports whether plan, made when the oldest checkpoint was
+// oldest, still holds after checkpoint safety.
+func isPlanCurrent(projectStore *store.Store, plan restorePlan, safety, oldest int) (bool, error) {
+	oldestNow, err := oldestID(projectStore)
+	if err != nil || oldestNow != oldest {
+		return false, err
+	}
+	return isCoveredBy(projectStore, safety, plan.scanned)
+}
+
+// planCoveredBy plans the restore of checkpoint id under the store's shared
+// lock, making sure a checkpoint holds everything the restore overwrites.
+// When checkpoint safety does not, because the watcher missed a change or
+// the project changed after it, a full scan takes one that does.
+func planCoveredBy(projectStore *store.Store, id, safety int, options store.CheckpointOptions) (restorePlan, func(), error) {
+	plan, unlock, err := lockAndPlan(projectStore, id)
+	if err != nil {
+		return restorePlan{}, nil, err
+	}
+	isCovered, err := isCoveredBy(projectStore, safety, plan.scanned)
+	if err != nil {
+		unlock()
+		return restorePlan{}, nil, err
+	}
+	if isCovered {
+		return plan, unlock, nil
+	}
+	unlock()
+	if _, err := projectStore.Take(options); err != nil {
+		return restorePlan{}, nil, err
+	}
+	return lockAndPlan(projectStore, id)
+}
+
+// oldestID returns the ID of the oldest checkpoint. A merge into the base
+// removes the oldest checkpoints, so a change in it means stored states may
+// have moved.
+func oldestID(projectStore *store.Store) (int, error) {
+	checkpoints, err := projectStore.List()
+	if err != nil || len(checkpoints) == 0 {
+		return 0, err
+	}
+	return checkpoints[0].ID, nil
 }

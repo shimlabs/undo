@@ -120,7 +120,9 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 			fmt.Sprintf("Run %s to restore without asking.", env.stderr().Bold(projectCommand(env, parsed, commandLine+" --yes"))))
 	}
 	printCheckpointHeading(out, checkpoint, projectStore.Root())
-	changes, err := restore.Plan(projectStore, checkpoint.ID)
+	_, statErr := os.Stat(projectStore.Root())
+	wasDeleted := errors.Is(statErr, fs.ErrNotExist)
+	changes, err := planOrApply(env, parsed, projectStore, checkpoint.ID)
 	if err != nil {
 		return err
 	}
@@ -133,20 +135,35 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 		return nil
 	}
 	out.Println()
-	if !parsed.isConfirmed && !confirm(env, out.Bold(fmt.Sprintf("Restore %s?", pluralize(count, "path")))+" [y/N] ") {
-		out.Println("Nothing restored.")
-		return errDeclined
+	if !parsed.isConfirmed {
+		if !confirm(env, out.Bold(fmt.Sprintf("Restore %s?", pluralize(count, "path")))+" [y/N] ") {
+			out.Println("Nothing restored.")
+			return errDeclined
+		}
+		if changes, err = restore.Apply(projectStore, checkpoint.ID, env.checkpointer()); err != nil {
+			return err
+		}
 	}
-	_, statErr := os.Stat(projectStore.Root())
-	wasDeleted := errors.Is(statErr, fs.ErrNotExist)
-	applied, err := restore.Apply(projectStore, checkpoint.ID, env.checkpointer())
-	if err != nil {
-		return err
+	printRestored(env, parsed, changes, wasDeleted)
+	return nil
+}
+
+// planOrApply plans the restore of checkpoint id, or with --yes, where
+// there is nothing to wait for, restores it at once, which plans only once.
+func planOrApply(env Env, parsed flags, projectStore *store.Store, id int) (restore.Changes, error) {
+	if parsed.isConfirmed {
+		return restore.Apply(projectStore, id, env.checkpointer())
 	}
+	return restore.Plan(projectStore, id)
+}
+
+// printRestored reports what a restore did and how to take it back.
+func printRestored(env Env, parsed flags, applied restore.Changes, wasDeleted bool) {
+	out := env.stdout()
 	if printNotRestored(out, applied) {
 		out.Println()
 	}
-	count = restoredCount(applied)
+	count := restoredCount(applied)
 	pronoun := "them"
 	if count == 1 {
 		pronoun = "it"
@@ -155,7 +172,6 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 	if wasDeleted {
 		out.Println("Checkpoints leave out excluded folders, such as node_modules/; reinstall them.")
 	}
-	return nil
 }
 
 // projectCommand returns commandLine with the --project flag the user gave,
