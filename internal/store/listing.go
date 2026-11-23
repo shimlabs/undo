@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path/filepath"
+	"slices"
 
 	"github.com/shimlabs/undo/internal/tree"
 )
@@ -25,7 +27,10 @@ func (s *Store) BaseListing() (tree.Listing, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, errNoBase
 	}
-	return listing, err
+	if err != nil {
+		return nil, err
+	}
+	return listing, checkLocal(slices.Collect(maps.Keys(listing)))
 }
 
 // ListingAt returns the project listing at checkpoint id. It uses the saved

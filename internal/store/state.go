@@ -2,9 +2,12 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
@@ -65,8 +68,26 @@ func (s *Store) State(id int) (map[string]Source, error) {
 // Manifest returns the manifest of checkpoint id.
 func (s *Store) Manifest(id int) (Manifest, error) {
 	var manifest Manifest
-	err := readJSON(filepath.Join(s.layerDir(id), "manifest.json"), &manifest)
-	return manifest, err
+	if err := readJSON(filepath.Join(s.layerDir(id), "manifest.json"), &manifest); err != nil {
+		return Manifest{}, err
+	}
+	paths := slices.Concat(manifest.Deleted, manifest.Unstable, manifest.Unreadable, slices.Collect(maps.Keys(manifest.Changed)))
+	return manifest, checkLocal(paths)
+}
+
+// ErrPathOutsideProject means a stored path points outside the project.
+// Undo never writes such a path, so the store was changed by someone else.
+var ErrPathOutsideProject = errors.New("a stored path points outside the project")
+
+// checkLocal rejects stored paths that are absolute or climb out of the
+// project with "..", so restoring or merging cannot touch other files.
+func checkLocal(paths []string) error {
+	for _, rel := range paths {
+		if !filepath.IsLocal(filepath.FromSlash(rel)) {
+			return fmt.Errorf("%q: %w", rel, ErrPathOutsideProject)
+		}
+	}
+	return nil
 }
 
 // Extract writes the stored copy of the file or symlink rel, as recorded in

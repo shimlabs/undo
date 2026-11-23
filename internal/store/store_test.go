@@ -125,3 +125,21 @@ func TestLocateRefusesSymlinkedHome(t *testing.T) {
 		t.Fatalf("Locate(home through a symlink) = %v, want ErrNotProject", err)
 	}
 }
+
+func TestStoredPathsCannotLeaveProject(t *testing.T) {
+	s, root := newProject(t, map[string]string{"a.txt": "a"})
+	outside, _ := filepath.EvalSymlinks(t.TempDir())
+	writeFile(t, filepath.Join(outside, "precious"), "data")
+	s.Take(CheckpointOptions{Label: "first", Dir: root})
+	escape, _ := filepath.Rel(s.baseDir(), outside)
+	writeJSON(filepath.Join(s.layerDir(1), "manifest.json"), Manifest{Deleted: []string{escape}})
+
+	if _, err := s.State(1); err == nil {
+		t.Fatal("State accepted a stored path outside the project")
+	}
+	writeJSON(s.mergePath(), pendingMerge{Through: 1})
+	s.Take(CheckpointOptions{Label: "second", Dir: root})
+	if _, err := os.Stat(filepath.Join(outside, "precious")); err != nil {
+		t.Fatalf("a planted merge deleted a file outside the store: %v", err)
+	}
+}
