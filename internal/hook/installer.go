@@ -4,6 +4,8 @@ import (
 	"maps"
 	"path/filepath"
 	"strings"
+
+	"github.com/shimlabs/undo/internal/shell"
 )
 
 // installer adds undo's hook for an agent to the agent's configuration and
@@ -23,7 +25,7 @@ func withCommand(handler map[string]any, command string) map[string]any {
 // hookCommand returns the shell command that runs binary's hook for agent.
 // The path is always quoted, since agents run hooks through a shell.
 func hookCommand(binary, agent string) string {
-	return "'" + strings.ReplaceAll(binary, "'", `'\''`) + "' hook " + agent
+	return shell.Quote(binary) + " hook " + agent
 }
 
 // isUndoHandler matches a handler that runs undo's hook for agent: one shell
@@ -38,8 +40,8 @@ func isUndoHandler(agent string) func(handler any) bool {
 		if !ok {
 			return false
 		}
-		if len(program) >= 2 && strings.HasPrefix(program, "'") && strings.HasSuffix(program, "'") {
-			program = strings.ReplaceAll(program[1:len(program)-1], `'\''`, "'")
+		if unquoted, isQuoted := shell.Unquote(program); isQuoted {
+			program = unquoted
 		} else if strings.ContainsAny(program, " \t") {
 			return false
 		}
