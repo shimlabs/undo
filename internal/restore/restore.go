@@ -129,6 +129,9 @@ type restorePlan struct {
 	target      map[string]store.Source
 	current     tree.Listing
 	changes     Changes
+	// unchanged holds the paths an earlier restore to the same checkpoint
+	// wrote and nothing changed since, so they still match the target.
+	unchanged tree.Listing
 }
 
 // planRestore plans a restore of checkpoint id. It never touches a path the
@@ -163,7 +166,23 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	lost := plan.lostPaths()
 	plan.drop(lost)
 	kept, untracked := plan.dropUnsaved(matcherThen, matcherNow, manifest.Unreadable, skipped.Unreadable)
+	restored, err := projectStore.RestoredEntries(id)
+	if err != nil {
+		return restorePlan{}, err
+	}
+	plan.unchanged = tree.Listing{}
+	isUnchanged := func(rel string) bool {
+		entry, isRestored := restored[rel]
+		if isRestored && current[rel] == entry {
+			plan.unchanged[rel] = entry
+			return true
+		}
+		return false
+	}
 	written, removed := tree.Changed(current, plan.targetListing())
+	// Paths that still match are left alone, so they need none of the checks
+	// below.
+	written = slices.DeleteFunc(written, isUnchanged)
 	// The safety checkpoint could not save a file undo cannot read, so the
 	// restore must not change it either.
 	unreadable := plan.unreadableFiles(slices.Concat(written, removed))
@@ -180,15 +199,8 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 		written, removed = tree.Changed(current, plan.targetListing())
 	}
 	written = slices.DeleteFunc(written, isInsideAny(kept))
+	written = slices.DeleteFunc(written, isUnchanged)
 	removed = slices.DeleteFunc(removed, isInsideAny(kept))
-	restored, err := projectStore.RestoredEntries(id)
-	if err != nil {
-		return restorePlan{}, err
-	}
-	written = slices.DeleteFunc(written, func(rel string) bool {
-		entry, isRestored := restored[rel]
-		return isRestored && current[rel] == entry
-	})
 	slices.Sort(kept)
 	plan.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable, Lost: lost}
 	return plan, nil
@@ -376,7 +388,13 @@ func (p *restorePlan) apply(projectStore *store.Store, id int) error {
 	if err != nil {
 		return err
 	}
-	return projectStore.SaveRestore(id, p.restoredEntries(slices.Concat(p.changes.Written, dirs)))
+	entries := p.restoredEntries(slices.Concat(p.changes.Written, dirs))
+	for rel, entry := range p.unchanged {
+		if _, isWritten := entries[rel]; !isWritten {
+			entries[rel] = entry
+		}
+	}
+	return projectStore.SaveRestore(id, entries)
 }
 
 // restoredEntries returns the current entries of paths, as the restore left

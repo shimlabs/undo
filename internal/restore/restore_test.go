@@ -899,3 +899,21 @@ func TestRestoreKeepsDirectoryWithNestedUnreadableContentWhereFileWas(t *testing
 		})
 	}
 }
+
+func TestRepeatedRestoreWritesOnlyWhatChangedSince(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	for _, rel := range []string{"README.md", "src/main.go", "src/util/str.go"} {
+		testutil.WriteFile(t, filepath.Join(root, filepath.FromSlash(rel)), "broken")
+	}
+	take(t, projectStore, "2")
+	apply(t, projectStore, 1)
+
+	for _, rel := range []string{"README.md", "src/main.go"} {
+		testutil.WriteFile(t, filepath.Join(root, filepath.FromSlash(rel)), "edited again")
+		take(t, projectStore, "edit "+rel)
+		if changes := apply(t, projectStore, 1); !slices.Equal(changes.Written, []string{rel}) {
+			t.Fatalf("restore after editing %s wrote %v, want only %s", rel, changes.Written, rel)
+		}
+	}
+}
