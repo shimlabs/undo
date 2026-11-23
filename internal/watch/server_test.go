@@ -228,6 +228,29 @@ func TestServeStopsWhenIdle(t *testing.T) {
 	}
 }
 
+func TestServeStopsWhenIdleDespiteStatusRequests(t *testing.T) {
+	projectStore, _, socketDir := newServerProject(t)
+	done, _ := runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: 300 * time.Millisecond})
+	client := Client{SocketDir: socketDir}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		case <-deadline:
+			t.Fatal("status requests kept the server running with no checkpoint")
+		case <-time.After(100 * time.Millisecond):
+			// A request that meets the server as it stops fails, which is
+			// fine: the test waits for the stop.
+			_, _ = client.Status(projectStore)
+		}
+	}
+}
+
 func TestServeStopsWhenCanceled(t *testing.T) {
 	projectStore, _, socketDir := newServerProject(t)
 	done, stop := runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute})

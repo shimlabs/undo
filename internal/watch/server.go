@@ -44,7 +44,7 @@ type serverResponse struct {
 type Options struct {
 	// SocketDir is where the server's socket goes.
 	SocketDir string
-	// IdleTimeout is how long the server waits for a request before it exits.
+	// IdleTimeout is how long the server runs after its last checkpoint.
 	IdleTimeout time.Duration
 	// Limits bound the history the server keeps when it prunes the store.
 	Limits store.Limits
@@ -56,7 +56,7 @@ type Options struct {
 }
 
 // Serve watches the project in projectStore and takes checkpoints for clients
-// until ctx is canceled or no request arrives for options.IdleTimeout. After
+// until ctx is canceled or options.IdleTimeout passes without one. After
 // checkpoints, once it has been quiet for options.PruneQuietPeriod, it prunes
 // the store in the background if pruning is due.
 func Serve(ctx context.Context, projectStore *store.Store, options Options) error {
@@ -157,13 +157,18 @@ type server struct {
 	checkpointCount int
 }
 
-// acceptLoop serves connections until the server has been idle for
-// options.IdleTimeout. After a checkpoint, the first quiet period triggers a
-// prune.
+// acceptLoop serves connections until options.IdleTimeout passes without a
+// checkpoint. After a checkpoint, the first quiet period triggers a prune.
 func (s *server) acceptLoop() error {
 	isPruneDue := false
+	lastCheckpoint := time.Now()
 	for {
-		wait := s.options.IdleTimeout
+		// Only checkpoints keep the server running: undo status asks too,
+		// and a script polling it must not keep a watcher alive forever.
+		wait := time.Until(lastCheckpoint.Add(s.options.IdleTimeout))
+		if wait <= 0 {
+			return nil
+		}
 		if isPruneDue {
 			wait = min(wait, s.options.PruneQuietPeriod)
 		}
@@ -192,6 +197,7 @@ func (s *server) acceptLoop() error {
 		}
 		if isCheckpointed {
 			isPruneDue = true
+			lastCheckpoint = time.Now()
 		}
 	}
 }
