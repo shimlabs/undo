@@ -218,7 +218,9 @@ func (p *projectRestore) apply(projectStore *store.Store) error {
 func (p *projectRestore) removals() []string {
 	paths := slices.Clone(p.changes.Removed)
 	for _, rel := range p.changes.Written {
-		if entry, ok := p.current[rel]; ok && entry.Kind != p.target[rel].Entry.Kind {
+		// A named pipe cannot be rewritten in place, so a changed one is
+		// removed and made again.
+		if entry, ok := p.current[rel]; ok && (entry.Kind != p.target[rel].Entry.Kind || entry.Kind == tree.Other) {
 			paths = append(paths, rel)
 			delete(p.current, rel)
 		}
@@ -288,48 +290,15 @@ func (p *projectRestore) writeAll(projectStore *store.Store) (skipped []string, 
 }
 
 // clonableDirs returns the directories in paths that are missing from the
-// project and can be cloned from the base as they are: everything inside them
-// at the checkpoint comes from the base, and nothing was deleted from them
-// since.
+// project and can be cloned from the base in one call.
 func (p *projectRestore) clonableDirs(projectStore *store.Store, paths []string) (map[string]bool, error) {
-	candidates := map[string]bool{}
+	var missing []string
 	for _, rel := range paths {
 		if _, exists := p.current[rel]; !exists && rel != "." && p.target[rel].Entry.Kind == tree.Dir {
-			candidates[rel] = true
+			missing = append(missing, rel)
 		}
 	}
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-	base, err := projectStore.BaseListing()
-	if err != nil {
-		return nil, err
-	}
-	inTarget, inBase := map[string]int{}, map[string]int{}
-	for rel, source := range p.target {
-		for dir := path.Dir(rel); dir != "."; dir = path.Dir(dir) {
-			if candidates[dir] {
-				inTarget[dir]++
-				if source.Layer != 0 {
-					candidates[dir] = false
-				}
-			}
-		}
-	}
-	for rel := range base {
-		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
-			if candidates[dir] {
-				inBase[dir]++
-			}
-		}
-	}
-	clonable := map[string]bool{}
-	for dir, isCandidate := range candidates {
-		if isCandidate && base[dir].Kind == tree.Dir && inTarget[dir] == inBase[dir] {
-			clonable[dir] = true
-		}
-	}
-	return clonable, nil
+	return projectStore.UnchangedDirs(p.target, missing)
 }
 
 // restoreDirModeAndTimes sets the mode and times of every directory in paths,

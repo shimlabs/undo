@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -113,10 +114,54 @@ func (s *Store) Extract(rel string, source Source, dst string) error {
 }
 
 // ExtractBaseDir writes the whole directory rel from the base to dst, which
-// must not exist, in one clone. Only use it when nothing inside rel changed
-// since the base.
+// must not exist, in one clone. Only use it for a directory UnchangedDirs
+// returned.
 func (s *Store) ExtractBaseDir(rel, dst string) error {
 	return s.clone(s.basePath(rel), dst)
+}
+
+// UnchangedDirs returns the directories among dirs whose whole content in
+// state is exactly what the base holds: everything inside them comes from
+// the base, nothing was deleted from them since, and none of them holds a
+// named pipe or other special file, which the base may not keep. Such a
+// directory can be written with one ExtractBaseDir.
+func (s *Store) UnchangedDirs(state map[string]Source, dirs []string) (map[string]bool, error) {
+	candidates := map[string]bool{}
+	for _, rel := range dirs {
+		candidates[rel] = true
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	base, err := s.BaseListing()
+	if err != nil {
+		return nil, err
+	}
+	inState, inBase := map[string]int{}, map[string]int{}
+	for rel, source := range state {
+		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
+			if candidates[dir] {
+				inState[dir]++
+				if source.Layer != 0 || source.Entry.Kind == tree.Other {
+					candidates[dir] = false
+				}
+			}
+		}
+	}
+	for rel := range base {
+		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
+			if candidates[dir] {
+				inBase[dir]++
+			}
+		}
+	}
+	unchanged := map[string]bool{}
+	for dir, isCandidate := range candidates {
+		if isCandidate && base[dir].Kind == tree.Dir && inState[dir] == inBase[dir] {
+			unchanged[dir] = true
+		}
+	}
+	return unchanged, nil
 }
 
 func (s *Store) baseDir() string {

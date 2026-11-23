@@ -480,6 +480,38 @@ func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
 	}
 }
 
+func TestRestoreReplacesChangedNamedPipe(t *testing.T) {
+	s, root := newProject(t)
+	syscall.Mkfifo(filepath.Join(root, "pipe"), 0o640)
+	want := snapshot(t, root)
+	take(t, s, "first")
+	os.Chmod(filepath.Join(root, "pipe"), 0o600)
+
+	if _, err := Apply(s, 1, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	requireSame(t, want, snapshot(t, root))
+}
+
+func TestRestoreKeepsNamedPipeAfterPrune(t *testing.T) {
+	s, root := newProject(t)
+	take(t, s, "first")
+	syscall.Mkfifo(filepath.Join(root, "src", "pipe"), 0o640)
+	take(t, s, "with pipe")
+	writeFile(t, filepath.Join(root, "README.md"), "later")
+	want := snapshot(t, root)
+	take(t, s, "later")
+	if _, err := s.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(root, "src"))
+
+	if _, err := Apply(s, 3, (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	requireSame(t, want, snapshot(t, root))
+}
+
 // runIn runs a command in dir and fails the test if it fails.
 func runIn(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
