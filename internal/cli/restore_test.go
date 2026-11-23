@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/terminal"
 	"github.com/shimlabs/undo/internal/testutil"
 	"github.com/shimlabs/undo/internal/watch"
 )
@@ -94,5 +96,18 @@ func TestChangeRows(t *testing.T) {
 	}
 	if total := rowsCount(writtenRows) + rowsCount(removedRows); total != 6 {
 		t.Fatalf("rowsCount = %d, want 6, the sum of the rows", total)
+	}
+}
+
+func TestPrintRowsAlignsDetailsAfterAccentedPaths(t *testing.T) {
+	var out bytes.Buffer
+	noColor := func(text string) string { return text }
+	printRows(terminal.NewWriter(&out), []changeRow{
+		{action: "restore", path: "café/", detail: "3 files", color: noColor},
+		{action: "restore", path: "main/", detail: "2 files", color: noColor},
+	})
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(lines) != 2 || utf8.RuneCountInString(lines[0]) != utf8.RuneCountInString(lines[1]) {
+		t.Fatalf("details are not aligned:\n%s", out.String())
 	}
 }

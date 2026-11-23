@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -234,13 +235,13 @@ func printRows(out *terminal.Writer, rows []changeRow) {
 	actionWidth, pathWidth := 0, 0
 	for _, row := range rows {
 		actionWidth = max(actionWidth, len(row.action))
-		pathWidth = max(pathWidth, len(row.path))
+		pathWidth = max(pathWidth, utf8.RuneCountInString(row.path))
 	}
 	pathWidth = min(pathWidth, maxPathColumnWidth)
 	for _, row := range rows {
 		line := fmt.Sprintf("  %s  %s", row.color(fmt.Sprintf("%-*s", actionWidth, row.action)), row.path)
 		if row.detail != "" {
-			line += strings.Repeat(" ", max(pathWidth-len(row.path), 0)) + "  " + out.Dim(row.detail)
+			line += strings.Repeat(" ", max(pathWidth-utf8.RuneCountInString(row.path), 0)) + "  " + out.Dim(row.detail)
 		}
 		out.Println(line)
 	}
