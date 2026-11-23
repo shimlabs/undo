@@ -386,7 +386,11 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 	t.mu.Unlock()
 	defer os.Remove(markerPath)
 
-	if err := os.WriteFile(markerPath, nil, 0o600); err != nil {
+	marker, err := os.OpenFile(markerPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return 0, false
+	}
+	if err := marker.Close(); err != nil {
 		return 0, false
 	}
 	select {

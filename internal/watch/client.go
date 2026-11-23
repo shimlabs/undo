@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/store"
 )
 
@@ -108,7 +109,7 @@ func recordStartFailure(projectStore *store.Store, failure error) {
 	if failure == nil {
 		failure = errors.New("exit status 0")
 	}
-	if err := os.WriteFile(projectStore.WatcherFailurePath(), []byte(failure.Error()), 0o600); err != nil {
+	if err := atomicfile.WriteFile(projectStore.WatcherFailurePath(), []byte(failure.Error()), 0o600); err != nil {
 		projectStore.LogError(err)
 	}
 }

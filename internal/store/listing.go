@@ -141,5 +141,5 @@ func (s *Store) savedListing() (int, tree.Listing, error) {
 	if err := decoder.Decode(&listing); err != nil {
 		return 0, nil, err
 	}
-	return id, listing, nil
+	return id, listing, checkLocal(slices.Collect(maps.Keys(listing)))
 }

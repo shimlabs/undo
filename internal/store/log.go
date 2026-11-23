@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // maxLogSize bounds the error log. A failure that repeats on every command
@@ -29,8 +31,10 @@ func LogHomeError(home string, failure error) {
 }
 
 func appendLog(path string, failure error) {
-	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY
-	if info, err := os.Stat(path); err == nil && info.Size() > maxLogSize {
+	// O_NOFOLLOW: a symlink planted in place of the log must not lead the
+	// write outside the store.
+	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY | unix.O_NOFOLLOW
+	if info, err := os.Lstat(path); err == nil && info.Size() > maxLogSize {
 		flags |= os.O_TRUNC
 	}
 	file, err := os.OpenFile(path, flags, 0o600)

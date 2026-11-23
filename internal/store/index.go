@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
+	"golang.org/x/sys/unix"
 )
 
 // The index holds one JSON line per checkpoint. Taking a checkpoint appends a
@@ -99,7 +100,7 @@ func (s *Store) appendIndex(checkpoint Checkpoint) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(s.indexPath(), os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(s.indexPath(), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return err
 	}

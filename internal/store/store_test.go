@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/testutil"
@@ -259,5 +260,32 @@ func TestOpenRefusesStoreWithSymlinkedBase(t *testing.T) {
 	home := filepath.Dir(projectStore.Dir())
 	if _, err := Open(home, root); !errors.Is(err, ErrUnsafeStore) {
 		t.Fatalf("Open = %v, want ErrUnsafeStore", err)
+	}
+}
+
+func TestStoreNeverWritesThroughSymlinkedFiles(t *testing.T) {
+	for _, name := range []string{logFile, pruneMarkerFile, indexFile, lockFile} {
+		t.Run(name, func(t *testing.T) {
+			projectStore, root := newProject(t, map[string]string{"a.txt": "a"})
+			take(t, projectStore, "first")
+			outside := filepath.Join(t.TempDir(), "id_ed25519")
+			testutil.WriteFile(t, outside, "secret key")
+			target := filepath.Join(projectStore.Dir(), name)
+			if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, target); err != nil {
+				t.Fatal(err)
+			}
+
+			testutil.WriteFile(t, filepath.Join(root, "a.txt"), "changed")
+			projectStore.LogError(errors.New("logged"))
+			_, _ = projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
+			_, _ = projectStore.PruneIfDue(time.Now().Add(2*time.Hour), DefaultLimits())
+
+			if data, err := os.ReadFile(outside); err != nil || string(data) != "secret key" {
+				t.Fatalf("file outside the store = %q, %v", data, err)
+			}
+		})
 	}
 }
