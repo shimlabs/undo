@@ -96,7 +96,7 @@ func printCheckpoints(out io.Writer, projectStore *store.Store) error {
 	fmt.Fprintf(out, "Checkpoints  %d (oldest %s)\n", len(checkpoints), timeAgo(checkpoints[0].Time))
 	var unstableCount int
 	for _, checkpoint := range checkpoints {
-		if manifest, err := projectStore.Manifest(checkpoint.ID); err == nil && len(manifest.Unstable) > 0 {
+		if checkpoint.UnstableCount > 0 {
 			unstableCount++
 		}
 	}

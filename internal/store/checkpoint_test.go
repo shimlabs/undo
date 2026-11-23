@@ -404,6 +404,9 @@ func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
 		if !slices.Contains(manifest.Unstable, "log.txt") {
 			continue
 		}
+		if indexed, err := projectStore.Checkpoint(checkpoint.ID); err != nil || indexed.UnstableCount != len(manifest.Unstable) {
+			t.Fatalf("index line says %d unstable files, the manifest %d: %v", indexed.UnstableCount, len(manifest.Unstable), err)
+		}
 
 		settled := take(t, projectStore, "settled")
 		state, err := projectStore.State(settled.ID)

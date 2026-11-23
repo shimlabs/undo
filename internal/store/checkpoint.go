@@ -31,6 +31,9 @@ type Checkpoint struct {
 	ID   int       `json:"id"`
 	Time time.Time `json:"time"`
 	CheckpointOptions
+	// UnstableCount is how many files changed while the checkpoint saved
+	// them.
+	UnstableCount int `json:"unstable_count,omitempty"`
 }
 
 // Checkpointer takes a checkpoint of the project in projectStore, either by
@@ -167,7 +170,12 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 		return Checkpoint{}, err
 	}
 	options.Label = shortLabel(options.Label)
-	checkpoint := Checkpoint{ID: id, Time: time.Now(), CheckpointOptions: options}
+	checkpoint := Checkpoint{
+		ID:                id,
+		Time:              time.Now(),
+		CheckpointOptions: options,
+		UnstableCount:     len(manifest.Unstable),
+	}
 	return checkpoint, s.appendIndex(checkpoint)
 }
 
