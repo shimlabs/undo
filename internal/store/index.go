@@ -1,127 +1,129 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
-	"time"
+	"slices"
 
-	"golang.org/x/sys/unix"
-
-	"github.com/shimlabs/undo/internal/tree"
+	"github.com/shimlabs/undo/internal/atomicfile"
 )
 
-// Checkpointer takes a checkpoint of the project in s, either by scanning it
-// with Take or through the background watcher.
-type Checkpointer func(s *Store, label, dir string) (Checkpoint, error)
-
-// Checkpoint is a point the project can be restored to: its state just before
-// the command in Label ran.
-type Checkpoint struct {
-	ID    int       `json:"id"`
-	Time  time.Time `json:"time"`
-	Label string    `json:"label"`
-	Dir   string    `json:"dir"`
-}
-
-// Manifest is what a layer recorded: the state of every path that changed
-// since the previous checkpoint, and the paths that were deleted.
-type Manifest struct {
-	Changed  map[string]tree.Entry `json:"changed"`
-	Deleted  []string              `json:"deleted"`
-	Unstable []string              `json:"unstable,omitempty"`
-}
+// The index holds one JSON line per checkpoint. Taking a checkpoint appends a
+// line, so its cost does not grow with the history, and only merging old
+// checkpoints rewrites the file.
 
 // List returns the checkpoints in the order they were taken.
 func (s *Store) List() ([]Checkpoint, error) {
-	var list []Checkpoint
-	err := readJSON(filepath.Join(s.dir, "index.json"), &list)
+	data, err := os.ReadFile(s.indexPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	return list, err
-}
-
-// Manifest returns the manifest of checkpoint id.
-func (s *Store) Manifest(id int) (Manifest, error) {
-	var m Manifest
-	err := readJSON(filepath.Join(s.layerDir(id), "manifest.json"), &m)
-	return m, err
-}
-
-func (s *Store) layerDir(id int) string {
-	return filepath.Join(s.dir, "layers", strconv.Itoa(id))
-}
-
-// BaseDir returns the directory that holds the base clone of the project.
-func (s *Store) BaseDir() string {
-	return filepath.Join(s.dir, "base")
-}
-
-// LayerFile returns the path where checkpoint id keeps its copy of rel.
-func (s *Store) LayerFile(id int, rel string) string {
-	return filepath.Join(s.layerDir(id), "files", filepath.FromSlash(rel))
-}
-
-func (s *Store) lock() (unlock func(), err error) {
-	unlock, err = s.flock(unix.LOCK_EX)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.finishMerge(); err != nil {
-		unlock()
-		return nil, err
-	}
-	return unlock, nil
+	return parseIndex(data)
 }
 
-// RLock blocks changes to stored checkpoints until unlock is called. Taking a
-// checkpoint or pruning waits for it, but other readers do not.
-func (s *Store) RLock() (unlock func(), err error) {
-	return s.flock(unix.LOCK_SH)
-}
-
-func (s *Store) flock(how int) (unlock func(), err error) {
-	file, err := os.OpenFile(filepath.Join(s.dir, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+// Checkpoint returns checkpoint id.
+func (s *Store) Checkpoint(id int) (Checkpoint, error) {
+	list, err := s.List()
 	if err != nil {
-		return nil, err
+		return Checkpoint{}, err
 	}
-	if err := unix.Flock(int(file.Fd()), how); err != nil {
-		file.Close()
-		return nil, err
+	i := slices.IndexFunc(list, func(cp Checkpoint) bool { return cp.ID == id })
+	if i < 0 {
+		return Checkpoint{}, fmt.Errorf("no checkpoint %d", id)
 	}
-	// Closing the file releases the lock.
-	unlock = func() { file.Close() }
-	if err := s.loadConfig(); err != nil {
-		unlock()
-		return nil, err
-	}
-	return unlock, nil
+	return list[i], nil
 }
 
-func readJSON(path string, v any) error {
-	data, err := os.ReadFile(path)
+// Latest returns the most recent checkpoint, and false if there is none. It
+// reads only the end of the index.
+func (s *Store) Latest() (Checkpoint, bool, error) {
+	file, err := os.Open(s.indexPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return Checkpoint{}, false, nil
+	}
+	if err != nil {
+		return Checkpoint{}, false, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return Checkpoint{}, false, err
+	}
+	const tailSize = 16 << 10
+	offset := max(info.Size()-tailSize, 0)
+	tail := make([]byte, info.Size()-offset)
+	if _, err := file.ReadAt(tail, offset); err != nil && !errors.Is(err, io.EOF) {
+		return Checkpoint{}, false, err
+	}
+	if offset > 0 {
+		_, tail, _ = bytes.Cut(tail, []byte("\n"))
+	}
+	list, err := parseIndex(tail)
+	if err != nil || len(list) == 0 {
+		return Checkpoint{}, false, err
+	}
+	return list[len(list)-1], true, nil
+}
+
+// parseIndex parses index lines. A last line without a newline was cut off by
+// a crash while it was written, and is ignored.
+func parseIndex(data []byte) ([]Checkpoint, error) {
+	var list []Checkpoint
+	for len(data) > 0 {
+		line, rest, isComplete := bytes.Cut(data, []byte("\n"))
+		if !isComplete {
+			break
+		}
+		data = rest
+		var cp Checkpoint
+		if err := json.Unmarshal(line, &cp); err != nil {
+			return nil, err
+		}
+		list = append(list, cp)
+	}
+	return list, nil
+}
+
+func (s *Store) appendIndex(cp Checkpoint) error {
+	line, err := json.Marshal(cp)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, v)
-}
-
-func writeJSON(path string, v any) error {
-	data, err := json.Marshal(v)
+	file, err := os.OpenFile(s.indexPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, data)
+	_, err = file.Write(append(line, '\n'))
+	if err == nil {
+		err = atomicfile.Sync(file)
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
-func writeFileAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
+func (s *Store) writeIndex(list []Checkpoint) error {
+	var buf bytes.Buffer
+	for _, cp := range list {
+		line, err := json.Marshal(cp)
+		if err != nil {
+			return err
+		}
+		buf.Write(append(line, '\n'))
 	}
-	return os.Rename(tmp, path)
+	return writeFileAtomic(s.indexPath(), buf.Bytes())
+}
+
+func (s *Store) indexPath() string {
+	return filepath.Join(s.dir, "index.jsonl")
 }

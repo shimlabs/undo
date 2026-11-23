@@ -19,114 +19,174 @@ import (
 	"github.com/shimlabs/undo/internal/tree"
 )
 
-// Changes lists the paths a restore writes and the paths it removes, relative
-// to the project root.
+// Changes lists what a restore writes, removes and cannot restore, as paths
+// relative to the project root.
 type Changes struct {
-	Write  []string
-	Remove []string
+	Written []string
+	Removed []string
+	// Skipped are sockets and devices, which a restore cannot recreate.
+	Skipped []string
+}
+
+// Len returns the number of paths the restore writes or removes.
+func (c Changes) Len() int {
+	return len(c.Written) + len(c.Removed)
 }
 
 // Plan returns what restoring checkpoint id would change. It does not change
 // anything.
-func Plan(s *store.Store, id int) (Changes, error) {
-	unlock, err := s.RLock()
+func Plan(projectStore *store.Store, id int) (Changes, error) {
+	project, unlock, err := lockAndCompare(projectStore, id)
 	if err != nil {
 		return Changes{}, err
 	}
-	defer unlock()
-	target, err := s.State(id)
-	if err != nil {
-		return Changes{}, err
-	}
-	changes, _, err := diff(s, target)
-	return changes, err
+	unlock()
+	return project.changes, nil
 }
 
 // Apply makes the project match checkpoint id. It first takes a checkpoint of
 // the current state with checkpoint, so the restore itself can be undone.
-// Excluded paths are never touched.
-func Apply(s *store.Store, id int, checkpoint store.Checkpointer) (Changes, error) {
-	list, err := s.List()
+// Paths that are excluded or unreadable now are never touched.
+func Apply(projectStore *store.Store, id int, checkpoint store.Checkpointer) (Changes, error) {
+	if _, err := projectStore.Checkpoint(id); err != nil {
+		return Changes{}, err
+	}
+	options := store.CheckpointOptions{Label: fmt.Sprintf("undo to %d", id), Dir: projectStore.Root()}
+	safety, err := checkpoint(projectStore, options)
 	if err != nil {
 		return Changes{}, err
 	}
-	if !slices.ContainsFunc(list, func(cp store.Checkpoint) bool { return cp.ID == id }) {
-		return Changes{}, fmt.Errorf("no checkpoint %d", id)
-	}
-	if _, err := checkpoint(s, fmt.Sprintf("undo to %d", id), s.Root()); err != nil {
-		return Changes{}, err
-	}
-	unlock, err := s.RLock()
+	project, unlock, err := lockAndCompare(projectStore, id)
 	if err != nil {
 		return Changes{}, err
+	}
+	isCovered, err := isCoveredBy(projectStore, safety.ID, project.current)
+	if err != nil {
+		unlock()
+		return Changes{}, err
+	}
+	if !isCovered {
+		// The watcher missed a change, so the safety checkpoint does not hold
+		// everything the restore would overwrite. A full scan does.
+		unlock()
+		if _, err := projectStore.Take(options); err != nil {
+			return Changes{}, err
+		}
+		if project, unlock, err = lockAndCompare(projectStore, id); err != nil {
+			return Changes{}, err
+		}
 	}
 	defer unlock()
-	target, err := s.State(id)
-	if err != nil {
-		return Changes{}, err
-	}
-	changes, current, err := diff(s, target)
-	if err != nil {
-		return Changes{}, err
-	}
-
-	removed := removals(changes, current, target)
-	if err := removeAll(s.Root(), removed); err != nil {
-		return changes, err
-	}
-	for _, rel := range removed {
-		delete(current, rel)
-	}
-	if err := writeAll(s, changes.Write, current, target); err != nil {
-		return changes, err
-	}
-	return changes, restoreDirTimes(s.Root(), slices.Concat(changes.Write, changes.Remove), target)
+	return project.changes, project.apply(projectStore)
 }
 
-func diff(s *store.Store, target map[string]store.Source) (Changes, tree.Listing, error) {
-	ex, err := exclude.New(s.Root())
+// lockAndCompare takes the store's shared lock, so pruning cannot change the
+// stored states during the restore, and plans the restore of checkpoint id.
+func lockAndCompare(projectStore *store.Store, id int) (projectRestore, func(), error) {
+	unlock, err := projectStore.RLock()
 	if err != nil {
-		return Changes{}, nil, err
+		return projectRestore{}, nil, err
 	}
-	current, err := tree.Scan(s.Root(), ex)
+	project, err := compare(projectStore, id)
 	if err != nil {
-		return Changes{}, nil, err
+		unlock()
+		return projectRestore{}, nil, err
 	}
-	var changes Changes
-	for rel, src := range target {
-		if entry, ok := current[rel]; !ok || entry != src.Entry {
-			changes.Write = append(changes.Write, rel)
+	return project, unlock, nil
+}
+
+// isCoveredBy reports whether the project still looks the way checkpoint id
+// recorded it, so everything the restore overwrites can be brought back.
+func isCoveredBy(projectStore *store.Store, id int, current tree.Listing) (bool, error) {
+	saved, err := projectStore.ListingAt(id)
+	if err != nil {
+		return false, err
+	}
+	changed, deleted := tree.Changed(saved, current)
+	return len(changed)+len(deleted) == 0, nil
+}
+
+// projectRestore is a planned restore: the target state, the project as it
+// is, and the changes between them.
+type projectRestore struct {
+	root    string
+	target  map[string]store.Source
+	current tree.Listing
+	changes Changes
+}
+
+// compare plans a restore of checkpoint id. Paths the current exclude rules
+// exclude, and paths inside directories that cannot be read, are left out of
+// both sides, so the restore never touches them.
+func compare(projectStore *store.Store, id int) (projectRestore, error) {
+	root := projectStore.Root()
+	matcher, err := exclude.New(root)
+	if err != nil {
+		return projectRestore{}, err
+	}
+	target, err := projectStore.State(id)
+	if err != nil {
+		return projectRestore{}, err
+	}
+	current, skipped, err := tree.ScanWithSkipped(root, matcher)
+	if err != nil {
+		return projectRestore{}, err
+	}
+	for rel, source := range target {
+		if matcher.Excludes(rel, source.Entry.Kind == tree.Dir) || isInside(rel, skipped.Unreadable) {
+			delete(target, rel)
 		}
 	}
-	for rel := range current {
-		if _, ok := target[rel]; !ok {
-			changes.Remove = append(changes.Remove, rel)
-		}
+	targetListing := make(tree.Listing, len(target))
+	for rel, source := range target {
+		targetListing[rel] = source.Entry
 	}
-	slices.Sort(changes.Write)
-	slices.Sort(changes.Remove)
-	return changes, current, nil
+	written, removed := tree.Changed(current, targetListing)
+	return projectRestore{root: root, target: target, current: current, changes: Changes{Written: written, Removed: removed}}, nil
+}
+
+func isInside(rel string, dirs []string) bool {
+	return slices.ContainsFunc(dirs, func(dir string) bool {
+		return strings.HasPrefix(rel, dir+"/")
+	})
+}
+
+func (p *projectRestore) apply(projectStore *store.Store) error {
+	if err := p.removeAll(p.removals()); err != nil {
+		return err
+	}
+	skipped, err := p.writeAll(projectStore)
+	p.changes.Skipped = skipped
+	if err != nil {
+		return err
+	}
+	return p.restoreDirModeAndTimes(slices.Concat(p.changes.Written, p.changes.Removed))
 }
 
 // removals returns the paths to delete before writing: paths that are not in
 // the target, and paths whose kind changes, such as a file that must become a
 // directory.
-func removals(changes Changes, current tree.Listing, target map[string]store.Source) []string {
-	paths := slices.Clone(changes.Remove)
-	for _, rel := range changes.Write {
-		if entry, ok := current[rel]; ok && entry.Kind != target[rel].Entry.Kind {
+func (p *projectRestore) removals() []string {
+	paths := slices.Clone(p.changes.Removed)
+	for _, rel := range p.changes.Written {
+		if entry, ok := p.current[rel]; ok && entry.Kind != p.target[rel].Entry.Kind {
 			paths = append(paths, rel)
+			delete(p.current, rel)
 		}
 	}
 	return paths
 }
 
-// removeAll deletes paths, deepest first. If a directory still contains
-// excluded files, it is left in place.
-func removeAll(root string, paths []string) error {
+// removeAll deletes paths, deepest first. A directory that still holds
+// excluded files is left in place.
+func (p *projectRestore) removeAll(paths []string) error {
 	slices.SortFunc(paths, func(a, b string) int { return depth(b) - depth(a) })
 	for _, rel := range paths {
-		err := os.Remove(filepath.Join(root, filepath.FromSlash(rel)))
+		full := p.path(rel)
+		if err := makeParentWritable(full); err != nil {
+			return err
+		}
+		err := os.Remove(full)
 		if err == nil || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTEMPTY) {
 			continue
 		}
@@ -135,78 +195,73 @@ func removeAll(root string, paths []string) error {
 	return nil
 }
 
-// writeAll writes paths from target, parents first. A directory that is missing
-// from the project and whose whole content is unchanged since the base is
-// cloned in one call.
-func writeAll(s *store.Store, paths []string, current tree.Listing, target map[string]store.Source) error {
-	root := s.Root()
-	paths = slices.Clone(paths)
+// writeAll writes the changed paths from the target, parents first. A
+// directory that is missing from the project and whose whole content is
+// unchanged since the base is cloned in one call. It returns the paths it
+// cannot recreate.
+func (p *projectRestore) writeAll(projectStore *store.Store) (skipped []string, err error) {
+	paths := slices.Clone(p.changes.Written)
 	slices.SortStableFunc(paths, func(a, b string) int { return depth(a) - depth(b) })
-	whole, err := wholeDirs(s, paths, current, target)
+	clonable, err := p.clonableDirs(projectStore, paths)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	written := map[string]bool{}
+	isWritten := map[string]bool{}
 	for _, rel := range paths {
-		if written[path.Dir(rel)] && rel != "." {
-			written[rel] = true
+		if rel != "." && isWritten[path.Dir(rel)] {
+			isWritten[rel] = true
 			continue
 		}
-		src := target[rel]
-		full := filepath.Join(root, filepath.FromSlash(rel))
-		_, exists := current[rel]
-		switch src.Entry.Kind {
-		case tree.Dir:
-			if whole[rel] {
-				if err := s.Clone(src.Path, full); err != nil {
-					return err
-				}
-				written[rel] = true
-				continue
-			}
-			if err := os.MkdirAll(full, 0o700); err != nil {
-				return err
-			}
-		case tree.File, tree.Symlink:
-			if exists {
-				err = replace(s, src.Path, full)
-			} else {
-				err = s.Clone(src.Path, full)
-			}
-			if err != nil {
-				return err
+		source, full := p.target[rel], p.path(rel)
+		if rel != "." {
+			if err := makeParentWritable(full); err != nil {
+				return skipped, err
 			}
 		}
+		switch {
+		case clonable[rel]:
+			err = projectStore.ExtractBaseDir(rel, full)
+			isWritten[rel] = true
+		case source.Entry.Kind == tree.Dir:
+			err = os.MkdirAll(full, 0o700)
+		case source.Entry.Kind == tree.File || source.Entry.Kind == tree.Symlink:
+			err = projectStore.Extract(rel, source, full)
+		case source.Entry.Mode&fs.ModeNamedPipe != 0:
+			err = syscall.Mkfifo(full, uint32(source.Entry.Mode.Perm()))
+		default:
+			skipped = append(skipped, rel)
+		}
+		if err != nil {
+			return skipped, err
+		}
 	}
-	return nil
+	return skipped, nil
 }
 
-// wholeDirs returns the directories in paths that are missing from the
+// clonableDirs returns the directories in paths that are missing from the
 // project and can be cloned from the base as they are: everything inside them
 // at the checkpoint comes from the base, and nothing was deleted from them
 // since.
-func wholeDirs(s *store.Store, paths []string, current tree.Listing, target map[string]store.Source) (map[string]bool, error) {
+func (p *projectRestore) clonableDirs(projectStore *store.Store, paths []string) (map[string]bool, error) {
 	candidates := map[string]bool{}
 	for _, rel := range paths {
-		if _, exists := current[rel]; !exists && rel != "." && target[rel].Entry.Kind == tree.Dir {
+		if _, exists := p.current[rel]; !exists && rel != "." && p.target[rel].Entry.Kind == tree.Dir {
 			candidates[rel] = true
 		}
 	}
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	base, err := s.BaseListing()
+	base, err := projectStore.BaseListing()
 	if err != nil {
 		return nil, err
 	}
-	baseDir := s.BaseDir()
 	inTarget, inBase := map[string]int{}, map[string]int{}
-	for rel, src := range target {
-		fromBase := src.Path == filepath.Join(baseDir, filepath.FromSlash(rel))
+	for rel, source := range p.target {
 		for dir := path.Dir(rel); dir != "."; dir = path.Dir(dir) {
 			if candidates[dir] {
 				inTarget[dir]++
-				if !fromBase {
+				if source.Layer != 0 {
 					candidates[dir] = false
 				}
 			}
@@ -219,35 +274,23 @@ func wholeDirs(s *store.Store, paths []string, current tree.Listing, target map[
 			}
 		}
 	}
-	whole := map[string]bool{}
-	for dir, ok := range candidates {
-		if ok && base[dir].Kind == tree.Dir && inTarget[dir] == inBase[dir] {
-			whole[dir] = true
+	clonable := map[string]bool{}
+	for dir, isCandidate := range candidates {
+		if isCandidate && base[dir].Kind == tree.Dir && inTarget[dir] == inBase[dir] {
+			clonable[dir] = true
 		}
 	}
-	return whole, nil
+	return clonable, nil
 }
 
-// replace clones src next to dst and renames the clone into place. A clone
-// cannot overwrite an existing path, so this is how dst gets replaced.
-func replace(s *store.Store, src, dst string) error {
-	tmp := dst + ".undo-tmp"
-	if err := os.RemoveAll(tmp); err != nil {
-		return err
-	}
-	if err := s.Clone(src, tmp); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dst)
-}
-
-// restoreDirTimes sets the mode and times of every directory in paths, and of
-// every directory that holds one of paths, deepest first. Writing or removing
-// a path changes its directory's modification time, so this has to come last.
-func restoreDirTimes(root string, paths []string, target map[string]store.Source) error {
+// restoreDirModeAndTimes sets the mode and times of every directory in paths,
+// and of every directory that holds one of paths, deepest first. Writing or
+// removing a path changes its directory's modification time, and the restore
+// may have made a read-only directory writable, so this has to come last.
+func (p *projectRestore) restoreDirModeAndTimes(paths []string) error {
 	dirs := map[string]bool{}
 	for _, rel := range paths {
-		if target[rel].Entry.Kind == tree.Dir {
+		if p.target[rel].Entry.Kind == tree.Dir {
 			dirs[rel] = true
 		}
 		if rel != "." {
@@ -257,23 +300,43 @@ func restoreDirTimes(root string, paths []string, target map[string]store.Source
 	sorted := slices.Collect(maps.Keys(dirs))
 	slices.SortFunc(sorted, func(a, b string) int { return depth(b) - depth(a) })
 	for _, rel := range sorted {
-		entry, ok := target[rel]
-		if !ok || entry.Entry.Kind != tree.Dir {
+		source, ok := p.target[rel]
+		if !ok || source.Entry.Kind != tree.Dir {
 			continue
 		}
-		if err := setMeta(filepath.Join(root, filepath.FromSlash(rel)), entry.Entry); err != nil {
+		if err := setModeAndTimes(p.path(rel), source.Entry); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func setMeta(path string, entry tree.Entry) error {
-	if err := os.Chmod(path, entry.Mode&(fs.ModePerm|fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky)); err != nil {
+func (p *projectRestore) path(rel string) string {
+	return filepath.Join(p.root, filepath.FromSlash(rel))
+}
+
+// makeParentWritable lets the restore add or remove path in its directory.
+// The directory's recorded mode is set again at the end.
+func makeParentWritable(path string) error {
+	parent := filepath.Dir(path)
+	info, err := os.Lstat(parent)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0o300 == 0o300 {
+		return nil
+	}
+	return os.Chmod(parent, info.Mode().Perm()|0o300)
+}
+
+func setModeAndTimes(path string, entry tree.Entry) error {
+	if err := os.Chmod(path, permissionBits(entry.Mode)); err != nil {
 		return err
 	}
-	mtime := time.Unix(0, entry.ModTime)
-	return os.Chtimes(path, mtime, mtime)
+	modTime := time.Unix(0, entry.ModTime)
+	return os.Chtimes(path, modTime, modTime)
+}
+
+// permissionBits returns the part of mode that chmod sets.
+func permissionBits(mode fs.FileMode) fs.FileMode {
+	return mode & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky)
 }
 
 func depth(rel string) int {

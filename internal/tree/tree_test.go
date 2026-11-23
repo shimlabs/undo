@@ -14,7 +14,7 @@ import (
 	"github.com/shimlabs/undo/internal/exclude"
 )
 
-func write(t *testing.T, path, content string) {
+func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -26,33 +26,33 @@ func write(t *testing.T, path, content string) {
 
 func scan(t *testing.T, root string) Listing {
 	t.Helper()
-	m, err := exclude.New(root)
+	matcher, err := exclude.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := Scan(root, m)
+	listing, err := Scan(root, matcher)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return l
+	return listing
 }
 
 func TestScanSkipsExcluded(t *testing.T) {
 	root := t.TempDir()
-	write(t, filepath.Join(root, "src", "main.go"), "package main")
-	write(t, filepath.Join(root, "node_modules", "left-pad", "index.js"), "")
+	writeFile(t, filepath.Join(root, "src", "main.go"), "package main")
+	writeFile(t, filepath.Join(root, "node_modules", "left-pad", "index.js"), "")
 
-	l := scan(t, root)
+	listing := scan(t, root)
 
-	if _, ok := l["src/main.go"]; !ok {
+	if _, ok := listing["src/main.go"]; !ok {
 		t.Fatal("src/main.go missing from listing")
 	}
-	for path := range l {
+	for path := range listing {
 		if path == "node_modules" || strings.HasPrefix(path, "node_modules/") {
 			t.Fatalf("excluded path %q in listing", path)
 		}
 	}
-	if l["."].Kind != Dir {
+	if listing["."].Kind != Dir {
 		t.Fatal("root is not recorded as a directory")
 	}
 }
@@ -60,18 +60,18 @@ func TestScanSkipsExcluded(t *testing.T) {
 func TestScanRecordsSymlinkWithoutFollowing(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	write(t, filepath.Join(outside, "secret.txt"), "x")
+	writeFile(t, filepath.Join(outside, "secret.txt"), "x")
 	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
 
-	l := scan(t, root)
+	listing := scan(t, root)
 
-	e, ok := l["link"]
-	if !ok || e.Kind != Symlink || e.Link != outside {
-		t.Fatalf("link entry = %+v, want symlink to %q", e, outside)
+	entry, ok := listing["link"]
+	if !ok || entry.Kind != Symlink || entry.Link != outside {
+		t.Fatalf("link entry = %+v, want symlink to %q", entry, outside)
 	}
-	if _, ok := l["link/secret.txt"]; ok {
+	if _, ok := listing["link/secret.txt"]; ok {
 		t.Fatal("scan followed a symlink")
 	}
 }
@@ -79,12 +79,12 @@ func TestScanRecordsSymlinkWithoutFollowing(t *testing.T) {
 func TestChangedDetectsCpPreservedTimes(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "a.txt")
-	write(t, path, "aaaa")
+	writeFile(t, path, "aaaa")
 	before := scan(t, root)
 
 	info, _ := os.Stat(path)
 	time.Sleep(10 * time.Millisecond)
-	write(t, path, "bbbb")
+	writeFile(t, path, "bbbb")
 	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
@@ -98,8 +98,8 @@ func TestChangedDetectsCpPreservedTimes(t *testing.T) {
 
 func TestChangedReportsDeleted(t *testing.T) {
 	root := t.TempDir()
-	write(t, filepath.Join(root, "keep.txt"), "k")
-	write(t, filepath.Join(root, "gone.txt"), "g")
+	writeFile(t, filepath.Join(root, "keep.txt"), "k")
+	writeFile(t, filepath.Join(root, "gone.txt"), "g")
 	before := scan(t, root)
 
 	if err := os.Remove(filepath.Join(root, "gone.txt")); err != nil {
@@ -121,74 +121,101 @@ func TestChangedReportsDeleted(t *testing.T) {
 func buildTree(tb testing.TB, dirs, files int) string {
 	tb.Helper()
 	root := tb.TempDir()
-	for d := range dirs {
-		dir := filepath.Join(root, fmt.Sprintf("pkg%d", d%7), fmt.Sprintf("mod%d", d))
+	for i := range dirs {
+		dir := filepath.Join(root, fmt.Sprintf("pkg%d", i%7), fmt.Sprintf("mod%d", i))
 		if err := os.MkdirAll(filepath.Join(dir, "node_modules", "dep"), 0o755); err != nil {
 			tb.Fatal(err)
 		}
 		os.WriteFile(filepath.Join(dir, "node_modules", "dep", "index.js"), nil, 0o644)
 		os.Symlink("../shared", filepath.Join(dir, "link"))
-		for f := range files {
-			os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.go", f)), []byte("package x"), 0o644)
+		for j := range files {
+			os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.go", j)), []byte("package x"), 0o644)
 		}
 	}
 	return root
 }
 
-func walkScan(t *testing.T, root string, ex *exclude.Matcher) (Listing, []string) {
+func walkScan(t *testing.T, root string, matcher *exclude.Matcher) (Listing, []string) {
 	t.Helper()
 	listing := Listing{}
 	var excluded []string
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			t.Fatal(err)
 		}
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
-		if rel != "." && ex.Match(rel, d.IsDir()) {
+		if rel != "." && matcher.Match(rel, entry.IsDir()) {
 			excluded = append(excluded, rel)
-			if d.IsDir() {
+			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		entry, err := Stat(path)
+		stat, err := Stat(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		listing[rel] = entry
+		listing[rel] = stat
 		return nil
 	})
 	slices.Sort(excluded)
 	return listing, excluded
 }
 
-func TestScanAllMatchesWalk(t *testing.T) {
+func TestScanWithSkippedMatchesWalkDir(t *testing.T) {
 	root := buildTree(t, 60, 20)
-	ex, err := exclude.New(root)
+	matcher, err := exclude.New(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	listing, excluded, err := ScanWithExcluded(root, ex)
+	listing, skipped, err := ScanWithSkipped(root, matcher)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slices.Sort(excluded)
 
-	wantListing, wantExcluded := walkScan(t, root, ex)
+	wantListing, wantExcluded := walkScan(t, root, matcher)
 	if !maps.Equal(listing, wantListing) {
 		changed, deleted := Changed(wantListing, listing)
 		t.Fatalf("listing differs: changed %v, deleted %v", changed, deleted)
 	}
-	if !slices.Equal(excluded, wantExcluded) {
-		t.Fatalf("excluded = %v, want %v", excluded, wantExcluded)
+	if !slices.Equal(skipped.Excluded, wantExcluded) {
+		t.Fatalf("excluded = %v, want %v", skipped.Excluded, wantExcluded)
+	}
+}
+
+func TestScanSkipsUnreadableDirectories(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every directory")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.txt"), "a")
+	writeFile(t, filepath.Join(root, "pgdata", "base", "1"), "rows")
+	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
+	matcher, _ := exclude.New(root)
+
+	listing, skipped, err := ScanWithSkipped(root, matcher)
+	if err != nil {
+		t.Fatalf("one unreadable directory failed the whole scan: %v", err)
+	}
+	if _, ok := listing["a.txt"]; !ok {
+		t.Fatal("a.txt missing from listing")
+	}
+	if entry := listing["pgdata"]; entry.Kind != Dir {
+		t.Fatalf("pgdata entry = %+v, want the directory itself", entry)
+	}
+	if !slices.Equal(skipped.Unreadable, []string{"pgdata"}) {
+		t.Fatalf("unreadable = %v, want [pgdata]", skipped.Unreadable)
 	}
 }
 
 func TestScanMissingRoot(t *testing.T) {
-	ex, _ := exclude.New(t.TempDir())
-	listing, err := Scan(filepath.Join(t.TempDir(), "gone"), ex)
+	matcher, _ := exclude.New(t.TempDir())
+	listing, err := Scan(filepath.Join(t.TempDir(), "gone"), matcher)
 	if err != nil || len(listing) != 0 {
 		t.Fatalf("Scan = %v, %v; want an empty listing", listing, err)
 	}
@@ -196,9 +223,9 @@ func TestScanMissingRoot(t *testing.T) {
 
 func BenchmarkScan(b *testing.B) {
 	root := buildTree(b, 500, 20)
-	ex, _ := exclude.New(root)
+	matcher, _ := exclude.New(root)
 	for b.Loop() {
-		if _, err := Scan(root, ex); err != nil {
+		if _, err := Scan(root, matcher); err != nil {
 			b.Fatal(err)
 		}
 	}

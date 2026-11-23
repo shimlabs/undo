@@ -1,6 +1,6 @@
 //go:build darwin || linux
 
-package watch
+package fsnotify
 
 import (
 	"os"
@@ -26,8 +26,8 @@ func (c *collector) paths() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var paths []string
-	for _, e := range c.events {
-		paths = append(paths, e.Path)
+	for _, event := range c.events {
+		paths = append(paths, event.Path)
 	}
 	return paths
 }
@@ -38,7 +38,7 @@ func (c *collector) waitFor(t *testing.T, marker string) []string {
 	if err := os.WriteFile(marker, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(markerTimeout)
+	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		paths := c.paths()
 		if i := slices.Index(paths, marker); i >= 0 {
@@ -52,25 +52,25 @@ func (c *collector) waitFor(t *testing.T, marker string) []string {
 
 func startCollecting(t *testing.T, root string) *collector {
 	t.Helper()
-	var c collector
-	stream, err := Start([]string{root}, nil, c.add)
+	var collected collector
+	stream, err := NewStream([]string{root}, nil, collected.add)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(stream.Close)
-	return &c
+	return &collected
 }
 
 func TestStreamDeliversWritesBeforeLaterMarker(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
-	c := startCollecting(t, root)
+	collected := startCollecting(t, root)
 
 	path := filepath.Join(root, "a.txt")
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if before := c.waitFor(t, filepath.Join(root, "marker")); !slices.Contains(before, path) {
+	if before := collected.waitFor(t, filepath.Join(root, "marker")); !slices.Contains(before, path) {
 		t.Fatalf("events before marker = %v, want %s", before, path)
 	}
 }
@@ -80,12 +80,12 @@ func TestStreamDeliversDeletesBeforeLaterMarker(t *testing.T) {
 	nested := filepath.Join(root, "src", "lib", "x.go")
 	os.MkdirAll(filepath.Dir(nested), 0o755)
 	os.WriteFile(nested, []byte("x"), 0o644)
-	c := startCollecting(t, root)
-	c.waitFor(t, filepath.Join(root, "ready"))
+	collected := startCollecting(t, root)
+	collected.waitFor(t, filepath.Join(root, "ready"))
 
 	os.RemoveAll(filepath.Join(root, "src"))
 
-	before := c.waitFor(t, filepath.Join(root, "marker"))
+	before := collected.waitFor(t, filepath.Join(root, "marker"))
 	if !slices.Contains(before, nested) || !slices.Contains(before, filepath.Join(root, "src")) {
 		t.Fatalf("events before marker = %v", before)
 	}
@@ -94,7 +94,7 @@ func TestStreamDeliversDeletesBeforeLaterMarker(t *testing.T) {
 func TestStreamCloseWhileEventsArrive(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	for round := range 50 {
-		stream, err := Start([]string{root}, nil, func([]Event) {})
+		stream, err := NewStream([]string{root}, nil, func([]Event) {})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,15 +108,15 @@ func TestStreamCloseWhileEventsArrive(t *testing.T) {
 
 func TestStreamSeesFilesInNewDirectories(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
-	c := startCollecting(t, root)
+	collected := startCollecting(t, root)
 
 	nested := filepath.Join(root, "a", "b", "c", "f.txt")
 	os.MkdirAll(filepath.Dir(nested), 0o755)
 	os.WriteFile(nested, []byte("x"), 0o644)
-	c.waitFor(t, filepath.Join(root, "ready"))
+	collected.waitFor(t, filepath.Join(root, "ready"))
 	os.WriteFile(nested, []byte("changed"), 0o644)
 
-	if before := c.waitFor(t, filepath.Join(root, "marker")); !slices.Contains(before, nested) {
+	if before := collected.waitFor(t, filepath.Join(root, "marker")); !slices.Contains(before, nested) {
 		t.Fatalf("events before marker = %v, want %s", before, nested)
 	}
 }
@@ -124,8 +124,8 @@ func TestStreamSeesFilesInNewDirectories(t *testing.T) {
 func TestStreamWatchesRecreatedRoot(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	markers, _ := filepath.EvalSymlinks(t.TempDir())
-	var c collector
-	stream, err := Start([]string{root, markers}, nil, c.add)
+	var collected collector
+	stream, err := NewStream([]string{root, markers}, nil, collected.add)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,11 +133,11 @@ func TestStreamWatchesRecreatedRoot(t *testing.T) {
 
 	os.RemoveAll(root)
 	os.Mkdir(root, 0o755)
-	c.waitFor(t, filepath.Join(markers, "recreated"))
+	collected.waitFor(t, filepath.Join(markers, "recreated"))
 
 	path := filepath.Join(root, "a.txt")
 	os.WriteFile(path, []byte("x"), 0o644)
-	if before := c.waitFor(t, filepath.Join(markers, "written")); !slices.Contains(before, path) {
+	if before := collected.waitFor(t, filepath.Join(markers, "written")); !slices.Contains(before, path) {
 		t.Fatalf("events before marker = %v, want %s", before, path)
 	}
 }

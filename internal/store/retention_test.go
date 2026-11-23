@@ -15,7 +15,7 @@ import (
 	"github.com/shimlabs/undo/internal/store"
 )
 
-func newStore(t *testing.T) (*store.Store, string) {
+func newProject(t *testing.T) (*store.Store, string) {
 	t.Helper()
 	t.Setenv("UNDO_HOME", t.TempDir())
 	root, _ := filepath.EvalSymlinks(t.TempDir())
@@ -26,7 +26,7 @@ func newStore(t *testing.T) (*store.Store, string) {
 	return s, root
 }
 
-func put(t *testing.T, path string, data []byte) {
+func writeFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -36,13 +36,13 @@ func put(t *testing.T, path string, data []byte) {
 
 func fingerprint(root string) map[string]string {
 	prints := map[string]string{}
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)
 		data, _ := os.ReadFile(path)
-		prints[rel] = fmt.Sprintf("%v %x", d.IsDir(), sha256.Sum256(data))
+		prints[rel] = fmt.Sprintf("%v %x", entry.IsDir(), sha256.Sum256(data))
 		return nil
 	})
 	return prints
@@ -54,18 +54,18 @@ func history(t *testing.T, s *store.Store, root string) []map[string]string {
 	t.Helper()
 	var states []map[string]string
 	steps := []func(){
-		func() { put(t, filepath.Join(root, "a.txt"), []byte("one")) },
-		func() { put(t, filepath.Join(root, "dir", "b.txt"), []byte("two")) },
+		func() { writeFile(t, filepath.Join(root, "a.txt"), []byte("one")) },
+		func() { writeFile(t, filepath.Join(root, "dir", "b.txt"), []byte("two")) },
 		func() { os.Remove(filepath.Join(root, "a.txt")) },
 		func() {
 			os.RemoveAll(filepath.Join(root, "dir"))
-			put(t, filepath.Join(root, "dir"), []byte("now a file"))
+			writeFile(t, filepath.Join(root, "dir"), []byte("now a file"))
 		},
 	}
 	for i, step := range steps {
 		step()
 		states = append(states, fingerprint(root))
-		if _, err := s.Take(fmt.Sprintf("step %d", i+1), root); err != nil {
+		if _, err := s.Take(store.CheckpointOptions{Label: fmt.Sprintf("step %d", i+1), Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -73,7 +73,7 @@ func history(t *testing.T, s *store.Store, root string) []map[string]string {
 }
 
 func TestPruneMergesOldestIntoBase(t *testing.T) {
-	s, root := newStore(t)
+	s, root := newProject(t)
 	states := history(t, s, root)
 
 	merged, err := s.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 2, MaxBytes: 1 << 40})
@@ -98,7 +98,7 @@ func TestPruneMergesOldestIntoBase(t *testing.T) {
 }
 
 func TestPruneByAgeKeepsLatest(t *testing.T) {
-	s, root := newStore(t)
+	s, root := newProject(t)
 	history(t, s, root)
 
 	if _, err := s.Prune(time.Now().Add(8*24*time.Hour), store.DefaultLimits); err != nil {
@@ -111,10 +111,10 @@ func TestPruneByAgeKeepsLatest(t *testing.T) {
 }
 
 func TestUsageCountsOnlyUnsharedData(t *testing.T) {
-	s, root := newStore(t)
+	s, root := newProject(t)
 	data := bytes.Repeat([]byte("x"), 4<<20)
-	put(t, filepath.Join(root, "big.bin"), data)
-	if _, err := s.Take("first", root); err != nil {
+	writeFile(t, filepath.Join(root, "big.bin"), data)
+	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,7 +126,7 @@ func TestUsageCountsOnlyUnsharedData(t *testing.T) {
 		t.Fatalf("usage %d bytes while the base shares all data with the project", shared)
 	}
 
-	put(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte("y"), 4<<20))
+	writeFile(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte("y"), 4<<20))
 	private, err := s.Usage()
 	if err != nil {
 		t.Fatal(err)
@@ -137,16 +137,16 @@ func TestUsageCountsOnlyUnsharedData(t *testing.T) {
 }
 
 func TestPruneBySizeMergesUntilUnder(t *testing.T) {
-	s, root := newStore(t)
+	s, root := newProject(t)
 	for _, fill := range []string{"a", "b", "c"} {
-		put(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte(fill), 2<<20))
-		if _, err := s.Take("write "+fill, root); err != nil {
+		writeFile(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte(fill), 2<<20))
+		if _, err := s.Take(store.CheckpointOptions{Label: "write " + fill, Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	put(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte("d"), 2<<20))
+	writeFile(t, filepath.Join(root, "big.bin"), bytes.Repeat([]byte("d"), 2<<20))
 	want := fingerprint(root)
-	if _, err := s.Take("write d", root); err != nil {
+	if _, err := s.Take(store.CheckpointOptions{Label: "write d", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := s.Usage()

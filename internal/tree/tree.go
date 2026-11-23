@@ -28,7 +28,9 @@ const (
 	Other
 )
 
-// Entry describes a path at the time it was listed.
+// Entry describes a path at the time it was listed. Stores keep entries on
+// disk. Mode holds fs.FileMode bits, which Go's compatibility promise keeps
+// stable, so stored entries stay readable by later versions.
 type Entry struct {
 	Kind       Kind        `json:"kind"`
 	Mode       fs.FileMode `json:"mode"`
@@ -43,50 +45,66 @@ type Entry struct {
 // to the project root, and the root itself is ".".
 type Listing map[string]Entry
 
-// Scan lists every path under root that ex does not exclude. Symlinks are
-// recorded but never followed.
-func Scan(root string, ex *exclude.Matcher) (Listing, error) {
-	listing, _, err := ScanWithExcluded(root, ex)
+// Skipped lists the paths a scan did not go into.
+type Skipped struct {
+	// Excluded are the paths the matcher excludes.
+	Excluded []string
+	// Unreadable are the directories undo has no permission to list, such as
+	// a database folder owned by another user. Their own entries are in the
+	// listing, but nothing inside them is.
+	Unreadable []string
+}
+
+// Scan lists every path under root that matcher does not exclude. Symlinks
+// are recorded but never followed. Directories it cannot read are left out.
+func Scan(root string, matcher *exclude.Matcher) (Listing, error) {
+	listing, _, err := ScanWithSkipped(root, matcher)
 	return listing, err
 }
 
-// ScanWithExcluded works like Scan and also returns the excluded paths it
-// skipped. It does not go into excluded directories.
-func ScanWithExcluded(root string, ex *exclude.Matcher) (Listing, []string, error) {
+// ScanWithSkipped works like Scan and also returns the paths it skipped. It
+// does not go into excluded or unreadable directories.
+func ScanWithSkipped(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
 	entry, err := Stat(root)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Listing{}, nil, nil
+		return Listing{}, Skipped{}, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, Skipped{}, err
 	}
 	listing := Listing{".": entry}
 	if entry.Kind != Dir {
-		return listing, nil, nil
+		return listing, Skipped{}, nil
 	}
 	var mu sync.Mutex
-	var excluded []string
-	err = walk.Dirs(dir{path: root, rel: "."}, walk.Workers, func(d dir) ([]dir, error) {
-		children, err := os.ReadDir(d.path)
+	var skipped Skipped
+	err = walk.Dirs(directory{path: root, rel: "."}, func(dir directory) ([]directory, error) {
+		children, err := os.ReadDir(dir.path)
 		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		if errors.Is(err, fs.ErrPermission) {
+			mu.Lock()
+			skipped.Unreadable = append(skipped.Unreadable, dir.rel)
+			mu.Unlock()
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
 		found := make(Listing, len(children))
-		var skipped []string
-		var subdirs []dir
+		var excluded []string
+		var subdirs []directory
 		for _, child := range children {
 			rel := child.Name()
-			if d.rel != "." {
-				rel = d.rel + "/" + child.Name()
+			if dir.rel != "." {
+				rel = dir.rel + "/" + child.Name()
 			}
-			if ex.Match(rel, child.IsDir()) {
-				skipped = append(skipped, rel)
+			if matcher.Match(rel, child.IsDir()) {
+				excluded = append(excluded, rel)
 				continue
 			}
-			path := filepath.Join(d.path, child.Name())
+			path := filepath.Join(dir.path, child.Name())
 			entry, err := Stat(path)
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
@@ -96,22 +114,24 @@ func ScanWithExcluded(root string, ex *exclude.Matcher) (Listing, []string, erro
 			}
 			found[rel] = entry
 			if entry.Kind == Dir {
-				subdirs = append(subdirs, dir{path: path, rel: rel})
+				subdirs = append(subdirs, directory{path: path, rel: rel})
 			}
 		}
 		mu.Lock()
 		maps.Copy(listing, found)
-		excluded = append(excluded, skipped...)
+		skipped.Excluded = append(skipped.Excluded, excluded...)
 		mu.Unlock()
 		return subdirs, nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, Skipped{}, err
 	}
-	return listing, excluded, nil
+	slices.Sort(skipped.Excluded)
+	slices.Sort(skipped.Unreadable)
+	return listing, skipped, nil
 }
 
-type dir struct {
+type directory struct {
 	path string
 	rel  string
 }
@@ -123,17 +143,17 @@ func Stat(path string) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	st, ok := info.Sys().(*syscall.Stat_t)
+	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return Entry{}, &fs.PathError{Op: "stat", Path: path, Err: errors.ErrUnsupported}
 	}
-	modTime, changeTime := statTimes(st)
+	modTime, changeTime := statTimes(stat)
 	entry := Entry{
 		Mode:       info.Mode(),
 		Size:       info.Size(),
 		ModTime:    modTime,
 		ChangeTime: changeTime,
-		Inode:      st.Ino,
+		Inode:      stat.Ino,
 	}
 	switch {
 	case info.Mode().IsRegular():
@@ -152,16 +172,16 @@ func Stat(path string) (Entry, error) {
 	return entry, nil
 }
 
-// Changed returns the paths in cur that are new or different from old, and the
-// paths in old that are missing from cur. Both lists are sorted.
-func Changed(old, cur Listing) (changed, deleted []string) {
-	for path, entry := range cur {
+// Changed returns the paths in current that are new or different from old,
+// and the paths in old that are missing from current. Both lists are sorted.
+func Changed(old, current Listing) (changed, deleted []string) {
+	for path, entry := range current {
 		if previous, ok := old[path]; !ok || previous != entry {
 			changed = append(changed, path)
 		}
 	}
 	for path := range old {
-		if _, ok := cur[path]; !ok {
+		if _, ok := current[path]; !ok {
 			deleted = append(deleted, path)
 		}
 	}

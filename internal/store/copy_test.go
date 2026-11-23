@@ -12,13 +12,13 @@ import (
 )
 
 func TestCopyModeRestoresExactly(t *testing.T) {
-	s, root := newStore(t)
+	s, root := newProject(t)
 	if err := s.SetCopyMode(true); err != nil {
 		t.Fatal(err)
 	}
-	put(t, filepath.Join(root, "src", "main.go"), []byte("package main"))
+	writeFile(t, filepath.Join(root, "src", "main.go"), []byte("package main"))
 	want := fingerprint(root)
-	if _, err := s.Take("before", root); err != nil {
+	if _, err := s.Take(store.CheckpointOptions{Label: "before", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.RemoveAll(filepath.Join(root, "src"))
@@ -33,7 +33,7 @@ func TestCopyModeRestoresExactly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reopened.CopyMode() {
+	if !reopened.IsCopyMode() {
 		t.Fatal("copy mode was not saved with the store")
 	}
 }
@@ -52,7 +52,7 @@ func plainProject(t *testing.T) (*store.Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
-	put(t, filepath.Join(root, "main.go"), []byte("package main"))
+	writeFile(t, filepath.Join(root, "main.go"), []byte("package main"))
 	s, err := store.Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func plainProject(t *testing.T) (*store.Store, string) {
 func TestTakeRefusesWithoutClones(t *testing.T) {
 	s, _ := plainProject(t)
 
-	_, err := s.Take("first", s.Root())
+	_, err := s.Take(store.CheckpointOptions{Label: "first", Dir: s.Root()})
 	if !errors.Is(err, store.ErrCloneUnsupported) {
 		t.Fatalf("Take = %v, want ErrCloneUnsupported", err)
 	}
@@ -78,7 +78,7 @@ func TestCopyModeWorksWithoutClones(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := fingerprint(root)
-	if _, err := s.Take("first", root); err != nil {
+	if _, err := s.Take(store.CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(root, "main.go"))
@@ -93,12 +93,12 @@ func TestCopyModeWorksWithoutClones(t *testing.T) {
 func TestTakeRefusesWhenFilesAppearLater(t *testing.T) {
 	s, root := plainProject(t)
 	os.Remove(filepath.Join(root, "main.go"))
-	if _, err := s.Take("empty", root); err != nil {
+	if _, err := s.Take(store.CheckpointOptions{Label: "empty", Dir: root}); err != nil {
 		t.Fatal(err)
 	}
 
-	put(t, filepath.Join(root, "main.go"), []byte("package main"))
-	_, err := s.Take("first file", root)
+	writeFile(t, filepath.Join(root, "main.go"), []byte("package main"))
+	_, err := s.Take(store.CheckpointOptions{Label: "first file", Dir: root})
 	if !errors.Is(err, store.ErrCloneUnsupported) {
 		t.Fatalf("Take = %v, want ErrCloneUnsupported", err)
 	}

@@ -1,4 +1,4 @@
-package watch
+package fsnotify
 
 /*
 #cgo LDFLAGS: -framework CoreServices
@@ -28,7 +28,7 @@ static FSEventStreamRef undoStreamCreate(uintptr_t handle, char **paths, int cou
 }
 
 static dispatch_queue_t undoQueueCreate(void) {
-	return dispatch_queue_create("undo.watch", DISPATCH_QUEUE_SERIAL);
+	return dispatch_queue_create("undo.fsnotify", DISPATCH_QUEUE_SERIAL);
 }
 
 static int undoStreamStart(FSEventStreamRef stream, dispatch_queue_t queue) {
@@ -69,10 +69,11 @@ type Stream struct {
 	handle cgo.Handle
 }
 
-// Start watches the directories in paths and calls onEvents on a background
-// thread with each batch of changes. FSEvents watches whole trees, so the
-// second argument, which tells the Linux stream what not to watch, is not used.
-func Start(paths []string, _ func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
+// NewStream watches the directories in paths and calls onEvents on a
+// background thread with each batch of changes. FSEvents watches whole trees,
+// so the second argument, which tells the Linux stream what not to watch, is
+// not used.
+func NewStream(paths []string, _ func(dir string) bool, onEvents func([]Event)) (*Stream, error) {
 	cPaths := make([]*C.char, len(paths))
 	for i, path := range paths {
 		cPaths[i] = C.CString(path)
@@ -106,7 +107,7 @@ func undoStreamEvents(handle C.uintptr_t, count C.size_t, paths **C.char, flags 
 	flagList := unsafe.Slice(flags, count)
 	events := make([]Event, count)
 	for i := range events {
-		events[i] = Event{Path: C.GoString(pathList[i]), Rescan: flagList[i]&rescanFlags != 0}
+		events[i] = Event{Path: C.GoString(pathList[i]), ShouldRescan: flagList[i]&rescanFlags != 0}
 	}
 	onEvents(events)
 }

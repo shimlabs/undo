@@ -309,3 +309,12 @@ func TestInstallQuotesBinaryPath(t *testing.T) {
 		t.Fatalf("binary path is not quoted:\n%s", data)
 	}
 }
+
+func TestInstallRefusesTemporaryBinary(t *testing.T) {
+	agentHome(t)
+	for _, binary := range []string{filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "undo"), "/tmp/undo"} {
+		if _, err := claude.Install(binary); !errors.Is(err, ErrUnsafeBinary) {
+			t.Errorf("Install(%s) = %v, want ErrUnsafeBinary", binary, err)
+		}
+	}
+}

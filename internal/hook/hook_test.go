@@ -68,6 +68,20 @@ func TestHandleLabelsEachAgentsEvents(t *testing.T) {
 	}
 }
 
+func TestHandleRecordsAgentAndSession(t *testing.T) {
+	agentHome(t)
+	root := newProject(t)
+	event := `{"cwd":"` + root + `","session_id":"abc123","tool_name":"Bash","tool_input":{"command":"ls"}}`
+
+	if err := claude.Handle(strings.NewReader(event), (*store.Store).Take); err != nil {
+		t.Fatal(err)
+	}
+	list := checkpoints(t, root)
+	if len(list) != 1 || list[0].Agent != "claude" || list[0].Session != "abc123" {
+		t.Fatalf("checkpoints = %+v", list)
+	}
+}
+
 func TestHandleFindsProjectFromEnvironment(t *testing.T) {
 	agentHome(t)
 	root := newProject(t)

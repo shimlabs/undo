@@ -2,69 +2,87 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/shimlabs/undo/internal/exclude"
-	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/watch"
 )
 
-func statusCommand(env Env) error {
-	s, err := openStore(env)
+func statusCommand(args []string, env Env) error {
+	parsed, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
-	cps, err := s.List()
+	projectStore, err := openStore(env, parsed)
 	if err != nil {
 		return err
 	}
-	ex, err := exclude.New(s.Root())
+	matcher, err := exclude.New(projectStore.Root())
 	if err != nil {
 		return err
 	}
-	usage, err := s.Usage()
+	diskUsage, err := projectStore.Usage()
 	if err != nil {
 		return err
 	}
-	watcher, err := watch.Status(s)
+	watcher, err := watch.Status(projectStore)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "Project      %s\n", s.Root())
-	fmt.Fprintf(env.Stdout, "Store        %s\n", s.Dir())
-	if len(cps) == 0 {
-		fmt.Fprintln(env.Stdout, "Checkpoints  0")
+	out := env.Stdout
+	fmt.Fprintf(out, "Project      %s\n", printable(projectStore.Root()))
+	fmt.Fprintf(out, "Store        %s\n", printable(projectStore.Dir()))
+	if err := printCheckpoints(out, projectStore); err != nil {
+		return err
+	}
+	if projectStore.IsCopyMode() {
+		fmt.Fprintln(out, "Storage      full copies, because copy mode is on")
 	} else {
-		fmt.Fprintf(env.Stdout, "Checkpoints  %d (oldest %s)\n", len(cps), timeAgo(cps[0].Time))
+		fmt.Fprintln(out, "Storage      clones that share data with the project")
 	}
-	if s.CopyMode() {
-		fmt.Fprintln(env.Stdout, "Storage      full copies, because copy mode is on")
+	fmt.Fprintf(out, "Disk used    %s not shared with the project, limit %s\n", formatBytes(diskUsage), formatBytes(store.DefaultLimits.MaxBytes))
+	if watcher.IsRunning {
+		fmt.Fprintf(out, "Watcher      running, %d checkpoints since it started\n", watcher.CheckpointCount)
 	} else {
-		fmt.Fprintln(env.Stdout, "Storage      clones that share data with the project")
+		fmt.Fprintln(out, "Watcher      not running, so checkpoints scan the project")
 	}
-	fmt.Fprintf(env.Stdout, "Disk used    %s not shared with the project, limit %s\n", formatBytes(usage), formatBytes(store.DefaultLimits.MaxBytes))
-	if watcher.Running {
-		fmt.Fprintln(env.Stdout, "Watcher      running")
+	if agents := installedAgents(); len(agents) > 0 {
+		fmt.Fprintf(out, "Hooks        %s\n", strings.Join(agents, ", "))
 	} else {
-		fmt.Fprintln(env.Stdout, "Watcher      not running, so checkpoints scan the project")
+		fmt.Fprintln(out, "Hooks        none yet, run: undo install <agent>")
 	}
-	var hooks []string
-	for _, agent := range hook.Agents {
-		if agent.IsInstalled() {
-			hooks = append(hooks, agent.Title)
-		}
+	fmt.Fprintf(out, "Excluded     %s\n", strings.Join(matcher.Patterns(), ", "))
+	fmt.Fprintln(out, "Not covered  anything outside this folder: databases, git push, API calls")
+	if line := projectStore.LastError(); line != "" {
+		fmt.Fprintf(out, "Last error   %s\n", printable(line))
 	}
-	if len(hooks) == 0 {
-		fmt.Fprintln(env.Stdout, "Hooks        none yet, run: undo install <agent>")
-	} else {
-		fmt.Fprintf(env.Stdout, "Hooks        %s\n", strings.Join(hooks, ", "))
+	return nil
+}
+
+// printCheckpoints prints how many checkpoints there are and what the latest
+// one could not save.
+func printCheckpoints(out io.Writer, projectStore *store.Store) error {
+	checkpoints, err := projectStore.List()
+	if err != nil {
+		return err
 	}
-	fmt.Fprintf(env.Stdout, "Excluded     %s\n", strings.Join(ex.Patterns(), ", "))
-	fmt.Fprintln(env.Stdout, "Not covered  anything outside this folder: databases, git push, API calls")
-	if line := s.LastError(); line != "" {
-		fmt.Fprintf(env.Stdout, "Last error   %s\n", line)
+	if len(checkpoints) == 0 {
+		fmt.Fprintln(out, "Checkpoints  0")
+		return nil
+	}
+	fmt.Fprintf(out, "Checkpoints  %d (oldest %s)\n", len(checkpoints), timeAgo(checkpoints[0].Time))
+	manifest, err := projectStore.Manifest(checkpoints[len(checkpoints)-1].ID)
+	if err != nil {
+		return err
+	}
+	if len(manifest.Unreadable) > 0 {
+		fmt.Fprintf(out, "Unreadable   %s (undo has no permission to read these, so they are not covered)\n", printable(strings.Join(manifest.Unreadable, ", ")))
+	}
+	if len(manifest.Unstable) > 0 {
+		fmt.Fprintf(out, "Changing     %s (kept changing while they were saved, so the saved copy may be mid-write)\n", printable(strings.Join(manifest.Unstable, ", ")))
 	}
 	return nil
 }
@@ -83,16 +101,16 @@ func formatBytes(size int64) string {
 	return fmt.Sprintf("%.1f %s", value, unit)
 }
 
-func timeAgo(t time.Time) string {
-	d := time.Since(t).Round(time.Second)
+func timeAgo(moment time.Time) string {
+	elapsed := time.Since(moment).Round(time.Second)
 	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds ago", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case elapsed < time.Minute:
+		return fmt.Sprintf("%ds ago", int(elapsed.Seconds()))
+	case elapsed < time.Hour:
+		return fmt.Sprintf("%dm ago", int(elapsed.Minutes()))
+	case elapsed < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(elapsed.Hours()))
 	default:
-		return t.Format("Jan 2 15:04")
+		return moment.Format("Jan 2 15:04")
 	}
 }

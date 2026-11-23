@@ -11,25 +11,26 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/watch"
 )
 
 func checkpointCommand(args []string, env Env) error {
-	f, err := parseFlags(args)
+	parsed, err := parseFlags(args)
 	if err != nil {
 		return err
 	}
-	s, err := openStore(env)
+	projectStore, err := openStore(env, parsed)
 	if err != nil {
 		return err
 	}
-	if f.copy {
-		if err := s.SetCopyMode(true); err != nil {
+	if parsed.isCopyMode {
+		if err := projectStore.SetCopyMode(true); err != nil {
 			return err
 		}
 	}
-	cp, err := takeCheckpoint(s, f.label, env.Dir, env)
+	cp, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: parsed.label, Dir: env.Dir})
 	if err != nil {
 		return err
 	}
@@ -44,11 +45,11 @@ func runCommand(args []string, env Env) error {
 	if len(args) == 0 {
 		return usageError{"run needs a command"}
 	}
-	s, err := openStore(env)
+	projectStore, err := openStore(env, flags{})
 	if err != nil {
 		return err
 	}
-	if _, err := takeCheckpoint(s, strings.Join(args, " "), env.Dir, env); err != nil {
+	if _, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: strings.Join(args, " "), Dir: env.Dir}); err != nil {
 		return err
 	}
 	cmd := exec.Command(args[0], args[1:]...)
@@ -57,24 +58,29 @@ func runCommand(args []string, env Env) error {
 	return cmd.Run()
 }
 
-// takeCheckpoint checkpoints through the project's watcher when one can be started,
-// and by scanning the project otherwise.
-func takeCheckpoint(s *store.Store, label, dir string, env Env) (store.Checkpoint, error) {
-	if env.StartWatcher == nil {
-		return s.Take(label, dir)
+// hookCommand handles one event from an agent. It never fails and never
+// prints, because some agents block the tool when a hook fails or prints. An
+// unknown agent name is handled like any other agent, and Handle logs its
+// failures in the store.
+func hookCommand(args []string, env Env) {
+	defer func() { _ = recover() }()
+	var agent hook.Agent
+	if len(args) > 0 {
+		agent, _ = hook.FindAgent(args[0])
 	}
-	return watch.Checkpoint(s, label, dir, func() error { return env.StartWatcher(s.Root()) })
+	_ = agent.Handle(env.Stdin, env.checkpointer())
 }
 
 func watchCommand(env Env) error {
-	s, err := openStore(env)
+	projectStore, err := openStore(env, flags{})
 	if err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := watch.Serve(ctx, s, watch.Options{Idle: time.Hour, Limits: store.DefaultLimits}); err != nil && !errors.Is(err, watch.ErrRunning) {
-		s.LogError(fmt.Errorf("watcher stopped: %w", err))
+	err = watch.Serve(ctx, projectStore, watch.Options{IdleTimeout: time.Hour, Limits: store.DefaultLimits})
+	if err != nil && !errors.Is(err, watch.ErrRunning) {
+		projectStore.LogError(fmt.Errorf("watcher stopped: %w", err))
 		return err
 	}
 	return nil

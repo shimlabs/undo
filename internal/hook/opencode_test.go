@@ -2,6 +2,8 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +32,20 @@ console.log("done")
 	}
 }
 
+// installPlugin writes the plugin for binary. Install refuses binaries in
+// temporary directories, where the test keeps its fake undo.
+func installPlugin(t *testing.T, binary string) string {
+	t.Helper()
+	path, err := openCode.configPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := openCode.installer.install(path, binary, openCode.Name); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestOpenCodePluginSendsEvent(t *testing.T) {
 	agentHome(t)
 	received := filepath.Join(t.TempDir(), "event.json")
@@ -37,10 +53,7 @@ func TestOpenCodePluginSendsEvent(t *testing.T) {
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncat > '"+received+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	plugin, err := openCode.Install(fake)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plugin := installPlugin(t, fake)
 	project := t.TempDir()
 
 	runPlugin(t, plugin, project, "edit", `{"filePath":"`+project+`/a.go","oldString":"x","newString":"y"}`)
@@ -53,7 +66,7 @@ func TestOpenCodePluginSendsEvent(t *testing.T) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.Cwd != project || event.ToolName != "edit" || event.ToolInput.FilePath != project+"/a.go" {
+	if event.Cwd != project || event.SessionID != "s" || event.ToolName != "edit" || event.ToolInput.FilePath != project+"/a.go" {
 		t.Fatalf("event = %+v", event)
 	}
 }
@@ -63,18 +76,18 @@ func TestOpenCodePluginIgnoresReadOnlyTools(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "event.json")
 	fake := filepath.Join(t.TempDir(), "undo")
 	os.WriteFile(fake, []byte("#!/bin/sh\ncat > '"+received+"'\n"), 0o755)
-	plugin, _ := openCode.Install(fake)
+	plugin := installPlugin(t, fake)
 
 	runPlugin(t, plugin, t.TempDir(), "read", `{"filePath":"/a.go"}`)
 
-	if _, err := os.Stat(received); !os.IsNotExist(err) {
+	if _, err := os.Stat(received); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("undo ran for a tool that does not change files")
 	}
 }
 
 func TestOpenCodePluginNeverBlocks(t *testing.T) {
 	agentHome(t)
-	plugin, _ := openCode.Install(filepath.Join(t.TempDir(), "missing-undo"))
+	plugin := installPlugin(t, filepath.Join(t.TempDir(), "missing-undo"))
 
 	runPlugin(t, plugin, t.TempDir(), "bash", `{"command":"rm -rf build"}`)
 }

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/shimlabs/undo/internal/hook"
@@ -14,14 +12,7 @@ func installCommand(args []string, env Env) error {
 	if err != nil {
 		return err
 	}
-	binary, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
-		binary = resolved
-	}
-	path, err := agent.Install(binary)
+	path, err := agent.Install(env.Executable)
 	if err != nil {
 		return err
 	}
@@ -48,13 +39,20 @@ func agentArg(command string, args []string) (hook.Agent, error) {
 			return agent, nil
 		}
 	}
-	return hook.Agent{}, usageError{fmt.Sprintf("%s supports: %s", command, strings.Join(agentNames(), ", "))}
-}
-
-func agentNames() []string {
 	var names []string
-	for _, agent := range hook.Agents {
+	for _, agent := range hook.Agents() {
 		names = append(names, agent.Name)
 	}
-	return names
+	return hook.Agent{}, usageError{fmt.Sprintf("%s supports: %s", command, strings.Join(names, ", "))}
+}
+
+// installedAgents returns the names of the agents that have undo's hook.
+func installedAgents() []string {
+	var titles []string
+	for _, agent := range hook.Agents() {
+		if agent.IsInstalled() {
+			titles = append(titles, agent.Title)
+		}
+	}
+	return titles
 }

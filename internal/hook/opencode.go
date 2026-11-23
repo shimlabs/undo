@@ -39,6 +39,7 @@ export const UndoPlugin = async ({ directory }) => ({
     const args = output.args ?? {}
     const event = {
       cwd: args.workdir ?? directory,
+      session_id: input.sessionID,
       tool_name: input.tool,
       tool_input: { command: args.command ?? args.patchText, file_path: args.filePath },
     }

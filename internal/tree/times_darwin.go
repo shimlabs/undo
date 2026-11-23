@@ -2,6 +2,6 @@ package tree
 
 import "syscall"
 
-func statTimes(st *syscall.Stat_t) (modTime, changeTime int64) {
-	return st.Mtimespec.Nano(), st.Ctimespec.Nano()
+func statTimes(stat *syscall.Stat_t) (modTime, changeTime int64) {
+	return stat.Mtimespec.Nano(), stat.Ctimespec.Nano()
 }

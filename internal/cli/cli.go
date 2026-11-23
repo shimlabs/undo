@@ -5,12 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode"
 
-	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
+	"github.com/shimlabs/undo/internal/watch"
 )
 
 // Version is set when the binary is built.
@@ -35,6 +40,7 @@ Flags:
   --yes                    restore without asking
   --label <text>           label for undo checkpoint
   --copy                   keep full copies, for filesystems without clones
+  --project <path>         use the project at <path>, even one that was deleted
 `
 
 // Env holds the directory and streams a command works with.
@@ -43,14 +49,32 @@ type Env struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
-	// StartWatcher starts a background watcher for the project at root. When
-	// it is nil, checkpoints scan the project instead.
-	StartWatcher func(root string) error
+	// Executable is the path of the undo binary, which installed hooks run.
+	Executable string
+	// StartWatcher starts a background watcher for the project at root and
+	// returns a channel that receives its error if it exits. When it is nil,
+	// checkpoints scan the project instead.
+	StartWatcher func(root string) (exited <-chan error, err error)
 }
 
-type usageError struct{ msg string }
+// checkpointer takes checkpoints through the project's watcher when one can
+// be started, and by scanning the project otherwise.
+func (env Env) checkpointer() store.Checkpointer {
+	return func(projectStore *store.Store, options store.CheckpointOptions) (store.Checkpoint, error) {
+		if env.StartWatcher == nil {
+			return projectStore.Take(options)
+		}
+		return watch.Checkpoint(projectStore, options, func() (<-chan error, error) {
+			return env.StartWatcher(projectStore.Root())
+		})
+	}
+}
 
-func (e usageError) Error() string { return e.msg }
+type usageError struct{ message string }
+
+func (e usageError) Error() string { return e.message }
+
+var errDeclined = errors.New("declined")
 
 // Run runs the command in args and returns the exit code for the process.
 func Run(args []string, env Env) int {
@@ -62,23 +86,21 @@ func Run(args []string, env Env) int {
 		return exit.ExitCode()
 	}
 	if usageErr, ok := errors.AsType[usageError](err); ok {
-		fmt.Fprintf(env.Stderr, "undo: %s\n\n%s", usageErr.msg, usage)
+		fmt.Fprintf(env.Stderr, "undo: %s\n\n%s", usageErr.message, usage)
 		return 2
 	}
 	switch {
 	case errors.Is(err, errDeclined):
-		return 1
 	case errors.Is(err, store.ErrCloneUnsupported):
 		fmt.Fprintf(env.Stderr, "undo: %s, so it cannot protect this project cheaply.\n"+
 			"Run 'undo checkpoint --copy' once to keep full copies instead. They take as much disk as the project.\n", err)
-		return 1
+	case errors.Is(err, store.ErrNotProject):
+		fmt.Fprintf(env.Stderr, "undo: %s.\nRun undo, or start your agent, inside a project folder.\n", err)
 	default:
 		fmt.Fprintf(env.Stderr, "undo: %s\n", err)
-		return 1
 	}
+	return 1
 }
-
-var errDeclined = errors.New("declined")
 
 func dispatch(args []string, env Env) error {
 	command, rest := "", args
@@ -89,7 +111,7 @@ func dispatch(args []string, env Env) error {
 	case "":
 		return undoCommand(rest, env)
 	case "list":
-		return listCommand(env)
+		return listCommand(rest, env)
 	case "diff":
 		return diffCommand(rest, env)
 	case "to":
@@ -99,23 +121,13 @@ func dispatch(args []string, env Env) error {
 	case "checkpoint":
 		return checkpointCommand(rest, env)
 	case "status":
-		return statusCommand(env)
+		return statusCommand(rest, env)
 	case "install":
 		return installCommand(rest, env)
 	case "uninstall":
 		return uninstallCommand(rest, env)
 	case "hook":
-		checkpoint := func(s *store.Store, label, dir string) (store.Checkpoint, error) {
-			return takeCheckpoint(s, label, dir, env)
-		}
-		// A hook must never fail, because some agents block the tool when it
-		// does. An unknown agent name is handled like any other agent.
-		var agent hook.Agent
-		if len(rest) > 0 {
-			agent, _ = hook.FindAgent(rest[0])
-		}
-		// Handle logs its failures in the store.
-		_ = agent.Handle(env.Stdin, checkpoint)
+		hookCommand(rest, env)
 		return nil
 	case "watch":
 		return watchCommand(env)
@@ -129,43 +141,88 @@ func dispatch(args []string, env Env) error {
 	return usageError{fmt.Sprintf("unknown command %q", command)}
 }
 
-func openStore(env Env) (*store.Store, error) {
-	root, err := project.Root(env.Dir)
+// flags holds the parsed command-line flags and the remaining arguments.
+type flags struct {
+	isConfirmed bool
+	isCopyMode  bool
+	label       string
+	project     string
+	args        []string
+}
+
+func parseFlags(args []string) (flags, error) {
+	var parsed flags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		name, value, hasValue := strings.Cut(arg, "=")
+		switch {
+		case arg == "--yes" || arg == "-y":
+			parsed.isConfirmed = true
+		case arg == "--copy":
+			parsed.isCopyMode = true
+		case name == "--label" || name == "--project":
+			if !hasValue {
+				if i+1 == len(args) {
+					return parsed, usageError{name + " needs a value"}
+				}
+				i++
+				value = args[i]
+			}
+			if name == "--label" {
+				parsed.label = value
+			} else {
+				parsed.project = value
+			}
+		case strings.HasPrefix(arg, "-"):
+			return parsed, usageError{fmt.Sprintf("unknown flag %q", arg)}
+		default:
+			parsed.args = append(parsed.args, arg)
+		}
+	}
+	return parsed, nil
+}
+
+// openStore opens the store of the project in env.Dir, or of the project
+// that --project names.
+func openStore(env Env, parsed flags) (*store.Store, error) {
+	if parsed.project == "" {
+		root, err := project.Root(env.Dir)
+		if err != nil {
+			return nil, err
+		}
+		return store.Open(root)
+	}
+	root, err := deletedOrExistingRoot(parsed.project, env.Dir)
 	if err != nil {
 		return nil, err
 	}
 	return store.Open(root)
 }
 
-// flags holds the parsed --yes and --label flags and the other arguments.
-type flags struct {
-	yes   bool
-	copy  bool
-	label string
-	args  []string
+// deletedOrExistingRoot returns the project root for path. A deleted project
+// has no folder to look in, so its path is taken as the root.
+func deletedOrExistingRoot(path, dir string) (string, error) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	if _, err := os.Stat(path); err == nil {
+		return project.Root(path)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(path)), nil
 }
 
-func parseFlags(args []string) (flags, error) {
-	var f flags
-	for i := 0; i < len(args); i++ {
-		switch arg := args[i]; {
-		case arg == "--yes" || arg == "-y":
-			f.yes = true
-		case arg == "--copy":
-			f.copy = true
-		case arg == "--label":
-			if i+1 == len(args) {
-				return f, usageError{"--label needs a value"}
-			}
-			i++
-			f.label = args[i]
-		case strings.HasPrefix(arg, "--label="):
-			f.label = strings.TrimPrefix(arg, "--label=")
-		case strings.HasPrefix(arg, "-"):
-			return f, usageError{fmt.Sprintf("unknown flag %q", arg)}
-		default:
-			f.args = append(f.args, arg)
-		}
+// printable returns text safe to print to a terminal. Labels and paths come
+// from agents and projects, and control characters in them could rewrite what
+// the terminal shows.
+func printable(text string) string {
+	if strings.IndexFunc(text, unicode.IsControl) < 0 {
+		return text
 	}
-	return f, nil
+	return strconv.Quote(text)
 }

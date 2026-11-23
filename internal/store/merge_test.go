@@ -2,6 +2,8 @@ package store
 
 import (
 	"crypto/sha256"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,20 +17,19 @@ func stateHashes(t *testing.T, s *Store, id int) map[string][32]byte {
 		t.Fatal(err)
 	}
 	hashes := map[string][32]byte{}
-	for rel, src := range state {
-		data, _ := os.ReadFile(src.Path)
-		hashes[rel] = sha256.Sum256(append([]byte(src.Entry.Mode.String()), data...))
+	for rel, source := range state {
+		path := s.basePath(rel)
+		if source.Layer > 0 {
+			path = s.layerFile(source.Layer, rel)
+		}
+		data, _ := os.ReadFile(path)
+		hashes[rel] = sha256.Sum256(append([]byte(source.Entry.Mode.String()), data...))
 	}
 	return hashes
 }
 
 func TestPruneFinishesInterruptedMerge(t *testing.T) {
-	t.Setenv("UNDO_HOME", t.TempDir())
-	root, _ := filepath.EvalSymlinks(t.TempDir())
-	s, err := Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s, root := newProject(t, nil)
 	steps := []func(){
 		func() { os.WriteFile(filepath.Join(root, "a.txt"), []byte("one"), 0o644) },
 		func() {
@@ -43,11 +44,11 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 	}
 	for _, step := range steps {
 		step()
-		if _, err := s.Take("step", root); err != nil {
+		if _, err := s.Take(CheckpointOptions{Label: "step", Dir: root}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	want3, want4 := stateHashes(t, s, 3), stateHashes(t, s, 4)
+	wantAtThird, wantAtFourth := stateHashes(t, s, 3), stateHashes(t, s, 4)
 
 	base, err := s.BaseListing()
 	if err != nil {
@@ -60,15 +61,15 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	never := Limits{MaxAge: time.Hour, MaxCount: 100, MaxBytes: 1 << 40}
-	if _, err := s.Prune(time.Now(), never); err != nil {
+	unlimited := Limits{MaxAge: time.Hour, MaxCount: 100, MaxBytes: 1 << 40}
+	if _, err := s.Prune(time.Now(), unlimited); err != nil {
 		t.Fatal(err)
 	}
 	list, _ := s.List()
 	if len(list) != 2 || list[0].ID != 3 {
 		t.Fatalf("checkpoints = %+v, want 3 and 4", list)
 	}
-	for id, want := range map[int]map[string][32]byte{3: want3, 4: want4} {
+	for id, want := range map[int]map[string][32]byte{3: wantAtThird, 4: wantAtFourth} {
 		got := stateHashes(t, s, id)
 		if len(got) != len(want) {
 			t.Fatalf("state %d has %d paths, want %d", id, len(got), len(want))
@@ -79,18 +80,13 @@ func TestPruneFinishesInterruptedMerge(t *testing.T) {
 			}
 		}
 	}
-	if _, err := os.Stat(s.mergePath()); !os.IsNotExist(err) {
+	if _, err := os.Stat(s.mergePath()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("merge record left behind: %v", err)
 	}
 }
 
 func TestPruneWaitsForReaders(t *testing.T) {
-	t.Setenv("UNDO_HOME", t.TempDir())
-	root, _ := filepath.EvalSymlinks(t.TempDir())
-	s, err := Open(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s, _ := newProject(t, nil)
 	unlock, err := s.RLock()
 	if err != nil {
 		t.Fatal(err)

@@ -4,6 +4,8 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,22 +32,32 @@ type Agent struct {
 	isHandledElsewhere func(event preToolUseInput) bool
 }
 
-// Agents lists every agent undo supports.
-var Agents = []Agent{claude, codex, cursor, gemini, openCode}
+// Agents returns every agent undo supports.
+func Agents() []Agent {
+	return []Agent{claude, codex, cursor, gemini, openCode}
+}
 
 // FindAgent returns the agent with the given command-line name.
 func FindAgent(name string) (Agent, bool) {
-	i := slices.IndexFunc(Agents, func(a Agent) bool { return a.Name == name })
+	agents := Agents()
+	i := slices.IndexFunc(agents, func(a Agent) bool { return a.Name == name })
 	if i < 0 {
 		return Agent{}, false
 	}
-	return Agents[i], true
+	return agents[i], true
 }
+
+// ErrUnsafeBinary means the undo binary lives where it will disappear or
+// where other users can replace it, so a hook must not run it.
+var ErrUnsafeBinary = errors.New("this undo binary is in a temporary or shared directory; install undo with go install or a package manager first")
 
 // Install adds a hook that runs binary before the agent changes files. A hook
 // undo installed before is replaced, and everything else in the agent's
 // configuration is kept. It returns the path of the file it wrote.
 func (a Agent) Install(binary string) (string, error) {
+	if err := checkBinary(binary); err != nil {
+		return "", err
+	}
 	path, err := a.configPath()
 	if err != nil {
 		return "", err
@@ -69,13 +81,38 @@ func (a Agent) IsInstalled() bool {
 	return err == nil && a.installer.isInstalled(path, a.Name)
 }
 
+// checkBinary refuses a binary in the temporary directory, where go run
+// builds and which is cleaned up later, or in a directory that other users
+// can write to, where anyone could put a program in its place.
+func checkBinary(binary string) error {
+	temps := []string{os.TempDir()}
+	if resolved, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+		temps = append(temps, resolved)
+	}
+	for _, temp := range temps {
+		if strings.HasPrefix(binary, filepath.Clean(temp)+string(filepath.Separator)) {
+			return fmt.Errorf("%s: %w", binary, ErrUnsafeBinary)
+		}
+	}
+	info, err := os.Stat(filepath.Dir(binary))
+	if err != nil {
+		return nil
+	}
+	if info.Mode().Perm()&0o002 != 0 {
+		return fmt.Errorf("%s: %w", binary, ErrUnsafeBinary)
+	}
+	return nil
+}
+
 // preToolUseInput is the part of a hook event that undo reads. Claude Code,
 // Codex, Cursor and Gemini CLI send these fields, and the OpenCode plugin
-// sends them too.
+// sends them too. Cursor names its session conversation_id.
 type preToolUseInput struct {
-	Cwd       string `json:"cwd"`
-	ToolName  string `json:"tool_name"`
-	ToolInput struct {
+	Cwd            string `json:"cwd"`
+	SessionID      string `json:"session_id"`
+	ConversationID string `json:"conversation_id"`
+	ToolName       string `json:"tool_name"`
+	ToolInput      struct {
 		Command  string `json:"command"`
 		FilePath string `json:"file_path"`
 		Cwd      string `json:"cwd"`
@@ -103,15 +140,23 @@ func (a Agent) Handle(in io.Reader, checkpoint store.Checkpointer) error {
 	if err != nil {
 		return err
 	}
-	s, err := store.Open(root)
+	projectStore, err := store.Open(root)
 	if err != nil {
 		return err
 	}
-	if _, err := checkpoint(s, event.label(root), dir); err != nil {
-		s.LogError(err)
+	options := store.CheckpointOptions{Label: event.label(root), Dir: dir, Agent: a.Name, Session: event.session()}
+	if _, err := checkpoint(projectStore, options); err != nil {
+		projectStore.LogError(err)
 		return err
 	}
 	return nil
+}
+
+func (e preToolUseInput) session() string {
+	if e.SessionID != "" {
+		return e.SessionID
+	}
+	return e.ConversationID
 }
 
 // dir returns the directory the tool works in. Agents report it in different

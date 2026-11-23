@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,10 +26,22 @@ func newProject(t *testing.T) string {
 	return root
 }
 
+// privateBinary returns the path of an undo binary in a directory only the
+// test user can write to, outside the temporary directory, which install
+// refuses.
+func privateBinary(t *testing.T) string {
+	t.Helper()
+	parent := t.TempDir()
+	t.Setenv("TMPDIR", filepath.Join(parent, "tmp"))
+	os.MkdirAll(filepath.Join(parent, "tmp"), 0o700)
+	os.MkdirAll(filepath.Join(parent, "bin"), 0o755)
+	return filepath.Join(parent, "bin", "undo")
+}
+
 func run(t *testing.T, dir string, stdin string, args ...string) (int, string) {
 	t.Helper()
 	var out bytes.Buffer
-	code := Run(args, Env{Dir: dir, Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &out})
+	code := Run(args, Env{Dir: dir, Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &out, Executable: privateBinary(t)})
 	return code, out.String()
 }
 
@@ -39,7 +52,7 @@ func TestRunCheckpointsThenRuns(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(root, "f.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "f.txt")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("command did not run")
 	}
 
@@ -86,7 +99,7 @@ func TestUndoAsksBeforeRestoring(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit %d, want 1: %s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(root, "f.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "f.txt")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("restored without confirmation")
 	}
 }
@@ -312,5 +325,54 @@ func TestStatusShowsInstalledHooks(t *testing.T) {
 	_, out = run(t, root, "", "status")
 	if !strings.Contains(out, "Hooks        Cursor, OpenCode") {
 		t.Fatalf("status with hooks:\n%s", out)
+	}
+}
+
+func TestUndoFindsDeletedProject(t *testing.T) {
+	t.Setenv("UNDO_HOME", t.TempDir())
+	parent, _ := filepath.EvalSymlinks(t.TempDir())
+	root := filepath.Join(parent, "app")
+	os.MkdirAll(root, 0o755)
+	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644)
+	if code, out := run(t, root, "", "checkpoint"); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	os.RemoveAll(root)
+
+	_, out := run(t, parent, "", "list")
+	if !strings.Contains(out, "was deleted. Bring it back with: undo to 1 --project") {
+		t.Fatalf("list in the parent does not point to the deleted project:\n%s", out)
+	}
+	if code, out := run(t, parent, "", "to", "1", "--yes", "--project", root); code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "main.go")); string(data) != "package main" {
+		t.Fatalf("main.go = %q after restoring the deleted project", data)
+	}
+}
+
+func TestPrintableEscapesControlCharacters(t *testing.T) {
+	if got := printable("rm -rf build"); got != "rm -rf build" {
+		t.Fatalf("printable changed plain text: %q", got)
+	}
+	if got := printable("echo \x1b]0;pwned\x07"); strings.ContainsRune(got, '\x1b') {
+		t.Fatalf("printable kept an escape sequence: %q", got)
+	}
+}
+
+func TestStatusShowsUnreadableDirectories(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every directory")
+	}
+	root := newProject(t)
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+	os.MkdirAll(filepath.Join(root, "pgdata"), 0o755)
+	os.Chmod(filepath.Join(root, "pgdata"), 0o000)
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, "pgdata"), 0o755) })
+	run(t, root, "", "checkpoint")
+
+	_, out := run(t, root, "", "status")
+	if !strings.Contains(out, "Unreadable   pgdata") {
+		t.Fatalf("status does not report the unreadable directory:\n%s", out)
 	}
 }

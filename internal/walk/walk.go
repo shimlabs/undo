@@ -8,49 +8,49 @@ import (
 	"sync/atomic"
 )
 
-// Workers is a good number of directories to read at once. Reading a
-// directory mostly waits on the filesystem rather than the CPU, so it is set
-// well above typical core counts.
-const Workers = 32
+// concurrency is how many directories are read at once. Reading a directory
+// mostly waits on the filesystem rather than the CPU, so this is set well
+// above typical core counts.
+const concurrency = 32
 
 // Dirs calls visit for root and then for every subdirectory visit returns,
-// with up to workers calls running at once. The walk stops at the first error,
+// with several calls running at once. The walk stops at the first error,
 // which Dirs returns.
-func Dirs[T any](root T, workers int, visit func(dir T) (subdirs []T, err error)) error {
-	w := &walker[T]{visit: visit, slots: make(chan struct{}, workers)}
+func Dirs[T any](root T, visit func(dir T) (subdirs []T, err error)) error {
+	w := &walker[T]{visit: visit, semaphore: make(chan struct{}, concurrency)}
 	w.walk(root)
 	w.pending.Wait()
 	return w.err
 }
 
 type walker[T any] struct {
-	visit   func(T) ([]T, error)
-	slots   chan struct{}
-	pending sync.WaitGroup
-	failed  atomic.Bool
-	once    sync.Once
-	err     error
+	visit     func(T) ([]T, error)
+	semaphore chan struct{}
+	pending   sync.WaitGroup
+	hasFailed atomic.Bool
+	once      sync.Once
+	err       error
 }
 
-// walk visits dir, then its subdirectories, each on a new goroutine while a
-// slot is free and on the current one otherwise.
+// walk visits dir, then its subdirectories, each on a new goroutine while the
+// semaphore allows and on the current one otherwise.
 func (w *walker[T]) walk(dir T) {
-	if w.failed.Load() {
+	if w.hasFailed.Load() {
 		return
 	}
 	subdirs, err := w.visit(dir)
 	if err != nil {
 		w.once.Do(func() {
 			w.err = err
-			w.failed.Store(true)
+			w.hasFailed.Store(true)
 		})
 		return
 	}
 	for _, subdir := range subdirs {
 		select {
-		case w.slots <- struct{}{}:
+		case w.semaphore <- struct{}{}:
 			w.pending.Go(func() {
-				defer func() { <-w.slots }()
+				defer func() { <-w.semaphore }()
 				w.walk(subdir)
 			})
 		default:
