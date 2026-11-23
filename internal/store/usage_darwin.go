@@ -25,7 +25,9 @@ static long long undoPrivateSize(const char *path) {
 import "C"
 
 import (
+	"errors"
 	"os"
+	"syscall"
 	"unsafe"
 )
 
@@ -33,6 +35,15 @@ func privateSize(path string) (int64, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 	size, err := C.undoPrivateSize(cPath)
+	if size < 0 && (errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP)) {
+		// A filesystem without clones, such as HFS+, has no private size,
+		// and every byte of a full copy is the store's own.
+		info, err := os.Lstat(path)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size(), nil
+	}
 	if size < 0 {
 		return 0, &os.PathError{Op: "getattrlist", Path: path, Err: err}
 	}
