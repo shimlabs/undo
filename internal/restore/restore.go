@@ -161,12 +161,17 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	written, removed := tree.Changed(current, plan.targetListing())
 	// The safety checkpoint could not save a file undo cannot read, so the
 	// restore must not change it either.
-	if unreadable := plan.unreadableFiles(slices.Concat(written, removed)); len(unreadable) > 0 {
-		plan.drop(unreadable)
-		kept = append(kept, unreadable...)
+	// A directory that holds paths the restore must not touch cannot be
+	// replaced by a file either.
+	unreadable := plan.unreadableFiles(slices.Concat(written, removed))
+	blocked := plan.dirsHoldingUntracked(written)
+	if left := slices.Concat(unreadable, blocked); len(left) > 0 {
+		plan.drop(left)
+		kept = append(kept, left...)
 		written, removed = tree.Changed(current, plan.targetListing())
 	}
 	written = slices.DeleteFunc(written, isInsideAny(kept))
+	removed = slices.DeleteFunc(removed, isInsideAny(kept))
 	restored, err := projectStore.RestoredEntries(id)
 	if err != nil {
 		return restorePlan{}, err
@@ -215,6 +220,30 @@ func (p *restorePlan) unreadableFiles(paths []string) []string {
 		}
 	}
 	return unreadable
+}
+
+// dirsHoldingUntracked returns the directories among paths that must become
+// files or symlinks but hold something the plan does not track, such as
+// excluded or unreadable paths.
+func (p *restorePlan) dirsHoldingUntracked(paths []string) []string {
+	var blocked []string
+	for _, rel := range paths {
+		if p.current[rel].Kind != tree.Dir || p.target[rel].Entry.Kind == tree.Dir {
+			continue
+		}
+		entries, err := os.ReadDir(p.path(rel))
+		if err != nil {
+			blocked = append(blocked, rel)
+			continue
+		}
+		if slices.ContainsFunc(entries, func(entry fs.DirEntry) bool {
+			_, isTracked := p.current[rel+"/"+entry.Name()]
+			return !isTracked
+		}) {
+			blocked = append(blocked, rel)
+		}
+	}
+	return blocked
 }
 
 // drop removes paths from the plan, so the restore leaves them as they are.

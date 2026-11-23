@@ -703,3 +703,28 @@ func TestRestoreNeverWritesOutsideWhenDirectoryIsSwappedForSymlink(t *testing.T)
 		t.Fatalf("restore wrote %d entries outside the project", len(entries))
 	}
 }
+
+// "cache" was a file at checkpoint 1. It is now a directory that holds only
+// excluded content (node_modules), so the restore cannot remove it.
+func TestRestoreKeepsDirectoryWithExcludedContentWhereFileWas(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "cache"), "file")
+	take(t, projectStore, "first")
+	if err := os.Remove(filepath.Join(root, "cache")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "cache", "node_modules", "x.js"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
+	take(t, projectStore, "second")
+
+	changes := apply(t, projectStore, 1)
+	if !slices.Contains(changes.Kept, "cache") {
+		t.Errorf("Kept = %v, want cache", changes.Kept)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package main\n" {
+		t.Errorf("src/main.go = %q; the restore stopped at cache", data)
+	}
+	if _, err := os.Stat(filepath.Join(root, "cache", "node_modules", "x.js")); err != nil {
+		t.Errorf("the excluded content in cache is gone: %v", err)
+	}
+}
