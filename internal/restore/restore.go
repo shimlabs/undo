@@ -128,8 +128,9 @@ type restorePlan struct {
 // planRestore plans a restore of checkpoint id. It never touches a path the
 // checkpoint did not save: paths its exclude rules left out, paths in
 // directories that could not be read then or now, and files that cannot be
-// read now, which the safety checkpoint cannot save either. A path that only today's rules exclude is written back if it is
-// missing, but never overwritten, and nothing inside it is touched.
+// read now, which the safety checkpoint cannot save either. A path that only
+// today's rules exclude is written back if it is missing, but never
+// overwritten, and nothing inside it is touched.
 func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	root := projectStore.Root()
 	matcherNow, err := exclude.New(root)
@@ -152,45 +153,16 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 	if err != nil {
 		return restorePlan{}, err
 	}
-	unreadable := slices.Concat(manifest.Unreadable, skipped.Unreadable)
-	isUnsaved := func(rel string, isDir bool) bool {
-		return matcherThen.Excludes(rel, isDir) || isAtOrInside(rel, unreadable)
-	}
-	var kept []string
-	for rel, entry := range current {
-		if isUnsaved(rel, entry.Kind == tree.Dir) {
-			delete(current, rel)
-		}
-	}
-	for rel, source := range target {
-		isDir := source.Entry.Kind == tree.Dir
-		switch {
-		case isUnsaved(rel, isDir):
-			delete(target, rel)
-		case matcherNow.Excludes(rel, isDir) && exists(filepath.Join(root, filepath.FromSlash(rel))):
-			delete(target, rel)
-			kept = append(kept, rel)
-		}
-	}
-	targetListing := make(tree.Listing, len(target))
-	for rel, source := range target {
-		targetListing[rel] = source.Entry
-	}
-	written, removed := tree.Changed(current, targetListing)
+	plan := restorePlan{root: root, target: target, current: current}
+	kept := plan.dropUnsaved(matcherThen, matcherNow, slices.Concat(manifest.Unreadable, skipped.Unreadable))
+	written, removed := tree.Changed(current, plan.targetListing())
 	// The safety checkpoint could not save a file undo cannot read, so the
 	// restore must not change it either.
-	isUnreadable := func(rel string) bool {
-		entry, isCurrent := current[rel]
-		if !isCurrent || entry.Kind != tree.File || isReadable(filepath.Join(root, filepath.FromSlash(rel))) {
-			return false
-		}
-		kept = append(kept, rel)
-		delete(current, rel)
-		delete(target, rel)
-		return true
+	if unreadable := plan.unreadableFiles(slices.Concat(written, removed)); len(unreadable) > 0 {
+		plan.drop(unreadable)
+		kept = append(kept, unreadable...)
+		written, removed = tree.Changed(current, plan.targetListing())
 	}
-	written = slices.DeleteFunc(written, isUnreadable)
-	removed = slices.DeleteFunc(removed, isUnreadable)
 	written = slices.DeleteFunc(written, isInsideAny(kept))
 	restored, err := projectStore.RestoredEntries(id)
 	if err != nil {
@@ -201,20 +173,73 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 		return isRestored && current[rel] == entry
 	})
 	slices.Sort(kept)
-	changes := Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable}
-	return restorePlan{root: root, target: target, current: current, changes: changes}, nil
+	plan.changes = Changes{Written: written, Removed: removed, Kept: kept, Unstable: manifest.Unstable}
+	return plan, nil
+}
+
+// dropUnsaved removes from the plan every path the checkpoint did not save:
+// paths its exclude rules left out and paths in unreadable directories. It
+// also drops existing paths that only today's rules exclude, and returns them.
+func (p *restorePlan) dropUnsaved(matcherThen, matcherNow *exclude.Matcher, unreadable []string) (kept []string) {
+	isUnsaved := func(rel string, isDir bool) bool {
+		return matcherThen.Excludes(rel, isDir) || isAtOrInside(rel, unreadable)
+	}
+	for rel, entry := range p.current {
+		if isUnsaved(rel, entry.Kind == tree.Dir) {
+			delete(p.current, rel)
+		}
+	}
+	for rel, source := range p.target {
+		isDir := source.Entry.Kind == tree.Dir
+		switch {
+		case isUnsaved(rel, isDir):
+			delete(p.target, rel)
+		case matcherNow.Excludes(rel, isDir) && exists(p.path(rel)):
+			delete(p.target, rel)
+			kept = append(kept, rel)
+		}
+	}
+	return kept
+}
+
+// unreadableFiles returns the files among paths that exist now and cannot be
+// read.
+func (p *restorePlan) unreadableFiles(paths []string) []string {
+	var unreadable []string
+	for _, rel := range paths {
+		if entry, isCurrent := p.current[rel]; isCurrent && entry.Kind == tree.File && !isReadable(p.path(rel)) {
+			unreadable = append(unreadable, rel)
+		}
+	}
+	return unreadable
+}
+
+// drop removes paths from the plan, so the restore leaves them as they are.
+func (p *restorePlan) drop(paths []string) {
+	for _, rel := range paths {
+		delete(p.current, rel)
+		delete(p.target, rel)
+	}
+}
+
+func (p *restorePlan) targetListing() tree.Listing {
+	listing := make(tree.Listing, len(p.target))
+	for rel, source := range p.target {
+		listing[rel] = source.Entry
+	}
+	return listing
 }
 
 // isInsideAny returns a function that reports whether a path is inside one of
 // dirs, which the restore leaves as they are.
 func isInsideAny(dirs []string) func(rel string) bool {
-	isDir := make(map[string]bool, len(dirs))
+	isKept := make(map[string]bool, len(dirs))
 	for _, dir := range dirs {
-		isDir[dir] = true
+		isKept[dir] = true
 	}
 	return func(rel string) bool {
 		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
-			if isDir[dir] {
+			if isKept[dir] {
 				return true
 			}
 		}
@@ -229,12 +254,12 @@ func isAtOrInside(rel string, dirs []string) bool {
 	})
 }
 
-func isReadable(path string) bool {
-	return unix.Access(path, unix.R_OK) == nil
+func isReadable(fullPath string) bool {
+	return unix.Access(fullPath, unix.R_OK) == nil
 }
 
-func exists(path string) bool {
-	_, err := os.Lstat(path)
+func exists(fullPath string) bool {
+	_, err := os.Lstat(fullPath)
 	return err == nil
 }
 
