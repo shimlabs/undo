@@ -347,6 +347,9 @@ func (s *Store) cloneStable(id int, rel string, entry tree.Entry) (tree.Entry, b
 		}
 		entry = after
 		if attempt == cloneAttempts {
+			// The stat can already include a write the clone missed. A change
+			// time no file has makes the next checkpoint clone it again.
+			entry.ChangeTime = 0
 			return entry, false, nil
 		}
 	}

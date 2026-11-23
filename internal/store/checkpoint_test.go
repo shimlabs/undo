@@ -2,12 +2,14 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -384,5 +386,57 @@ func TestPruneIfDueRunsHourly(t *testing.T) {
 	}
 	if merged, _ := projectStore.PruneIfDue(now.Add(2*time.Hour), keepOne); merged != 2 {
 		t.Fatalf("PruneIfDue after an hour merged %d, want 2", merged)
+	}
+}
+
+func TestUnstableFileIsSavedAgainOnceItSettles(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{"log.txt": ""})
+	path := filepath.Join(root, "log.txt")
+	unstableCount := 0
+	for attempt := range 100 {
+		var stop atomic.Bool
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				return
+			}
+			defer file.Close()
+			for !stop.Load() {
+				file.WriteString("line\n")
+			}
+		}()
+		checkpoint, err := projectStore.Take(CheckpointOptions{Label: fmt.Sprint(attempt), Dir: root})
+		stop.Store(true)
+		<-done
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := projectStore.Manifest(checkpoint.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(manifest.Unstable, "log.txt") {
+			continue
+		}
+
+		settled, err := projectStore.Take(CheckpointOptions{Label: "settled", Dir: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := projectStore.State(settled.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved, _ := os.ReadFile(projectStore.layerFile(state["log.txt"].Layer, "log.txt"))
+		current, _ := os.ReadFile(path)
+		if len(saved) != len(current) {
+			t.Fatalf("checkpoint after the file settled holds %d bytes, the file has %d", len(saved), len(current))
+		}
+		unstableCount++
+	}
+	if unstableCount == 0 {
+		t.Skip("the file never changed during a clone")
 	}
 }
