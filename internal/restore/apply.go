@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"cmp"
 	"errors"
 	"io/fs"
 	"maps"
@@ -8,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -111,7 +113,7 @@ func (p *restorePlan) removeAll(paths []string) error {
 // cannot recreate.
 func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err error) {
 	paths := slices.Clone(p.changes.Written)
-	slices.SortStableFunc(paths, func(a, b string) int { return tree.Depth(a) - tree.Depth(b) })
+	slices.SortFunc(paths, func(a, b string) int { return cmp.Or(tree.Depth(a)-tree.Depth(b), strings.Compare(a, b)) })
 	clonable, err := p.clonableDirs(projectStore, paths)
 	if err != nil {
 		return nil, err
@@ -119,13 +121,15 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 	extractor := projectStore.NewExtractor()
 	defer extractor.Close()
 	p.cloned = map[string]bool{}
-	var pending pendingWrites
+	pending := pendingWrites{parentDir: parentDir{root: p.projectRoot}}
+	defer pending.parentDir.close()
 	parents := tree.NewParentChecker(p.root)
 	for _, rel := range paths {
 		if err := p.writePath(rel, clonable[rel], extractor, parents, &pending); err != nil {
 			return pending.skipped, err
 		}
 	}
+	pending.parentDir.close()
 	p.keepOccupied(pending.occupied)
 	// Every directory exists now, so the files can be written in any order.
 	return pending.skipped, p.writeFiles(extractor, pending.files)
@@ -133,11 +137,13 @@ func (p *restorePlan) writeAll(projectStore *store.Store) (skipped []string, err
 
 // pendingWrites is what writing paths parents first leaves for later: the
 // files to write in parallel, the paths that what the removals left in
-// place occupies, and the paths that cannot be recreated.
+// place occupies, and the paths that cannot be recreated. parentDir is the
+// directory of the path being written.
 type pendingWrites struct {
-	files    []string
-	occupied []string
-	skipped  []string
+	files     []string
+	occupied  []string
+	skipped   []string
+	parentDir parentDir
 }
 
 // writePath writes the directory or special file rel, or adds it to
@@ -151,17 +157,11 @@ func (p *restorePlan) writePath(rel string, isClonable bool, extractor *store.Ex
 		return nil
 	}
 	source := p.target[rel]
-	if p.isOccupied(rel, source.Entry) {
-		pending.occupied = append(pending.occupied, rel)
-		return nil
-	}
 	if err := parents.Check(rel); err != nil {
 		return err
 	}
-	if rel != "." {
-		if err := p.makeParentWritable(rel); err != nil {
-			return err
-		}
+	if isOccupied, err := pending.isOccupied(rel, source.Entry); err != nil || isOccupied {
+		return err
 	}
 	switch {
 	case isClonable && p.isMissing(rel):
@@ -182,19 +182,29 @@ func (p *restorePlan) writePath(rel string, isClonable bool, extractor *store.Ex
 }
 
 // isOccupied reports whether something the removals left in place stands
-// where the restore must write entry, so writing it would fail. On a
-// filesystem that ignores case, a directory renamed only in case that holds
-// excluded content survives its removal under the target's name; a locked
-// file survives too.
-func (p *restorePlan) isOccupied(rel string, entry tree.Entry) bool {
+// where the restore must write entry at rel, so writing it would fail, and
+// adds rel to the occupied paths if so. On a filesystem that ignores case, a
+// directory renamed only in case that holds excluded content survives its
+// removal under the target's name; a locked file survives too.
+func (pending *pendingWrites) isOccupied(rel string, entry tree.Entry) (bool, error) {
 	if rel == "." {
-		return false
+		return false, nil
 	}
-	info, err := p.projectRoot.Lstat(filepath.FromSlash(rel))
+	dir, err := pending.parentDir.open(rel)
+	// A parent that is missing could not be written, so nothing stands in
+	// the way of rel.
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
-		return false
+		return false, err
 	}
-	return info.IsDir() != (entry.Kind == tree.Dir)
+	found, err := tree.StatAt(dir, path.Base(rel))
+	if err != nil || (found.Kind == tree.Dir) == (entry.Kind == tree.Dir) {
+		return false, nil //nolint:nilerr // nothing in the way is the usual case
+	}
+	pending.occupied = append(pending.occupied, rel)
+	return true, nil
 }
 
 // keepOccupied takes the occupied paths, and everything under them, out of
@@ -337,8 +347,8 @@ func (p *restorePlan) path(rel string) string {
 	return filepath.Join(p.root, filepath.FromSlash(rel))
 }
 
-// makeParentWritable lets the restore add or remove rel in its directory.
-// The directory's recorded mode is set again at the end.
+// makeParentWritable lets the restore remove rel from its directory. The
+// directory's recorded mode is set again at the end.
 func (p *restorePlan) makeParentWritable(rel string) error {
 	parent := filepath.FromSlash(path.Dir(rel))
 	if info, err := p.projectRoot.Lstat(parent); err == nil && info.IsDir() && info.Mode().Perm()&0o300 != 0o300 {
