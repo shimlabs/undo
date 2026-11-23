@@ -19,21 +19,11 @@ import (
 // through. A symlink placed inside the store, or the store directory swapped
 // for another after it was checked, cannot lead a read or write outside it.
 func openFiles(dir string) (*os.Root, error) {
-	files, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, err
+	files, err := tree.OpenRoot(dir)
+	if errors.Is(err, tree.ErrReplaced) {
+		return nil, fmt.Errorf("%s: %w", dir, ErrUnsafeStore)
 	}
-	opened, err := files.Stat(".")
-	if err == nil {
-		var atPath fs.FileInfo
-		if atPath, err = os.Lstat(dir); err == nil && !os.SameFile(opened, atPath) {
-			err = fmt.Errorf("%s: %w", dir, ErrUnsafeStore)
-		}
-	}
-	if err != nil {
-		return nil, errors.Join(err, files.Close())
-	}
-	return files, nil
+	return files, err
 }
 
 // storeName returns path, which lies in the store directory, relative to it.

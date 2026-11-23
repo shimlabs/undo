@@ -367,20 +367,11 @@ func (p *restorePlan) apply(projectStore *store.Store, id int) error {
 	if err := os.MkdirAll(p.root, 0o700); err != nil {
 		return err
 	}
-	projectRoot, err := os.OpenRoot(p.root)
+	projectRoot, err := tree.OpenRoot(p.root)
 	if err != nil {
 		return err
 	}
 	defer projectRoot.Close()
-	// OpenRoot follows a symlink at the root itself, so the opened directory
-	// must be the one at that path.
-	opened, err := projectRoot.Stat(".")
-	if err != nil {
-		return err
-	}
-	if atPath, err := os.Lstat(p.root); err != nil || !os.SameFile(opened, atPath) {
-		return fmt.Errorf("%s changed while the restore started", p.root)
-	}
 	p.projectRoot = projectRoot
 	if err := p.removeAll(p.removals()); err != nil {
 		return err

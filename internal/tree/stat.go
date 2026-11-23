@@ -1,12 +1,8 @@
 package tree
 
 import (
-	"errors"
-	"fmt"
 	"io/fs"
 	"os"
-	"path"
-	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -110,35 +106,6 @@ func fileMode(mode uint32) fs.FileMode {
 		fileMode |= fs.ModeSticky
 	}
 	return fileMode
-}
-
-// OpenDir opens the directory rel below root one name at a time, never
-// following a symlink, so a directory an agent swaps for a symlink cannot
-// lead outside root. A symlink or file in place of a directory means the
-// directory is gone, and the error matches fs.ErrNotExist.
-func OpenDir(root, rel string) (*os.File, error) {
-	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, openError(root, err)
-	}
-	if rel != "." {
-		for name := range strings.SplitSeq(rel, "/") {
-			child, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-			unix.Close(fd)
-			if err != nil {
-				return nil, openError(path.Join(root, rel), err)
-			}
-			fd = child
-		}
-	}
-	return os.NewFile(uintptr(fd), path.Join(root, rel)), nil
-}
-
-func openError(name string, err error) error {
-	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
-		return fmt.Errorf("%s: %w", name, fs.ErrNotExist)
-	}
-	return &fs.PathError{Op: "open", Path: name, Err: err}
 }
 
 // toUint32 converts a stat mode, whose type differs between platforms.
