@@ -33,8 +33,8 @@ type Checkpoint struct {
 	CheckpointOptions
 }
 
-// Checkpointer takes a checkpoint of the project in projectStore, either by scanning it
-// with Take or through the background watcher.
+// Checkpointer takes a checkpoint of the project in projectStore, either by
+// scanning it with Take or through the background watcher.
 type Checkpointer func(projectStore *Store, options CheckpointOptions) (Checkpoint, error)
 
 // Manifest is what a layer recorded: the state of every path that changed

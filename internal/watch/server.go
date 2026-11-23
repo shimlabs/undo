@@ -55,8 +55,8 @@ type Options struct {
 	Ready func()
 }
 
-// Serve watches the project in projectStore and takes checkpoints for clients until ctx
-// is canceled or no request arrives for options.IdleTimeout. After
+// Serve watches the project in projectStore and takes checkpoints for clients
+// until ctx is canceled or no request arrives for options.IdleTimeout. After
 // checkpoints, once it has been quiet for options.PruneQuietPeriod, it prunes
 // the store in the background if pruning is due.
 func Serve(ctx context.Context, projectStore *store.Store, options Options) error {
