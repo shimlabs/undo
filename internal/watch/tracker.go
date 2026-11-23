@@ -429,6 +429,20 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, path s
 	if err != nil {
 		return err
 	}
+	storedName, err := tree.StoredName(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		removeRel()
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if storedName != filepath.Base(path) {
+		// The event names the path before a rename that changed only case or
+		// Unicode form, and the stat reached the renamed file.
+		removeRel()
+		return t.applyPath(changes, matcher, filepath.Join(filepath.Dir(path), storedName))
+	}
 	if matcher.Excludes(rel, entry.Kind == tree.Dir) {
 		return nil
 	}

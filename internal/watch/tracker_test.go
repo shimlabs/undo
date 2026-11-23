@@ -308,3 +308,39 @@ func TestTrackerSeesDirectoryReplacedByAnother(t *testing.T) {
 	checkpoint := takeCheckpoint(t, tracker, "after swap")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
+
+func TestTrackerSeesRenamesThatOnlyChangeCase(t *testing.T) {
+	tracker, projectStore, root := newTrackerWithFiles(t)
+	testutil.WriteFile(t, filepath.Join(root, "notes.md"), "v1")
+	takeCheckpoint(t, tracker, "first")
+	os.Rename(filepath.Join(root, "notes.md"), filepath.Join(root, "Notes.md"))
+	os.Rename(filepath.Join(root, "src"), filepath.Join(root, "Src"))
+	checkpoint := takeCheckpoint(t, tracker, "renamed")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+
+	testutil.WriteFile(t, filepath.Join(root, "Notes.md"), "v3")
+	edited := takeCheckpoint(t, tracker, "edited")
+	os.Remove(filepath.Join(root, "Notes.md"))
+	os.RemoveAll(filepath.Join(root, "Src"))
+	takeCheckpoint(t, tracker, "deleted")
+	if _, err := restore.Apply(projectStore, edited.ID, checkpointThroughTracker(tracker)); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "Notes.md")); string(data) != "v3" {
+		t.Fatalf("Notes.md = %q after restore, want v3", data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "Src", "lib", "util.go")); string(data) != "package lib" {
+		t.Fatalf("Src/lib/util.go = %q after restore", data)
+	}
+}
+
+func TestTrackerSeesRenamesThatOnlyChangeUnicodeForm(t *testing.T) {
+	tracker, projectStore, root := newTrackerWithFiles(t)
+	composed, decomposed := "café.txt", "café.txt"
+	testutil.WriteFile(t, filepath.Join(root, composed), "v1")
+	takeCheckpoint(t, tracker, "first")
+	os.Rename(filepath.Join(root, composed), filepath.Join(root, decomposed))
+
+	checkpoint := takeCheckpoint(t, tracker, "renamed")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
