@@ -156,11 +156,7 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 	isExcludedDir := map[string]bool{}
 	for _, event := range events {
 		if event.IsHistoryDone {
-			select {
-			case <-t.historyDone:
-			default:
-				close(t.historyDone)
-			}
+			t.closeHistoryDone()
 			continue
 		}
 		if done, ok := t.markers[event.Path]; ok {
@@ -193,6 +189,16 @@ func (t *tracker) handleEvents(events []fsnotify.Event) {
 		if t.isInRoot(parent) {
 			t.dirty[parent] = true
 		}
+	}
+}
+
+// closeHistoryDone marks the replayed history as delivered. The caller holds
+// t.mu.
+func (t *tracker) closeHistoryDone() {
+	select {
+	case <-t.historyDone:
+	default:
+		close(t.historyDone)
 	}
 }
 
@@ -317,6 +323,12 @@ func (t *tracker) waitForMarker() (fsnotify.EventID, bool) {
 	select {
 	case <-t.historyDone:
 	case <-time.After(markerTimeout):
+		// Waiting again on every checkpoint would make each one slow. This
+		// checkpoint compares the whole project instead, and later replayed
+		// events only mark paths to check again.
+		t.mu.Lock()
+		t.closeHistoryDone()
+		t.mu.Unlock()
 		return 0, false
 	}
 	path := filepath.Join(t.markerDir, fmt.Sprintf("%d-%d", os.Getpid(), t.sequence.Add(1)))
