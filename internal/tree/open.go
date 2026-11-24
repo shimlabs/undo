@@ -62,6 +62,16 @@ func OpenDir(root, rel string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path.Join(root, rel)), nil
 }
 
+// OpenDirAt opens the directory name in dir without following a symlink, as
+// OpenDir does for each name on its way.
+func OpenDirAt(dir *os.File, name string) (*os.File, error) {
+	fd, err := unix.Openat(int(dir.Fd()), name, openDirFlags, 0)
+	if err != nil {
+		return nil, openError(path.Join(dir.Name(), name), err)
+	}
+	return os.NewFile(uintptr(fd), path.Join(dir.Name(), name)), nil
+}
+
 func openError(name string, err error) error {
 	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
 		return fmt.Errorf("%s: %w", name, fs.ErrNotExist)

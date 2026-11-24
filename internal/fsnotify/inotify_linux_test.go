@@ -1,6 +1,9 @@
 package fsnotify
 
 import (
+	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"unsafe"
@@ -52,5 +55,33 @@ func TestVanishedDirectoryDoesNotForceRescans(t *testing.T) {
 	stream.parseEvents(created)
 	if hasRescan(stream.parseEvents(inotifyRecord(1, unix.IN_MODIFY, ""))) {
 		t.Fatal("a directory that vanished before it was watched made every batch ask for a rescan")
+	}
+}
+
+// An agent can swap a folder for a symlink just as a new folder inside it is
+// reported. The watch must not follow it out of the project.
+func TestWatchTreeNeverFollowsSymlinkedParent(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outside, ".ssh", "keys.d"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, ".ssh", "id_secret"), []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "x")); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := NewStream([]string{root}, nil, func([]Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	stream.mu.Lock()
+	found, _ := stream.watchTree(filepath.Join(root, "x", ".ssh"))
+	watched := slices.Collect(maps.Values(stream.dirsByWatch))
+	stream.mu.Unlock()
+	if len(found) != 0 || slices.Contains(watched, filepath.Join(root, "x", ".ssh")) {
+		t.Fatalf("watchTree followed a symlinked parent out of the project: found %v, watched %v", found, watched)
 	}
 }

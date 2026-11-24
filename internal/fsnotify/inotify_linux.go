@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -175,21 +177,52 @@ func (s *Stream) isRoot(path string) bool {
 }
 
 // watchTree adds a watch to dir and every directory below it, and returns
-// every path it found inside. Adding a watch to a directory that is already
-// watched, such as one that was moved, updates the path it reports.
+// every path it found inside. dir is reached from its watched root one name
+// at a time, so a folder an agent swaps for a symlink on the way cannot lead
+// the watch, or the paths it reports, outside the root. Adding a watch to a
+// directory that is already watched, such as one that was moved, updates
+// the path it reports.
 func (s *Stream) watchTree(dir string) ([]string, error) {
-	var found []string
-	if err := s.addWatch(dir); errors.Is(err, ErrWatchLimit) {
+	root, rel, ok := s.rootOf(dir)
+	if !ok {
+		return nil, fmt.Errorf("watch %s: %w", dir, errOutsideRoots)
+	}
+	file, err := tree.OpenDir(root, rel)
+	if err != nil {
+		return nil, fmt.Errorf("watch %s: %w", dir, err)
+	}
+	defer file.Close()
+	if err := s.addWatch(file, dir); errors.Is(err, ErrWatchLimit) {
 		return nil, err
 	} else if err != nil {
 		return nil, fmt.Errorf("watch %s: %w", dir, err)
 	}
-	err := s.watchInside(dir, &found)
+	var found []string
+	err = s.watchInside(file, dir, &found)
 	return found, err
 }
 
-func (s *Stream) addWatch(dir string) error {
-	wd, err := unix.InotifyAddWatch(s.fd, dir, watchMask)
+// errOutsideRoots means a path to watch is in none of the stream's roots.
+var errOutsideRoots = errors.New("outside the watched folders")
+
+// rootOf returns the root that holds path, and path relative to it.
+func (s *Stream) rootOf(path string) (root, rel string, ok bool) {
+	for _, root := range s.roots {
+		if path == root {
+			return root, ".", true
+		}
+		if rest, isInside := strings.CutPrefix(path, root+string(filepath.Separator)); isInside {
+			return root, filepath.ToSlash(rest), true
+		}
+	}
+	return "", "", false
+}
+
+// addWatch watches the directory open as file, which events name dir. The
+// watch is added through the descriptor, a link in /proc that the kernel
+// must follow, so it is on the directory that was opened.
+func (s *Stream) addWatch(file *os.File, dir string) error {
+	wd, err := unix.InotifyAddWatch(s.fd, "/proc/self/fd/"+strconv.Itoa(int(file.Fd())), watchMask&^unix.IN_DONT_FOLLOW)
 	if errors.Is(err, unix.ENOSPC) {
 		return ErrWatchLimit
 	}
@@ -200,18 +233,13 @@ func (s *Stream) addWatch(dir string) error {
 	return nil
 }
 
-// watchInside adds every path inside dir to found and watches the
-// directories among them. Each directory is opened without following a
-// symlink, so one swapped for a symlink or a named pipe fails at once
-// instead of leading elsewhere or blocking. Below dir, a directory that is
-// gone or cannot be read is passed over.
-func (s *Stream) watchInside(dir string, found *[]string) error {
-	file, err := tree.OpenDir(dir, ".")
-	if err != nil {
-		return err
-	}
+// watchInside adds every path inside the directory open as file, which
+// events name dir, to found and watches the directories among them. Each is
+// opened from its parent without following a symlink, so one swapped for a
+// symlink or a named pipe fails at once instead of leading elsewhere or
+// blocking. A directory that is gone or cannot be read is passed over.
+func (s *Stream) watchInside(file *os.File, dir string, found *[]string) error {
 	entries, err := file.ReadDir(-1)
-	file.Close()
 	if err != nil {
 		return err
 	}
@@ -221,12 +249,16 @@ func (s *Stream) watchInside(dir string, found *[]string) error {
 		if !entry.IsDir() || s.shouldSkip(path) {
 			continue
 		}
-		if err := s.addWatch(path); errors.Is(err, ErrWatchLimit) {
-			return err
-		} else if err != nil {
+		child, err := tree.OpenDirAt(file, entry.Name())
+		if err != nil {
 			continue
 		}
-		if err := s.watchInside(path, found); errors.Is(err, ErrWatchLimit) {
+		err = s.addWatch(child, path)
+		if err == nil {
+			err = s.watchInside(child, path, found)
+		}
+		child.Close()
+		if errors.Is(err, ErrWatchLimit) {
 			return err
 		}
 	}
