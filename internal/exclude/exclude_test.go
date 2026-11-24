@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func newMatcher(t *testing.T, undoignore string) *Matcher {
@@ -159,9 +161,7 @@ func TestNewRefusesHugeIgnoreFileLine(t *testing.T) {
 }
 
 func TestNewReportsUnreadableIgnoreFileAsUnreadable(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, IgnoreFile), []byte("dist/\n"), 0); err != nil {
 		t.Fatal(err)

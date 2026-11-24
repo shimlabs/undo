@@ -168,3 +168,29 @@ func SocketDir(tb testing.TB) string {
 	tb.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
 }
+
+// SkipIfRoot skips a test that needs permissions to hold, which root
+// ignores.
+func SkipIfRoot(tb testing.TB) {
+	tb.Helper()
+	if os.Geteuid() == 0 {
+		tb.Skip("root ignores permissions")
+	}
+}
+
+// PlainDir returns a new folder on the filesystem without clones that
+// UNDO_TEST_PLAIN_DIR names, and skips the test when it is not set. The
+// Linux CI job points it at ext4 or overlayfs.
+func PlainDir(tb testing.TB) string {
+	tb.Helper()
+	plain := os.Getenv("UNDO_TEST_PLAIN_DIR")
+	if plain == "" {
+		tb.Skip("UNDO_TEST_PLAIN_DIR is not set")
+	}
+	dir, err := os.MkdirTemp(plain, "project-") //nolint:usetesting // the folder must be on the filesystem UNDO_TEST_PLAIN_DIR names
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}

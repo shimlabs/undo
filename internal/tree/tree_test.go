@@ -193,9 +193,7 @@ func TestScanMatchesWalkDir(t *testing.T) {
 }
 
 func TestScanSkipsUnreadableDirectories(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read every directory")
-	}
+	testutil.SkipIfRoot(t)
 	root := t.TempDir()
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a")
 	testutil.WriteFile(t, filepath.Join(root, "pgdata", "base", "1"), "rows")
@@ -248,9 +246,7 @@ func BenchmarkScan(b *testing.B) {
 }
 
 func TestScanSkipsDirectoriesWithoutSearchPermission(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can enter every directory")
-	}
+	testutil.SkipIfRoot(t)
 	root := t.TempDir()
 	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "a")
 	testutil.WriteFile(t, filepath.Join(root, "noexec", "f"), "x")

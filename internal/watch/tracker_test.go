@@ -318,9 +318,7 @@ func TestTrackerWithRootTypedInOtherCase(t *testing.T) {
 }
 
 func TestTrackerRecordsDirectoryThatBecomesReadable(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read every directory")
-	}
+	testutil.SkipIfRoot(t)
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	testutil.WriteFile(t, filepath.Join(root, "data", "rows"), "data")
 	if err := os.Chmod(filepath.Join(root, "data"), 0o000); err != nil {
@@ -459,9 +457,7 @@ func TestTrackerStartedAgainSeesChangesMadeWhileStopped(t *testing.T) {
 }
 
 func TestTrackerKeepsUnreadableDirectoriesUntilReadable(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read any directory")
-	}
+	testutil.SkipIfRoot(t)
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	locked := filepath.Join(root, "locked")
 	testutil.WriteFile(t, filepath.Join(locked, "secret.txt"), "secret")
@@ -543,9 +539,7 @@ func TestTrackerNeverActsThroughSymlinkedParent(t *testing.T) {
 // A file that was unreadable at checkpoint 2 and unchanged at checkpoint 3.
 // Checkpoint 3 never saved it, so restoring 3 must not write an older copy.
 func TestTrackerDoesNotRestoreOldContentOfUnreadableFile(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	secret := filepath.Join(root, "secret.txt")
 	testutil.WriteFile(t, secret, "v1")
@@ -575,9 +569,7 @@ func TestTrackerDoesNotRestoreOldContentOfUnreadableFile(t *testing.T) {
 
 // Same scenario through scans only, for comparison.
 func TestScanDoesNotRestoreOldContentOfUnreadableFile(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	_, projectStore, root := newTrackerWithFiles(t)
 	secret := filepath.Join(root, "secret.txt")
 	testutil.WriteFile(t, secret, "v1")
@@ -689,9 +681,7 @@ func TestTrackerStartedAgainAfterRulesChange(t *testing.T) {
 // A directory that was unreadable and becomes readable is restored correctly
 // at the checkpoint where it became readable.
 func TestRestoreOfDirectoryReadableAgain(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
 	locked := filepath.Join(root, "docs")
@@ -725,9 +715,7 @@ func TestRestoreOfDirectoryReadableAgain(t *testing.T) {
 // An unreadable directory, then a watcher restart that resumes events.
 // The restarted tracker must still know the directory was never saved.
 func TestTrackerKeepsUnreadableDirectoryAcrossRestart(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root can read any directory")
-	}
+	testutil.SkipIfRoot(t)
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "1")
 	locked := filepath.Join(root, "docs")
@@ -807,9 +795,7 @@ func TestRestoreOfDirectoryMovedOutEditedAndBack(t *testing.T) {
 // secret.txt is unreadable at checkpoint 2 and still at checkpoint 3, then
 // readable again. It existed at checkpoint 3, so restoring 3 must keep it.
 func TestTrackerKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	secret := filepath.Join(root, "secret.txt")
 	testutil.WriteFile(t, secret, "v1")
@@ -839,9 +825,7 @@ func TestTrackerKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
 }
 
 func TestScanKeepsUnreadableUnchangedFileInRestore(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	_, projectStore, root := newTrackerWithFiles(t)
 	secret := filepath.Join(root, "secret.txt")
 	testutil.WriteFile(t, secret, "v1")

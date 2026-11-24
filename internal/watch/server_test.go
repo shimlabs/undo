@@ -311,9 +311,7 @@ func TestServerPrunesWhenQuiet(t *testing.T) {
 }
 
 func TestServerStopsWhenStreamCannotRestart(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read any file")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root, socketDir := newServerProject(t)
 	done, _ := runServer(t, projectStore, Options{SocketDir: socketDir, IdleTimeout: time.Minute})
 	client := Client{SocketDir: socketDir}
