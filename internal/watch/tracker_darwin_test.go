@@ -123,3 +123,21 @@ func TestTrackerReadsOnlyTheFolderOfALateChange(t *testing.T) {
 		t.Error("a late change in src made the checkpoint compare the whole project")
 	}
 }
+
+// A rename reports the old name and the new one, and the new name's event
+// can be the one that comes late; the renamed tree must still be in the
+// checkpoint.
+func TestTrackerSeesRenameWhoseNewNameComesLate(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
+	if err := os.Rename(filepath.Join(root, "src"), filepath.Join(root, "source")); err != nil {
+		t.Fatal(err)
+	}
+	if !projectTracker.waitForMarker() {
+		t.Fatal("the events never arrived")
+	}
+	dropEvents(projectTracker, filepath.Join(root, "source"))
+
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
