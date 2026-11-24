@@ -25,10 +25,8 @@ func statusCommand(parsed flags, env Env) error {
 	out.Headingf("%s", displayPath(root))
 	projectStore, err := store.Open(env.StoreHome, root)
 	switch {
-	case isMissingProject(err) && !clone.IsSupportedIn(root):
-		printField(out, "Checkpoints", "none yet; this filesystem cannot clone, so run "+out.Bold("undo checkpoint --copy"))
 	case isMissingProject(err):
-		printField(out, "Checkpoints", "none yet; run "+out.Bold("undo checkpoint")+" to take one")
+		printNoCheckpointsField(out, root, false)
 	case err != nil:
 		return err
 	default:
@@ -50,6 +48,15 @@ func statusCommand(parsed flags, env Env) error {
 	printField(out, "Excluded", terminal.Printable(strings.Join(matcher.Patterns(), ", ")))
 	printField(out, "Not covered", "anything outside this folder: databases, git push, API calls")
 	return nil
+}
+
+// printNoCheckpointsField says how to take the first checkpoint.
+func printNoCheckpointsField(out *terminal.Writer, root string, isCopyMode bool) {
+	if !isCopyMode && !clone.IsSupportedIn(root) {
+		printField(out, "Checkpoints", "none yet; this filesystem cannot clone, so run "+out.Bold("undo checkpoint --copy"))
+		return
+	}
+	printField(out, "Checkpoints", "none yet; run "+out.Bold("undo checkpoint")+" to take one")
 }
 
 // printField writes one labeled line of undo status.
@@ -75,9 +82,10 @@ func printStore(out *terminal.Writer, env Env, projectStore *store.Store) error 
 	if err := printCheckpointSummary(out, projectStore, checkpoints); err != nil {
 		return err
 	}
-	if projectStore.IsCopyMode() {
+	switch {
+	case projectStore.IsCopyMode():
 		printField(out, "Storage", "full copies, because copy mode is on")
-	} else {
+	case clone.IsSupportedIn(projectStore.Root()):
 		printField(out, "Storage", "clones that share data with the project")
 	}
 	printField(out, "Disk used", fmt.Sprintf("about %s not shared with the project, limit %s", formatBytes(diskUsage), formatBytes(store.DefaultLimits().MaxBytes)))
@@ -118,7 +126,7 @@ func logTime(line string) (time.Time, error) {
 // they were saved.
 func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store, checkpoints []store.Checkpoint) error {
 	if len(checkpoints) == 0 {
-		printField(out, "Checkpoints", "0")
+		printNoCheckpointsField(out, projectStore.Root(), projectStore.IsCopyMode())
 		return nil
 	}
 	printField(out, "Checkpoints", fmt.Sprintf("%s, the oldest %s", formatCount(len(checkpoints)), timeAgo(checkpoints[0].Time)))

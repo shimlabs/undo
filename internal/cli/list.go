@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/shell"
@@ -156,6 +157,10 @@ func printNoCheckpoints(env Env, parsed flags) error {
 		return fmt.Errorf("%s %w", displayPath(root), errNoSuchProject)
 	}
 	out.Printf("No checkpoints yet in %s.\n", displayPath(root))
+	if !clone.IsSupportedIn(root) {
+		out.Printf("Run %s to start; this filesystem cannot clone.\n", out.Bold(projectCommand(env, parsed, "undo checkpoint --copy")))
+		return nil
+	}
 	if installed, _ := agentHooks(); len(installed) == 0 {
 		out.Printf("Run %s to take one before every agent command, or %s to take one now.\n", out.Bold("undo install <agent>"), out.Bold("undo checkpoint"))
 		return nil
