@@ -166,6 +166,9 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 		return isUnchanged
 	}
 	written = slices.DeleteFunc(written, isUnchanged)
+	// Directories that differ only in their times need none of the checks
+	// below either: they are no change on their own.
+	written, unchangedDirs := p.splitUnchangedDirs(written)
 	// The safety checkpoint could not save a file undo cannot read, so the
 	// restore must not change it either.
 	unreadable := p.unreadableFiles(slices.Concat(written, removed))
@@ -186,11 +189,15 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	kept := slices.Sorted(maps.Keys(p.keepReasons))
 	written = slices.DeleteFunc(written, isInsideAny(kept))
 	written = slices.DeleteFunc(written, isUnchanged)
+	written = slices.DeleteFunc(written, p.isUnchangedDir)
 	removed = slices.DeleteFunc(removed, isInsideAny(kept))
 	// A checkpoint of a project that was missing has no root, but removing
 	// the project folder itself would act outside it, so it stays, empty.
 	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
-	written, p.unchangedDirs = p.splitUnchangedDirs(written)
+	// A locked directory, or one in a locked directory, cannot get its times
+	// back, and a kept path is left as it is.
+	untouchable := slices.Concat(kept, p.lockedPaths(unchangedDirs))
+	p.unchangedDirs = slices.DeleteFunc(unchangedDirs, func(rel string) bool { return isAtOrInside(rel, untouchable) })
 	p.changes = Changes{
 		Written: written, Removed: removed, Kept: kept, KeepReasons: p.keepReasons, Dirs: p.dirsAmong(written, removed, kept),
 		Unstable: inputs.manifest.Unstable, Lost: lost, MissingExcluded: p.missingExcluded(inputs),

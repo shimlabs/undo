@@ -343,3 +343,25 @@ func TestRestoreWithLockedFileRenamedInCase(t *testing.T) {
 	}
 	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
 }
+
+// A folder in a locked folder whose only change is its times: a restore has
+// nothing to do there, and must not ask the user to unlock anything.
+func TestRestoreLeavesFolderWithOnlyNewTimesInLockedFolder(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "vault", "inbox", "a.txt"), "a")
+	lockFile(t, filepath.Join(root, "vault"), root, projectStore.Dir())
+	first := take(t, projectStore, "1")
+	makeTemporaryFile(t, filepath.Join(root, "vault", "inbox"))
+
+	changes, err := Plan(projectStore, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.Written)+len(changes.Removed)+len(changes.Kept) != 0 {
+		t.Fatalf("written %v, kept %v for a folder whose only change is its times", changes.Written, changes.Kept)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "changed")
+	if applied := apply(t, projectStore, first.ID); len(applied.Kept) != 0 {
+		t.Fatalf("kept %v along with a real change", applied.Kept)
+	}
+}
