@@ -310,14 +310,14 @@ func reasonRows(action string, paths []string, reason string, color func(string)
 // listed.
 func printChanges(out *terminal.Writer, changes restore.Changes) int {
 	written, removed := changeRows(changes.Written, changes.Removed, changes.Dirs)
-	changeRows := slices.Concat(withColor(written, "restore", out.Green), withColor(removed, "remove", out.Red))
-	rows := slices.Concat(changeRows, keptRows(out, changes, changes.Kept))
+	restoreRows := slices.Concat(withColor(written, "restore", out.Green), withColor(removed, "remove", out.Red))
+	rows := slices.Concat(restoreRows, keptRows(out, changes, changes.Kept))
 	printRows(out, rows)
 	if len(rows) > 0 && len(changes.MissingExcluded) > 0 {
 		out.Println()
 	}
 	printMissingExcluded(out, changes)
-	return rowsCount(changeRows)
+	return rowsCount(restoreRows)
 }
 
 // maxNamedPaths is how many missing excluded paths are named before the
