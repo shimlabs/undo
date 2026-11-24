@@ -190,8 +190,18 @@ func TestCopyAtNeverOpensExistingAppleDoubleName(t *testing.T) {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, filepath.Join(src, "._p"), "payload")
+	srcDir, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srcDir.Close()
+	dstDir, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dstDir.Close()
 	finished := make(chan error, 1)
-	go func() { finished <- copyByPath(t, CopyAt, filepath.Join(src, "._p"), filepath.Join(dst, "._p")) }()
+	go func() { finished <- CopyAt(srcDir, "._p", dstDir, "._p") }()
 	select {
 	case err := <-finished:
 		if err == nil {
