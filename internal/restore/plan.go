@@ -184,7 +184,13 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	if len(unreadable)+len(locked)+len(blocked) > 0 {
 		written, removed = tree.Changed(p.current, p.targetListing())
 	}
+	// A directory the restore would remove cannot go while it holds a kept
+	// path, such as a locked file in a folder made after the checkpoint.
+	holdingKept := ancestorsOf(slices.Collect(maps.Keys(p.keepReasons)))
+	occupied := slices.DeleteFunc(slices.Clone(removed), func(rel string) bool { return !holdingKept[rel] })
+	p.keep(KeptOccupied, occupied)
 	kept := slices.Sorted(maps.Keys(p.keepReasons))
+	removed = slices.DeleteFunc(removed, func(rel string) bool { return holdingKept[rel] })
 	written = slices.DeleteFunc(written, isInsideAny(kept))
 	written = slices.DeleteFunc(written, isUnchanged)
 	written = slices.DeleteFunc(written, p.isUnchangedDir)
@@ -414,6 +420,17 @@ func isInsideAny(dirs []string) func(rel string) bool {
 }
 
 // isAtOrInside reports whether rel is one of dirs or inside one of them.
+// ancestorsOf returns the folders that hold any of paths, the root aside.
+func ancestorsOf(paths []string) map[string]bool {
+	ancestors := map[string]bool{}
+	for _, rel := range paths {
+		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
+			ancestors[dir] = true
+		}
+	}
+	return ancestors
+}
+
 func isAtOrInside(rel string, dirs []string) bool {
 	return slices.ContainsFunc(dirs, func(dir string) bool {
 		return rel == dir || strings.HasPrefix(rel, dir+"/")

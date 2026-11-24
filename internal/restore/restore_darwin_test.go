@@ -365,3 +365,17 @@ func TestRestoreLeavesFolderWithOnlyNewTimesInLockedFolder(t *testing.T) {
 		t.Fatalf("kept %v along with a real change", applied.Kept)
 	}
 }
+
+// A folder made after the checkpoint is removed by a restore, but not while
+// it holds a locked file, which the restore keeps.
+func TestRestoreKeepsNewFolderHoldingLockedFile(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, "k", "f"), "x")
+	lockFile(t, filepath.Join(root, "k", "f"), root, projectStore.Dir())
+
+	changes := apply(t, projectStore, 1)
+	if slices.Contains(changes.Removed, "k") || !slices.Contains(changes.Kept, "k") {
+		t.Fatalf("removed %v, kept %v; want k kept, as it holds a locked file", changes.Removed, changes.Kept)
+	}
+}
