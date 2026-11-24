@@ -50,12 +50,14 @@ func (c Client) Checkpoint(projectStore *store.Store, options store.CheckpointOp
 	if c.Start == nil {
 		return projectStore.Take(options)
 	}
-	if start != nil {
-		projectStore.LogError(fmt.Errorf("watcher unavailable, scanned the project instead: %w", err))
-	}
+	serverErr := err
 	checkpoint, err = projectStore.Take(options)
 	if err != nil {
+		// The scan's error reaches the user, and usually has the same cause.
 		return checkpoint, err
+	}
+	if start != nil {
+		projectStore.LogError(fmt.Errorf("the watcher failed, so the checkpoint scanned the project instead: %w", serverErr))
 	}
 	if _, err := projectStore.PruneIfDue(time.Now(), store.DefaultLimits()); err != nil {
 		projectStore.LogError(fmt.Errorf("pruning failed: %w", err))

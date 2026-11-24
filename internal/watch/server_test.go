@@ -198,6 +198,30 @@ func TestCheckpointLogsWhyItScanned(t *testing.T) {
 	}
 }
 
+// The scan's own error reaches the user, and logging the watcher's too would
+// show the same failure twice.
+func TestCheckpointLogsNothingWhenScanFailsToo(t *testing.T) {
+	projectStore, root, _ := newServerProject(t)
+	shared := t.TempDir()
+	if err := os.Chmod(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	client := Client{SocketDir: shared, Start: func(string) (<-chan error, error) { return nil, nil }}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), root); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: "first", Dir: root}); err == nil {
+		t.Fatal("a checkpoint of a project replaced by a symlink succeeded")
+	}
+	if last := projectStore.LastError(); last != "" {
+		t.Fatalf("last error = %q, want nothing logged", last)
+	}
+}
+
 func TestSocketDirRefusesSymlink(t *testing.T) {
 	link := filepath.Join(t.TempDir(), "undo")
 	if err := os.Symlink(t.TempDir(), link); err != nil {
