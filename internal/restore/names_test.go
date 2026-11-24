@@ -88,3 +88,42 @@ func assertContent(t *testing.T, path, want string) {
 		t.Fatalf("%s holds %q, %v; want %q", filepath.Base(path), data, err, want)
 	}
 }
+
+func TestRestoreAndMergeNamesNearTheLimit(t *testing.T) {
+	for _, name := range []string{
+		strings.Repeat("x", 255),
+		strings.Repeat("\u6f22", 83) + ".t", // 83 CJK characters, 3 bytes each
+		strings.Repeat("a\xe9", 120) + "\xe9\xe9.txt",
+	} {
+		projectStore, root := newProject(t)
+		if err := os.WriteFile(filepath.Join(root, name), []byte("v1"), 0o600); err != nil {
+			t.Logf("the filesystem refuses %q: %v", name, err)
+			continue
+		}
+		take(t, projectStore, "1")
+		testutil.WriteFile(t, filepath.Join(root, name), "v2")
+		take(t, projectStore, "2")
+		testutil.WriteFile(t, filepath.Join(root, name), "v3")
+		take(t, projectStore, "3")
+		apply(t, projectStore, 2)
+		assertContent(t, filepath.Join(root, name), "v2")
+		if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
+			t.Fatalf("prune: %v", err)
+		}
+		checkpoints, err := projectStore.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		testutil.WriteFile(t, filepath.Join(root, name), "v5")
+		apply(t, projectStore, checkpoints[0].ID)
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if strings.Contains(entry.Name(), ".undo-") {
+				t.Errorf("temporary file left: %q", entry.Name())
+			}
+		}
+	}
+}
