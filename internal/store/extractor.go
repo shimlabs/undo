@@ -1,8 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,6 +58,48 @@ func (e *Extractor) ExtractAt(rel string, source Source, dir *os.File, name stri
 		return errors.Join(&os.LinkError{Op: "renameat", Old: tempName, New: name, Err: err}, unix.Unlinkat(dirFd, tempName, 0))
 	}
 	return nil
+}
+
+// HasContent reports whether file holds the same bytes as the stored copy of
+// the file rel recorded in source.
+func (e *Extractor) HasContent(rel string, source Source, file *os.File) (bool, error) {
+	srcDir, srcName, release, err := e.openStored(rel, source)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	fd, err := unix.Openat(int(srcDir.Fd()), srcName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return false, &os.PathError{Op: "openat", Path: srcName, Err: err}
+	}
+	stored := os.NewFile(uintptr(fd), srcName)
+	defer stored.Close()
+	return sameBytes(stored, file)
+}
+
+// contentChunkSize is how much of each file sameBytes compares at a time.
+const contentChunkSize = 64 << 10
+
+// sameBytes reports whether first and second hold the same bytes.
+func sameBytes(first, second io.Reader) (bool, error) {
+	firstChunk, secondChunk := make([]byte, contentChunkSize), make([]byte, contentChunkSize)
+	for {
+		firstCount, firstErr := io.ReadFull(first, firstChunk)
+		secondCount, secondErr := io.ReadFull(second, secondChunk)
+		if !bytes.Equal(firstChunk[:firstCount], secondChunk[:secondCount]) {
+			return false, nil
+		}
+		isFirstDone := errors.Is(firstErr, io.EOF) || errors.Is(firstErr, io.ErrUnexpectedEOF)
+		isSecondDone := errors.Is(secondErr, io.EOF) || errors.Is(secondErr, io.ErrUnexpectedEOF)
+		switch {
+		case firstErr != nil && !isFirstDone:
+			return false, firstErr
+		case secondErr != nil && !isSecondDone:
+			return false, secondErr
+		case isFirstDone || isSecondDone:
+			return isFirstDone && isSecondDone, nil
+		}
+	}
 }
 
 // ExtractBaseDir writes the whole directory rel from the base to name in
