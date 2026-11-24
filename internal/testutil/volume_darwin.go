@@ -9,18 +9,25 @@ import (
 )
 
 // ExFATDir returns a new folder on an exFAT disk image, where macOS keeps
-// each file's extended attributes in a "._" file beside it. The image is
-// detached and deleted when the test ends.
+// each file's extended attributes in a "._" file beside it.
 func ExFATDir(tb testing.TB) string {
+	tb.Helper()
+	return VolumeDir(tb, "ExFAT")
+}
+
+// VolumeDir returns a new folder named project at the top of a disk image
+// of filesystem, as hdiutil names it, such as "APFS" or "ExFAT". The image
+// is detached and deleted when the test ends.
+func VolumeDir(tb testing.TB, filesystem string) string {
 	tb.Helper()
 	work := TempDir(tb)
 	image := filepath.Join(work, "volume.dmg")
 	mountPoint := filepath.Join(work, "volume")
-	if out, err := exec.CommandContext(tb.Context(), "hdiutil", "create", "-quiet", "-size", "32m", "-fs", "ExFAT", "-volname", "undotest", image).CombinedOutput(); err != nil {
-		tb.Skipf("cannot make an exFAT disk image: %v: %s", err, out)
+	if out, err := exec.CommandContext(tb.Context(), "hdiutil", "create", "-quiet", "-size", "32m", "-fs", filesystem, "-volname", "undotest", image).CombinedOutput(); err != nil {
+		tb.Skipf("cannot make a %s disk image: %v: %s", filesystem, err, out)
 	}
 	if out, err := exec.CommandContext(tb.Context(), "hdiutil", "attach", "-quiet", "-nobrowse", "-mountpoint", mountPoint, image).CombinedOutput(); err != nil {
-		tb.Skipf("cannot attach an exFAT disk image: %v: %s", err, out)
+		tb.Skipf("cannot attach a %s disk image: %v: %s", filesystem, err, out)
 	}
 	// The test's context is canceled before cleanups run.
 	detachContext := context.WithoutCancel(tb.Context())

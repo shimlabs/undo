@@ -311,14 +311,14 @@ func TestRestoreToCheckpointOfProjectWithoutAnyFails(t *testing.T) {
 }
 
 // Copy mode stays on for good, so where clones work it would only cost disk.
-func TestCheckpointRefusesCopyFlagWhereClonesWork(t *testing.T) {
+func TestCheckpointCopyFlagKeepsClonesWhereTheyWork(t *testing.T) {
 	root := newProject(t)
 	code, out := run(t, root, "", "checkpoint", "--copy")
-	if code != 2 || !strings.Contains(out, "This filesystem can clone, so --copy is not needed here.") {
+	if code != 0 || !strings.Contains(out, "Clones work here, so --copy is not needed") {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	if _, out := run(t, root, "", "list"); !strings.Contains(out, "No checkpoints yet") {
-		t.Fatalf("a refused --copy took a checkpoint:\n%s", out)
+	if out := mustRun(t, root, "status"); strings.Contains(out, "full copies") {
+		t.Fatalf("--copy turned copy mode on where clones work:\n%s", out)
 	}
 }
 

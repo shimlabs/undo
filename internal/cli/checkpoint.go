@@ -20,25 +20,34 @@ func checkpointCommand(parsed flags, env Env) error {
 		return err
 	}
 	defer projectStore.Close()
-	isCopyModeNew := parsed.isCopyMode && !projectStore.IsCopyMode()
-	if isCopyModeNew {
-		if err := projectStore.SetCopyMode(true); err != nil {
-			return err
-		}
-	}
 	label := parsed.label
 	if label == "" {
 		label = "undo checkpoint"
 	}
-	checkpoint, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: label, Dir: env.Dir})
+	options := store.CheckpointOptions{Label: label, Dir: env.Dir}
+	// Copy mode stays on for good, so it is turned on only once a clone has
+	// failed: the filesystem's type does not say whether the store, which
+	// may be on another volume, can clone from the project.
+	checkpoint, err := env.checkpointer()(projectStore, options)
+	isEnablingCopyMode := parsed.isCopyMode && errors.Is(err, store.ErrCloneUnsupported) && !projectStore.IsCopyMode()
+	if isEnablingCopyMode {
+		if err := projectStore.SetCopyMode(true); err != nil {
+			return err
+		}
+		checkpoint, err = env.checkpointer()(projectStore, options)
+	}
 	if err != nil {
 		return err
 	}
-	if isCopyModeNew {
-		env.stdout().Successf("Took checkpoint %d. Checkpoints of this project now keep full copies, which take as much disk as the project.", checkpoint.ID)
-		return nil
+	out := env.stdout()
+	switch {
+	case isEnablingCopyMode:
+		out.Successf("Took checkpoint %d. Checkpoints of this project now keep full copies, which take as much disk as the project.", checkpoint.ID)
+	case parsed.isCopyMode && !projectStore.IsCopyMode():
+		out.Successf("Took checkpoint %d. Clones work here, so --copy is not needed and checkpoints share data with the project.", checkpoint.ID)
+	default:
+		out.Successf("Took checkpoint %d.", checkpoint.ID)
 	}
-	env.stdout().Successf("Took checkpoint %d.", checkpoint.ID)
 	return nil
 }
 
