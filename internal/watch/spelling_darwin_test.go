@@ -263,3 +263,16 @@ func TestChildIndexFollowsListing(t *testing.T) {
 		t.Fatalf("child index = %v, want %v", projectTracker.children, want)
 	}
 }
+
+// Events spell a path the way the command did, so removing a folder by
+// another case names a path the record of excluded paths does not hold.
+// The root's own entry still changes.
+func TestTrackerDropsExcludedFolderRemovedUnderOtherCase(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	takeCheckpoint(t, projectTracker, "first")
+	if err := os.RemoveAll(filepath.Join(root, "NODE_MODULES")); err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "removed").ID)
+}
