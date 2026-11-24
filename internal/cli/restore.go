@@ -151,6 +151,11 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 		if printNothingToRestore(out, changes, checkpoint.ID) && isLatest {
 			out.Printf("Run %s to pick an earlier checkpoint, then %s.\n", out.Bold(projectCommand(env, parsed, "undo list")), out.Bold("undo to <id>"))
 		}
+		if len(changes.Kept) > 0 {
+			// The project still differs, so a script must not carry on as if
+			// it had been restored.
+			return errAlreadyReported
+		}
 		return nil
 	}
 	out.Println()

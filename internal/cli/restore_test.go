@@ -185,3 +185,17 @@ func TestDiffOfOnePathSaysRestoreIt(t *testing.T) {
 		t.Fatalf("diff of one path:\n%s", out)
 	}
 }
+
+func TestRestoreThatOnlyKeepsPathsExitsNonZero(t *testing.T) {
+	testutil.SkipIfRoot(t)
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	makeChangedFileUnreadable(t, root)
+
+	if code, out := run(t, root, "", "--yes"); code != 1 || !strings.Contains(out, "Nothing undo can restore") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if code, out := run(t, root, "", "diff", "1"); code != 0 {
+		t.Fatalf("diff exit %d:\n%s", code, out)
+	}
+}
