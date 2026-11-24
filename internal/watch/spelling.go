@@ -12,21 +12,36 @@ import (
 // storedSpelling returns fullPath with each directory in it spelled as the
 // filesystem stores it. On a filesystem that ignores case and Unicode form,
 // an event spells a path as the command that changed it did. storedDirs
-// keeps the directories already looked up.
-func (t *tracker) storedSpelling(storedDirs map[string]string, fullPath string) string {
+// keeps the directories already looked up, and each is looked up in its
+// parent reached through parents.
+func (t *tracker) storedSpelling(parents *parentDirs, storedDirs map[string]string, fullPath string) string {
 	dir := filepath.Dir(fullPath)
 	if dir == t.root || !t.isInRoot(dir) {
 		return fullPath
 	}
 	stored, ok := storedDirs[dir]
 	if !ok {
-		stored = t.storedSpelling(storedDirs, dir)
-		if name, err := tree.StoredName(stored); err == nil {
+		stored = t.storedSpelling(parents, storedDirs, dir)
+		if name, err := t.storedNameIn(parents, stored); err == nil {
 			stored = filepath.Join(filepath.Dir(stored), name)
 		}
 		storedDirs[dir] = stored
 	}
 	return filepath.Join(stored, filepath.Base(fullPath))
+}
+
+// storedNameIn returns the name the parent of fullPath, a path in the
+// project, stores for it.
+func (t *tracker) storedNameIn(parents *parentDirs, fullPath string) (string, error) {
+	rel, err := filepath.Rel(t.root, filepath.Dir(fullPath))
+	if err != nil {
+		return "", err
+	}
+	parent, err := parents.open(filepath.ToSlash(rel))
+	if err != nil {
+		return "", err
+	}
+	return tree.StoredNameAt(parent, filepath.Base(fullPath))
 }
 
 // removeStaleSpellings removes the listed paths in changes.uncertainDirs that

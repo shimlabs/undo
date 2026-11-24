@@ -1033,3 +1033,38 @@ func TestAddUnderSymlinkedParentAddsNothing(t *testing.T) {
 		t.Fatalf("addUnder through a symlinked parent added %v", changes.changed)
 	}
 }
+
+// An agent can swap a folder for a symlink to a folder outside the project
+// between two events of one batch. Stats go through folders reached one
+// name at a time, so nothing outside is recorded.
+func TestTrackerNeverStatsThroughParentSwappedForSymlink(t *testing.T) {
+	outside := testutil.TempDir(t)
+	testutil.WriteFile(t, filepath.Join(outside, ".ssh", "id_secret"), "PRIVATE")
+	testutil.WriteFile(t, filepath.Join(outside, "notes", "plan.txt"), "PRIVATE")
+	projectTracker, _, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	if err := os.MkdirAll(filepath.Join(root, "x", ".ssh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parents := newParentDirs(root)
+	defer parents.close()
+	if _, err := parents.open("x/.ssh"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, "x"), filepath.Join(root, "x2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "x")); err != nil {
+		t.Fatal(err)
+	}
+
+	changes := newChangeSet(projectTracker.listing)
+	for _, rel := range []string{"x/.ssh/id_secret", "x/notes/plan.txt"} {
+		if err := projectTracker.applyPath(changes, exclude.FromPatterns(nil), parents, filepath.Join(root, rel), false); err != nil {
+			t.Fatal(err)
+		}
+		if entry, isListed := changes.listing[rel]; isListed {
+			t.Fatalf("the tracker recorded %s from outside the project: %+v", rel, entry)
+		}
+	}
+}

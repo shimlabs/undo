@@ -480,11 +480,12 @@ func (t *tracker) waitForMarker() bool {
 func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, err error) {
 	changes := newChangeSet(t.listing)
 	matcher := t.matcher.Load()
-	parents := tree.NewParentChecker(t.root)
+	parents := newParentDirs(t.root)
+	defer parents.close()
 	storedDirs := map[string]string{}
 	for fullPath, isRenamed := range t.withHardLinks(dirty) {
 		if t.isCaseInsensitive {
-			fullPath = t.storedSpelling(storedDirs, fullPath)
+			fullPath = t.storedSpelling(parents, storedDirs, fullPath)
 		}
 		if err := t.applyPath(changes, matcher, parents, fullPath, isRenamed); err != nil {
 			return nil, nil, err
@@ -540,7 +541,7 @@ func (t *tracker) withHardLinks(dirty map[string]bool) map[string]bool {
 // applyPath updates the listing for one reported path. A path below a
 // symlink or a file is gone from the project, even if a stat through the
 // link would find something.
-func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parents *tree.ParentChecker, fullPath string, isRenamed bool) error {
+func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parents *parentDirs, fullPath string, isRenamed bool) error {
 	rel, err := filepath.Rel(t.root, fullPath)
 	if err != nil {
 		return err
@@ -548,14 +549,14 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 	rel = filepath.ToSlash(rel)
 	previous, wasTracked := changes.listing[rel]
 	wasDir := wasTracked && previous.Kind == tree.Dir
-	entry, storedName, err := lookUp(parents, rel, fullPath)
+	entry, storedName, err := lookUp(parents, rel)
 	switch {
 	case errors.Is(err, errPathGone):
 		changes.removeGone(rel, wasTracked, wasDir)
 		return nil
 	case err != nil:
 		return err
-	case storedName != filepath.Base(fullPath):
+	case storedName != path.Base(rel):
 		// The event names the path before a rename that changed only case or
 		// Unicode form, and the stat reached the renamed file.
 		changes.removeTree(rel, wasDir)
@@ -612,23 +613,33 @@ var errNeedsFullComparison = errors.New("a full comparison is needed")
 // errPathGone reports that a path is no longer in the project.
 var errPathGone = errors.New("path is gone")
 
-// lookUp returns the entry at fullPath and the name its directory stores for
-// it. A path below something that is not a directory, or that no longer
-// exists, is gone.
-func lookUp(parents *tree.ParentChecker, rel, fullPath string) (tree.Entry, string, error) {
-	if err := parents.Check(rel); errors.Is(err, tree.ErrParentNotDir) {
-		return tree.Entry{}, "", errPathGone
-	} else if err != nil {
-		return tree.Entry{}, "", err
+// lookUp returns the entry at rel and the name its directory stores for it,
+// through the directory reached one name at a time. A path below something
+// that is not a directory, or that no longer exists, is gone.
+func lookUp(parents *parentDirs, rel string) (tree.Entry, string, error) {
+	if rel == "." {
+		dir, err := parents.open(".")
+		if err != nil {
+			return tree.Entry{}, "", err
+		}
+		entry, err := tree.StatAt(dir, ".")
+		return entry, ".", err
 	}
-	entry, err := tree.Stat(fullPath)
+	dir, err := parents.open(path.Dir(rel))
 	if isGone(err) {
 		return tree.Entry{}, "", errPathGone
 	}
 	if err != nil {
 		return tree.Entry{}, "", err
 	}
-	storedName, err := tree.StoredName(fullPath)
+	entry, err := tree.StatAt(dir, path.Base(rel))
+	if isGone(err) {
+		return tree.Entry{}, "", errPathGone
+	}
+	if err != nil {
+		return tree.Entry{}, "", err
+	}
+	storedName, err := tree.StoredNameAt(dir, path.Base(rel))
 	if isGone(err) {
 		return tree.Entry{}, "", errPathGone
 	}
@@ -649,8 +660,8 @@ func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir str
 	if err != nil {
 		return err
 	}
-	// A directory that cannot be read is left out, so its entries reach the
-	// listing only with the next full comparison.
+	// A folder that cannot be read returns fs.ErrPermission, and
+	// applyEvents compares the whole project instead.
 	found, skipped, err := tree.ScanDir(t.root, filepath.ToSlash(rel), matcher)
 	if err != nil {
 		return err

@@ -79,7 +79,8 @@ func Scan(root string, matcher *exclude.Matcher) (Listing, Skipped, error) {
 // ScanDir lists every path inside the directory rel below root, as Scan
 // does, with paths relative to root. rel itself is left out. The directory
 // is reached one name at a time, so a symlink anywhere on the way to it
-// means it is gone.
+// means it is gone. A directory rel that cannot be opened returns an error
+// matching fs.ErrPermission, where Scan records it as unreadable.
 func ScanDir(root, rel string, matcher *exclude.Matcher) (Listing, Skipped, error) {
 	file, err := OpenDir(root, rel)
 	if errors.Is(err, fs.ErrNotExist) {
