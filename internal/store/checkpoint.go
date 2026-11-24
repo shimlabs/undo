@@ -254,7 +254,7 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		Changed:         map[string]tree.Entry{},
 		Deleted:         changes.Deleted,
 		Unreadable:      changes.Unreadable,
-		Excluded:        withoutAppleDoubleFiles(withoutStoreDirs(changes.Excluded)),
+		Excluded:        withoutAppleDoubleFiles(withoutStoreDirs(slices.Clone(changes.Excluded))),
 		ExcludePatterns: changes.ExcludePatterns,
 	}
 	files := splitChanged(changes, &manifest)
@@ -483,19 +483,19 @@ func (s *Store) cloneStable(dirs dirPair, rel string, entry tree.Entry) (tree.En
 	}
 }
 
-// withoutAppleDoubleFiles drops the "._" files macOS keeps beside files on
-// filesystems without extended attributes. macOS removes and writes them with
-// those files, so a restore must not report them gone.
+// withoutAppleDoubleFiles drops, in place, the "._" files macOS keeps beside
+// files on filesystems without extended attributes. macOS removes and writes
+// them with those files, so a restore must not report them gone.
 func withoutAppleDoubleFiles(excluded []string) []string {
 	return slices.DeleteFunc(excluded, func(rel string) bool {
 		return strings.HasPrefix(path.Base(rel), appledouble.Prefix)
 	})
 }
 
-// withoutStoreDirs drops the stores undo keeps next to projects, which are
-// excluded but are not the project's own.
+// withoutStoreDirs drops, in place, the stores undo keeps next to projects,
+// which are excluded but are not the project's own.
 func withoutStoreDirs(excluded []string) []string {
-	return slices.DeleteFunc(slices.Clone(excluded), func(rel string) bool {
+	return slices.DeleteFunc(excluded, func(rel string) bool {
 		return strings.HasPrefix(path.Base(rel), storeDirPrefix)
 	})
 }
