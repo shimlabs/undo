@@ -301,3 +301,53 @@ func startWatcher(t *testing.T, projectStore *store.Store) watch.Client {
 }
 
 var errWatcherGone = errors.New("the test's watcher is gone")
+
+// Folders made in quick succession, as mkdir -p, git clone or tar make them.
+// Every later edit inside them must reach the checkpoints.
+func TestWatcherSavesEditsInFoldersMadeTogether(t *testing.T) {
+	root := testutil.TempDir(t)
+	projectStore, err := store.Create(t.TempDir(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { projectStore.Close() })
+	client := startWatcher(t, projectStore)
+	take := func(label string) store.Checkpoint {
+		t.Helper()
+		checkpoint, err := client.Checkpoint(projectStore, store.CheckpointOptions{Label: label, Dir: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line := projectStore.LastError(); line != "" {
+			t.Fatalf("the checkpoint did not go through the watcher: %s", line)
+		}
+		return checkpoint
+	}
+	testutil.WriteFile(t, filepath.Join(root, "README"), "r")
+	take("1")
+	files := make([]string, 0, 80)
+	for i := range 20 {
+		for j := range 4 {
+			files = append(files, filepath.Join(root, fmt.Sprintf("pkg%d", i), fmt.Sprintf("sub%d", j), "f.txt"))
+		}
+	}
+	for _, file := range files {
+		testutil.WriteFile(t, file, "v1")
+	}
+	take("2")
+	for _, file := range files {
+		testutil.WriteFile(t, file, "v2 longer")
+	}
+	third := take("3")
+	if differences := listingDifferences(t, projectStore, third.ID, true); differences != "" {
+		t.Fatalf("checkpoint 3 differs from a scan:\n%s", differences)
+	}
+	for _, file := range files {
+		testutil.WriteFile(t, file, "v3 even longer")
+	}
+	take("4")
+	apply(t, projectStore, third.ID)
+	for _, file := range files {
+		testutil.AssertContent(t, file, "v2 longer")
+	}
+}

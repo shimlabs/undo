@@ -9,6 +9,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/shimlabs/undo/internal/tree"
 )
 
 // inotifyRecord encodes one inotify event the way the kernel does, with name
@@ -83,5 +85,32 @@ func TestWatchTreeNeverFollowsSymlinkedParent(t *testing.T) {
 	stream.mu.Unlock()
 	if len(found) != 0 || slices.Contains(watched, filepath.Join(root, "x", ".ssh")) {
 		t.Fatalf("watchTree followed a symlinked parent out of the project: found %v, watched %v", found, watched)
+	}
+}
+
+// Btrfs lists only the entries a folder held when it was opened, so a folder
+// made between the open and the watch must still be found by the listing.
+func TestWatchInsideListsFolderMadeAfterOpen(t *testing.T) {
+	root := t.TempDir()
+	stream, err := NewStream([]string{root}, nil, func([]Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	file, err := tree.OpenDir(root, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := os.Mkdir(filepath.Join(root, "made"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	stream.mu.Lock()
+	var found []string
+	err = stream.watchInside(file, root, &found)
+	stream.mu.Unlock()
+	if err != nil || !slices.Contains(found, filepath.Join(root, "made")) {
+		t.Fatalf("watchInside found %v, %v; want the folder made after the open", found, err)
 	}
 }

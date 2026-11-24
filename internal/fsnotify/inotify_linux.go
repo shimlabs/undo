@@ -239,7 +239,15 @@ func (s *Stream) addWatch(file *os.File, dir string) error {
 // symlink or a named pipe fails at once instead of leading elsewhere or
 // blocking. A directory that is gone or cannot be read is passed over.
 func (s *Stream) watchInside(file *os.File, dir string, found *[]string) error {
-	entries, err := file.ReadDir(-1)
+	// Btrfs lists only the entries a folder held when it was opened, and file
+	// was opened before its watch was added, so a folder made in between
+	// would have neither an event nor a place in the listing.
+	listed, err := tree.OpenDirAt(file, ".")
+	if err != nil {
+		return err
+	}
+	entries, err := listed.ReadDir(-1)
+	listed.Close()
 	if err != nil {
 		return err
 	}
