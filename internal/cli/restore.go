@@ -68,12 +68,31 @@ func diffCommand(parsed flags, env Env) error {
 	printCheckpointHeading(out, checkpoint, projectStore.Root())
 	count := printChanges(out, changes)
 	if count == 0 {
-		out.Successf("The project already matches checkpoint %d.", checkpoint.ID)
+		printNothingToRestore(out, changes, checkpoint.ID)
 		return nil
 	}
 	out.Println()
-	out.Printf("Run %s to restore these %s.\n", out.Bold(projectCommand(env, parsed, "undo to "+strconv.Itoa(checkpoint.ID))), pluralize(count, "path"))
+	paths := "these " + pluralize(count, "path")
+	if count == 1 {
+		paths = "it"
+	}
+	out.Printf("Run %s to restore %s.\n", out.Bold(projectCommand(env, parsed, "undo to "+strconv.Itoa(checkpoint.ID))), paths)
 	return nil
+}
+
+// printNothingToRestore says why a restore has nothing to do: the project
+// already matches the checkpoint, or what differs is kept or excluded.
+// It reports whether the project already matches.
+func printNothingToRestore(out *terminal.Writer, changes restore.Changes, id int) bool {
+	switch {
+	case len(changes.Kept) > 0:
+		out.Println()
+		out.Warningf("Nothing undo can restore; fix the kept paths above and run undo again.")
+	case len(changes.MissingExcluded) == 0:
+		out.Successf("Nothing to restore: the project already matches checkpoint %d.", id)
+		return true
+	}
+	return false
 }
 
 // findCheckpoint opens the project's store and finds the checkpoint the
@@ -128,13 +147,13 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 	}
 	count := printChanges(out, changes)
 	if count == 0 {
-		out.Successf("Nothing to restore: the project already matches checkpoint %d.", checkpoint.ID)
-		if isLatest {
+		if printNothingToRestore(out, changes, checkpoint.ID) && isLatest {
 			out.Printf("Run %s to pick an earlier checkpoint, then %s.\n", out.Bold(projectCommand(env, parsed, "undo list")), out.Bold("undo to <id>"))
 		}
 		return nil
 	}
 	out.Println()
+	shownKept := changes.Kept
 	if !parsed.isConfirmed {
 		if !confirm(env, out.Bold(fmt.Sprintf("Restore %s?", pluralize(count, "path")))+" [y/N] ") {
 			out.Println("Nothing restored.")
@@ -144,7 +163,20 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 			return err
 		}
 	}
-	printRestored(env, parsed, changes, wasDeleted)
+	if printNotRestored(out, changes, shownKept) {
+		out.Println()
+	}
+	count = restoredCount(changes)
+	pronoun := "them"
+	if count == 1 {
+		pronoun = "it"
+	}
+	out.Successf("Restored %s. Run %s to put %s back.", pluralize(count, "path"), out.Bold(projectCommand(env, parsed, "undo")), pronoun)
+	if wasDeleted && parsed.project == "" {
+		// The shell's folder is a new one now, which its old handle does not
+		// show.
+		out.Printf("Run %s to see the restored files.\n", out.Bold("cd ."))
+	}
 	return nil
 }
 
@@ -155,28 +187,6 @@ func planOrApply(env Env, parsed flags, projectStore *store.Store, id int) (rest
 		return restore.Apply(projectStore, id, env.checkpointer())
 	}
 	return restore.Plan(projectStore, id)
-}
-
-// printRestored reports what a restore did and how to take it back.
-func printRestored(env Env, parsed flags, applied restore.Changes, wasDeleted bool) {
-	out := env.stdout()
-	if printNotRestored(out, applied) {
-		out.Println()
-	}
-	count := restoredCount(applied)
-	pronoun := "them"
-	if count == 1 {
-		pronoun = "it"
-	}
-	out.Successf("Restored %s. Run %s to put %s back.", pluralize(count, "path"), out.Bold(projectCommand(env, parsed, "undo")), pronoun)
-	if wasDeleted {
-		out.Println("Checkpoints leave out excluded folders, such as node_modules/; reinstall them.")
-	}
-	if wasDeleted && parsed.project == "" {
-		// The shell's folder is a new one now, which its old handle does not
-		// show.
-		out.Printf("Run %s to see the restored files.\n", out.Bold("cd ."))
-	}
 }
 
 // projectCommand returns commandLine with the --project flag the user gave,
@@ -258,19 +268,25 @@ func keepReasons() map[restore.KeepReason]string {
 	}
 }
 
-// printNotRestored lists what the restore left alone and why, and reports
-// whether it listed anything.
-func printNotRestored(out *terminal.Writer, applied restore.Changes) bool {
-	rows := make([]changeRow, 0, len(applied.Kept)+len(applied.Lost)+len(applied.Unstable)+len(applied.Skipped))
-	reasons := keepReasons()
-	for _, rel := range applied.Kept {
-		rows = append(rows, changeRow{action: "kept", path: displayRel(rel, applied.Dirs[rel]), detail: reasons[applied.KeepReasons[rel]], color: out.Yellow})
-	}
+// printNotRestored lists what the restore left alone and why, except the
+// kept paths already shown, and reports whether it listed anything.
+func printNotRestored(out *terminal.Writer, applied restore.Changes, shownKept []string) bool {
+	kept := slices.DeleteFunc(slices.Clone(applied.Kept), func(rel string) bool { return slices.Contains(shownKept, rel) })
+	rows := keptRows(out, applied, kept)
 	rows = append(rows, reasonRows("lost", applied.Lost, "its saved copy is gone, as after a power cut", out.Red)...)
 	rows = append(rows, reasonRows("check", applied.Unstable, "it was changing while it was saved", out.Yellow)...)
 	rows = append(rows, reasonRows("skipped", applied.Skipped, "sockets and devices cannot be restored", out.Dim)...)
 	printRows(out, rows)
 	return len(rows) > 0
+}
+
+func keptRows(out *terminal.Writer, changes restore.Changes, kept []string) []changeRow {
+	reasons := keepReasons()
+	rows := make([]changeRow, 0, len(kept))
+	for _, rel := range kept {
+		rows = append(rows, changeRow{action: "kept", path: displayRel(rel, changes.Dirs[rel]), detail: reasons[changes.KeepReasons[rel]], color: out.Yellow})
+	}
+	return rows
 }
 
 func reasonRows(action string, paths []string, reason string, color func(string) string) []changeRow {
@@ -281,12 +297,53 @@ func reasonRows(action string, paths []string, reason string, color func(string)
 	return rows
 }
 
-// printChanges lists the changes and returns how many it listed.
+// printChanges lists the changes, the paths the restore keeps, and the
+// excluded paths it cannot bring back, and returns how many changes it
+// listed.
 func printChanges(out *terminal.Writer, changes restore.Changes) int {
 	written, removed := changeRows(changes.Written, changes.Removed, changes.Dirs)
-	rows := slices.Concat(withColor(written, "restore", out.Green), withColor(removed, "remove", out.Red))
+	changeRows := slices.Concat(withColor(written, "restore", out.Green), withColor(removed, "remove", out.Red))
+	rows := slices.Concat(changeRows, keptRows(out, changes, changes.Kept))
 	printRows(out, rows)
-	return rowsCount(rows)
+	if len(rows) > 0 && len(changes.MissingExcluded) > 0 {
+		out.Println()
+	}
+	printMissingExcluded(out, changes)
+	return rowsCount(changeRows)
+}
+
+// maxNamedPaths is how many missing excluded paths are named before the
+// rest are counted.
+const maxNamedPaths = 3
+
+// printMissingExcluded names the excluded paths the checkpoint had that are
+// gone, which no restore brings back.
+func printMissingExcluded(out *terminal.Writer, changes restore.Changes) {
+	missing := changes.MissingExcluded
+	if len(missing) == 0 {
+		return
+	}
+	names := make([]string, 0, maxNamedPaths+1)
+	for _, rel := range missing[:min(len(missing), maxNamedPaths)] {
+		names = append(names, displayRel(rel, changes.Dirs[rel]))
+	}
+	if len(missing) > maxNamedPaths {
+		names = append(names, fmt.Sprintf("%d more", len(missing)-maxNamedPaths))
+	}
+	verb, pronoun := "are", "them"
+	if len(missing) == 1 {
+		verb, pronoun = "is", "it"
+	}
+	out.Warningf("%s %s excluded from checkpoints, so undo cannot bring %s back. Reinstall or rebuild %s.", joinWithAnd(names), verb, pronoun, pronoun)
+}
+
+// joinWithAnd joins items as a list in a sentence: "a", "a and b", "a, b
+// and c".
+func joinWithAnd(items []string) string {
+	if len(items) <= 1 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 // restoredCount returns how many of the listed changes the restore made.

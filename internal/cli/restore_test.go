@@ -111,3 +111,81 @@ func TestPrintRowsAlignsDetailsAfterAccentedPaths(t *testing.T) {
 		t.Fatalf("details are not aligned:\n%s", out.String())
 	}
 }
+
+func TestUndoNamesExcludedFolderItCannotBringBack(t *testing.T) {
+	root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	mustRun(t, root, "checkpoint")
+	if err := os.RemoveAll(filepath.Join(root, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+
+	out := mustRun(t, root, "--yes")
+	if !strings.Contains(out, "node_modules/ is excluded from checkpoints, so undo cannot bring it back.") || strings.Contains(out, "already matches") {
+		t.Fatalf("undo after removing node_modules:\n%s", out)
+	}
+}
+
+func TestRestoreNamesExcludedFolderItLeftOut(t *testing.T) {
+	root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	mustRun(t, root, "checkpoint")
+	for _, rel := range []string{"node_modules", "f.txt"} {
+		if err := os.RemoveAll(filepath.Join(root, rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out := mustRun(t, root, "--yes")
+	if !strings.Contains(out, "Restored 1 path.") || !strings.Contains(out, "node_modules/ is excluded from checkpoints") {
+		t.Fatalf("undo after removing node_modules and f.txt:\n%s", out)
+	}
+}
+
+func makeChangedFileUnreadable(t *testing.T, root string) {
+	t.Helper()
+	testutil.WriteFile(t, filepath.Join(root, "f.txt"), "changed")
+	if err := os.Chmod(filepath.Join(root, "f.txt"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "f.txt"), 0o644)
+}
+
+func TestDiffShowsPathsTheRestoreKeeps(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	makeChangedFileUnreadable(t, root)
+
+	out := mustRun(t, root, "diff", "1")
+	if !strings.Contains(out, "kept  f.txt  undo cannot read it") || !strings.Contains(out, "Nothing undo can restore") || strings.Contains(out, "already matches") {
+		t.Fatalf("diff with only an unreadable change:\n%s", out)
+	}
+}
+
+func TestUndoShowsKeptPathsBeforeAsking(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	makeChangedFileUnreadable(t, root)
+	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "x")
+
+	_, out := run(t, root, "n\n", "to", "1")
+	kept, prompt := strings.Index(out, "kept"), strings.Index(out, "[y/N]")
+	if kept < 0 || prompt < 0 || kept > prompt {
+		t.Fatalf("the kept row is not shown before the question:\n%s", out)
+	}
+}
+
+func TestDiffOfOnePathSaysRestoreIt(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "x")
+	if out := mustRun(t, root, "diff", "1"); !strings.Contains(out, "Run undo to 1 to restore it.") {
+		t.Fatalf("diff of one path:\n%s", out)
+	}
+}
