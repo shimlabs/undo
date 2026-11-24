@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/testutil"
 )
@@ -1088,16 +1089,31 @@ func TestRestoreSetsFolderTimesAlongWithRealChanges(t *testing.T) {
 	requireSame(t, want, snapshot(t, root))
 }
 
-// allDefaultsRemoved is an .undoignore that brings back every default
+// allDefaultsRemoved returns an .undoignore that brings back every default
 // exclude, so a checkpoint is taken with no exclude patterns at all.
-const allDefaultsRemoved = "!node_modules/\n!.venv/\n!venv/\n!__pycache__/\n!target/\n!.next/\n!.turbo/\n!.gradle/\n!.cache/\n!.undo-*/\n"
+func allDefaultsRemoved(t *testing.T) string {
+	t.Helper()
+	matcher, err := exclude.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines strings.Builder
+	for _, pattern := range matcher.Patterns() {
+		lines.WriteString("!" + pattern + "\n")
+	}
+	return lines.String()
+}
 
 func TestRestoreUsesCheckpointRulesWhenTheyExcludedNothing(t *testing.T) {
 	projectStore, root := newProject(t)
-	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), allDefaultsRemoved)
+	undoignore := allDefaultsRemoved(t)
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), undoignore)
 	testutil.WriteFile(t, filepath.Join(root, "target", "release.bin"), "built by hand")
 	take(t, projectStore, "1")
-	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), strings.Replace(allDefaultsRemoved, "!target/\n", "", 1))
+	if manifest, err := projectStore.Manifest(1); err != nil || len(manifest.ExcludePatterns) != 0 {
+		t.Fatalf("checkpoint 1 was taken with exclude patterns %v, %v; want none", manifest.ExcludePatterns, err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), strings.Replace(undoignore, "!target/\n", "", 1))
 	if err := os.RemoveAll(filepath.Join(root, "target")); err != nil {
 		t.Fatal(err)
 	}
