@@ -80,6 +80,17 @@ type tracker struct {
 // server has to stop and let clients scan instead.
 var errStreamStopped = errors.New("watching stopped")
 
+// streamStoppedError is a failure that stopped the tracker's watching. It
+// matches errStreamStopped, and its message is its cause's alone, since
+// whoever logs it already says the watcher stopped.
+type streamStoppedError struct{ cause error }
+
+func (e streamStoppedError) Error() string { return e.cause.Error() }
+
+func (e streamStoppedError) Unwrap() error { return e.cause }
+
+func (e streamStoppedError) Is(target error) bool { return target == errStreamStopped }
+
 // newTracker starts watching the project in projectStore. Its first
 // checkpoint compares the whole project, because changes made before it
 // started are not known. Replaying the system's event history instead can
@@ -134,7 +145,7 @@ func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint,
 		// treat them as created after the checkpoint.
 		t.stream.Close()
 		if err := t.startStream(); err != nil {
-			return store.Checkpoint{}, fmt.Errorf("%w: %w", errStreamStopped, err)
+			return store.Checkpoint{}, streamStoppedError{cause: err}
 		}
 		shouldRescan = true
 	}
