@@ -134,6 +134,38 @@ func Create(home, root string) (*Store, error) {
 	return openAt(dir, root)
 }
 
+// FormatError is a store written in a layout this version of undo cannot
+// read. It matches ErrNewerFormat or ErrOlderFormat.
+type FormatError struct {
+	// Dir is the store's folder.
+	Dir string
+	// Root is the project whose checkpoints the store holds.
+	Root   string
+	Format int
+}
+
+func (e *FormatError) Error() string {
+	return e.Dir + ": " + e.formatError().Error()
+}
+
+// Is reports whether target is ErrNewerFormat or ErrOlderFormat, whichever
+// the store's format is.
+func (e *FormatError) Is(target error) bool {
+	return target == e.formatError()
+}
+
+// IsNewer reports whether a newer version of undo wrote the store.
+func (e *FormatError) IsNewer() bool {
+	return e.Format > format
+}
+
+func (e *FormatError) formatError() error {
+	if e.IsNewer() {
+		return ErrNewerFormat
+	}
+	return ErrOlderFormat
+}
+
 // CreateIfCloneable returns the store of the project at root, as Create
 // does, but refuses to make a new one where the project's filesystem cannot
 // clone, with ErrCloneUnsupported. A checkpoint refused for that then leaves
@@ -189,11 +221,8 @@ func initStore(dir, root string, files *os.Root) (*Store, error) {
 		return nil, err
 	}
 	settings := *s.config.Load()
-	if settings.Format > format {
-		return nil, fmt.Errorf("%s: %w", dir, ErrNewerFormat)
-	}
-	if settings.Format != 0 && settings.Format < format {
-		return nil, fmt.Errorf("%s: %w", dir, ErrOlderFormat)
+	if settings.Format != 0 && settings.Format != format {
+		return nil, &FormatError{Dir: dir, Root: root, Format: settings.Format}
 	}
 	if settings.Format == 0 {
 		settings.Format, settings.Root = format, root
