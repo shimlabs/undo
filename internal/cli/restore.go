@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -173,6 +172,11 @@ func printRestored(env Env, parsed flags, applied restore.Changes, wasDeleted bo
 	if wasDeleted {
 		out.Println("Checkpoints leave out excluded folders, such as node_modules/; reinstall them.")
 	}
+	if wasDeleted && parsed.project == "" {
+		// The shell's folder is a new one now, which its old handle does not
+		// show.
+		out.Printf("Run %s to see the restored files.\n", out.Bold("cd ."))
+	}
 }
 
 // projectCommand returns commandLine with the --project flag the user gave,
@@ -182,11 +186,7 @@ func projectCommand(env Env, parsed flags, commandLine string) string {
 	if parsed.project == "" {
 		return commandLine
 	}
-	project := parsed.project
-	if !filepath.IsAbs(project) {
-		project = filepath.Join(env.Dir, project)
-	}
-	return commandLine + " --project " + shellPath(project)
+	return commandLine + " --project " + shellPath(absolutePath(parsed.project, env.Dir))
 }
 
 // isTerminal reports whether in is a terminal a person can answer from.

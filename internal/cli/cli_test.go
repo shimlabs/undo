@@ -537,3 +537,46 @@ func TestMissingProjectPathIsAnError(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
+
+func TestUndoInsideDeletedProjectRestoresIt(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := run(t, root, "", "--yes")
+	if code != 0 || !strings.Contains(out, "Run cd . to see the restored files.") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "f.txt")); string(data) != "keep me" {
+		t.Fatalf("f.txt = %q after undo inside the deleted project", data)
+	}
+}
+
+func TestUndoInsideDeletedSubfolderRestoresProject(t *testing.T) {
+	root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main")
+	mustRun(t, root, "checkpoint")
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, out := run(t, filepath.Join(root, "src"), "", "--yes"); code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package main" {
+		t.Fatalf("src/main.go = %q after undo inside the deleted subfolder", data)
+	}
+}
+
+func TestListInsideDeletedProjectShowsItsCheckpoints(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if out := mustRun(t, root, "list"); !strings.Contains(out, "undo checkpoint") || strings.Contains(out, "No checkpoints yet") {
+		t.Fatalf("list inside the deleted project:\n%s", out)
+	}
+}

@@ -144,18 +144,16 @@ func printNoCheckpoints(env Env, parsed flags) error {
 		return nil
 	}
 	root, err := projectRoot(env, parsed)
-	if err == nil && parsed.project != "" {
-		if _, statErr := os.Stat(root); errors.Is(statErr, fs.ErrNotExist) {
-			return fmt.Errorf("%s %w", displayPath(root), errNoSuchProject)
-		}
-	}
 	if errors.Is(err, project.ErrNotProject) {
 		out.Println(sentence(notProjectMessage(err)))
 		out.Printf("Run %s inside a project folder.\n", out.Bold("undo"))
 		return nil
 	}
 	if err != nil {
-		root = env.Dir
+		return err
+	}
+	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%s %w", displayPath(root), errNoSuchProject)
 	}
 	out.Printf("No checkpoints yet in %s.\n", displayPath(root))
 	if installed, _ := agentHooks(); len(installed) == 0 {

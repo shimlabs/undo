@@ -89,12 +89,16 @@ func Run(args []string, env Env) int {
 }
 
 // projectRoot returns the root of the project in env.Dir, or of the project
-// that --project names, which may have been deleted.
+// that --project names. Either may have been deleted, as when the shell is
+// still in a folder an agent removed.
 func projectRoot(env Env, parsed flags) (string, error) {
-	if parsed.project == "" {
-		return project.Root(env.Dir)
+	if parsed.project != "" {
+		return deletedOrExistingRoot(parsed.project, env.Dir)
 	}
-	return deletedOrExistingRoot(parsed.project, env.Dir)
+	if _, err := os.Stat(env.Dir); errors.Is(err, fs.ErrNotExist) {
+		return deletedRootAround(env.StoreHome, env.Dir)
+	}
+	return project.Root(env.Dir)
 }
 
 // openStore opens the existing store of the project. It returns an error
@@ -116,12 +120,50 @@ func createStore(env Env, parsed flags) (*store.Store, error) {
 	return store.Create(env.StoreHome, root)
 }
 
+func absolutePath(path, dir string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(dir, path)
+}
+
+// deletedRootAround returns the root of the deleted project that held dir:
+// the nearest folder at or above dir with a store. Without one, dir is
+// taken as the root.
+func deletedRootAround(home, dir string) (string, error) {
+	existing := filepath.Dir(dir)
+	for !exists(existing) && existing != filepath.Dir(existing) {
+		existing = filepath.Dir(existing)
+	}
+	// Stores record resolved roots, so the part of dir that still exists is
+	// resolved the way they were.
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", err
+	}
+	rest, err := filepath.Rel(existing, dir)
+	if err != nil {
+		return "", err
+	}
+	dir = filepath.Join(resolved, rest)
+	for candidate := dir; candidate != resolved; candidate = filepath.Dir(candidate) {
+		if projectStore, err := store.Open(home, candidate); err == nil {
+			projectStore.Close()
+			return candidate, nil
+		}
+	}
+	return dir, nil
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
 // deletedOrExistingRoot returns the project root for path. A deleted project
 // has no folder to look in, so its path is taken as the root.
 func deletedOrExistingRoot(path, dir string) (string, error) {
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(dir, path)
-	}
+	path = absolutePath(path, dir)
 	if _, err := os.Stat(path); err == nil {
 		return project.Root(path)
 	} else if !errors.Is(err, fs.ErrNotExist) {
