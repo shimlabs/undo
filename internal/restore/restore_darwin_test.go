@@ -542,3 +542,30 @@ func TestRestoreOnExFATBringsBackExtendedAttributes(t *testing.T) {
 		t.Fatalf("com.example.tag = %q, %v; want red (store in %s)", value[:max(size, 0)], err, projectStore.Dir())
 	}
 }
+
+// A folder's Finder tags are extended attributes of the folder, which a
+// restore that makes the folder again must bring back.
+func TestRestoreBringsBackFolderExtendedAttributes(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "before the folder")
+	folder := filepath.Join(root, "tagged")
+	testutil.WriteFile(t, filepath.Join(folder, "a"), "1")
+	testutil.WriteFile(t, filepath.Join(folder, "b"), "2")
+	if err := os.Chmod(folder, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Setxattr(folder, "com.example.tag", []byte("red"), 0); err != nil {
+		t.Fatal(err)
+	}
+	tagged := take(t, projectStore, "with the folder")
+	if err := os.RemoveAll(folder); err != nil {
+		t.Fatal(err)
+	}
+
+	apply(t, projectStore, tagged.ID)
+	value := make([]byte, 16)
+	size, err := unix.Getxattr(folder, "com.example.tag", value)
+	if err != nil || string(value[:size]) != "red" {
+		t.Fatalf("com.example.tag = %q, %v; want red", value[:max(size, 0)], err)
+	}
+}

@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/shimlabs/undo/internal/appledouble"
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/tree"
@@ -258,7 +260,7 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		ExcludePatterns: changes.ExcludePatterns,
 	}
 	files := splitChanged(changes, &manifest)
-	if len(files) == 0 {
+	if len(files) == 0 && !slices.ContainsFunc(slices.Collect(maps.Values(manifest.Changed)), isDir) {
 		return manifest, nil
 	}
 	clonedFiles := make([]clonedFile, len(files))
@@ -291,7 +293,36 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 			manifest.Changed[rel] = cloned.entry
 		}
 	}
-	return manifest, nil
+	return manifest, s.storeDirAttributes(layer, manifest.Changed)
+}
+
+func isDir(entry tree.Entry) bool {
+	return entry.Kind == tree.Dir
+}
+
+// storeDirAttributes makes each changed directory in the layer and gives it
+// the extended attributes the project's directory has, such as Finder tags,
+// so a restore that makes the directory again can bring them back. A
+// directory gone since the scan, or one that cannot be opened, is left out.
+func (s *Store) storeDirAttributes(layer *os.Root, changed map[string]tree.Entry) error {
+	for rel, entry := range changed {
+		if entry.Kind != tree.Dir {
+			continue
+		}
+		dirs, err := s.openDirPair(layer, rel)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		err = clone.CopyExtendedAttributes(dirs.project, dirs.stored)
+		dirs.close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // cloneBatch clones files[i] for each i in batch into clonedFiles[i]. Many

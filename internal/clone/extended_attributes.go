@@ -10,11 +10,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// copyExtendedAttributes gives dst the extended attributes of src. An
-// attribute the destination refuses, as a filesystem without extended
-// attributes or a protected system attribute does, is left out, and so is
-// one removed from src while it is copied.
-func copyExtendedAttributes(src, dst *os.File) error {
+// CopyExtendedAttributes gives dst, a file or directory, the extended
+// attributes of src. An attribute the destination refuses, as a filesystem
+// without extended attributes or a protected system attribute does, is left
+// out, and so is one removed from src while it is copied.
+func CopyExtendedAttributes(src, dst *os.File) error {
 	srcFd, dstFd := int(src.Fd()), int(dst.Fd())
 	names, err := readAttributeNames(srcFd)
 	if err != nil {

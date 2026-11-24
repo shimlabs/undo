@@ -105,7 +105,7 @@ func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, 
 	out := os.NewFile(uintptr(outFd), name)
 	err = options.copyContent(in, out)
 	if err == nil && options.shouldCopyAttributes {
-		err = copyExtendedAttributes(in, out)
+		err = CopyExtendedAttributes(in, out)
 	}
 	if err == nil {
 		if chmodErr := unix.Fchmod(outFd, perm); chmodErr != nil {
@@ -135,7 +135,7 @@ func copyDirAt(srcFd int, srcName string, dir *os.File, name string, perm uint32
 	}
 	defer dst.Close()
 	if options.shouldCopyAttributes {
-		if err := copyExtendedAttributes(src, dst); err != nil {
+		if err := CopyExtendedAttributes(src, dst); err != nil {
 			return err
 		}
 	}

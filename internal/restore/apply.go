@@ -176,7 +176,7 @@ func (p *restorePlan) writePath(rel string, isClonable bool, extractor *store.Ex
 		pending.files = append(pending.files, rel)
 		return nil
 	default:
-		isWritten, err := p.writeOther(rel, source.Entry)
+		isWritten, err := p.writeOther(extractor, rel, source)
 		if !isWritten {
 			pending.skipped = append(pending.skipped, rel)
 		}
@@ -248,15 +248,24 @@ func (p *restorePlan) writeFiles(extractor *store.Extractor, files []string) err
 	return err
 }
 
-// writeOther creates the directory or named pipe rel describes, and reports
-// whether it could. Sockets and devices cannot be restored.
-func (p *restorePlan) writeOther(rel string, entry tree.Entry) (bool, error) {
+// writeOther creates the directory or named pipe source describes, and
+// reports whether it could. Sockets and devices cannot be restored.
+func (p *restorePlan) writeOther(extractor *store.Extractor, rel string, source store.Source) (bool, error) {
+	entry := source.Entry
 	switch {
 	case entry.Kind == tree.Dir:
 		if err := p.projectRoot.MkdirAll(filepath.FromSlash(rel), 0o700); err != nil {
 			return true, err
 		}
-		return true, p.restoreNameCase(rel)
+		if err := p.restoreNameCase(rel); err != nil {
+			return true, err
+		}
+		dir, err := openDirIn(p.projectRoot, rel)
+		if err != nil {
+			return true, err
+		}
+		defer dir.Close()
+		return true, extractor.CopyDirAttributes(rel, source, dir)
 	case entry.Mode&fs.ModeNamedPipe != 0:
 		return true, p.inParent(rel, func(dir *os.File, name string) error {
 			return clone.MkfifoAt(dir, name, entry.Mode)

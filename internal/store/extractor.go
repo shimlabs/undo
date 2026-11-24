@@ -111,6 +111,29 @@ func sameBytes(first, second io.Reader, firstChunk, secondChunk []byte) (bool, e
 	}
 }
 
+// CopyDirAttributes gives dir, the directory rel was restored as, the
+// extended attributes stored with rel as source records. A directory a
+// checkpoint stored no copy of keeps the attributes it has.
+func (e *Extractor) CopyDirAttributes(rel string, source Source, dir *os.File) error {
+	srcDir, srcName, release, err := e.openStored(rel, source)
+	if errors.Is(err, ErrStoredFileMissing) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer release()
+	stored, err := tree.OpenDirAt(srcDir, srcName)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer stored.Close()
+	return clone.CopyExtendedAttributes(stored, dir)
+}
+
 // ExtractBaseDir writes the whole directory rel from the base to name in
 // dir, which must not exist, in one clone. Only use it for a directory
 // UnchangedDirs returned.
