@@ -33,3 +33,8 @@ func peerUID(conn *net.UnixConn) (int, error) {
 	}
 	return int(credentials.Uid), nil
 }
+
+// canEventsArriveLate says whether an event can be delivered after the
+// marker written after it. inotify delivers one stream's events in order, and
+// the marker folder is in the same stream as the project.
+const canEventsArriveLate = false

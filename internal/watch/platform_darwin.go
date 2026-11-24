@@ -42,3 +42,8 @@ func peerUID(conn *net.UnixConn) (int, error) {
 	}
 	return int(credentials.Uid), nil
 }
+
+// canEventsArriveLate says whether an event can be delivered after the
+// marker written after it. FSEvents can, when the event joins a later one for
+// the same path.
+const canEventsArriveLate = true
