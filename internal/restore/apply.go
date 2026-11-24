@@ -286,7 +286,21 @@ func (p *restorePlan) restoreNameCase(rel string) error {
 	if err != nil || storedName == path.Base(rel) {
 		return err
 	}
-	return p.projectRoot.Rename(filepath.FromSlash(path.Join(path.Dir(rel), storedName)), filepath.FromSlash(rel))
+	current := filepath.FromSlash(path.Join(path.Dir(rel), storedName))
+	err = p.projectRoot.Rename(current, filepath.FromSlash(rel))
+	if !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	// APFS renames a directory only if it is writable. Its mode is set back
+	// with the other directories the restore wrote.
+	info, statErr := p.projectRoot.Lstat(current)
+	if statErr != nil || !info.IsDir() {
+		return err
+	}
+	if err := p.projectRoot.Chmod(current, info.Mode().Perm()|0o200); err != nil {
+		return err
+	}
+	return p.projectRoot.Rename(current, filepath.FromSlash(rel))
 }
 
 // inParent opens the directory that holds rel through the project root and

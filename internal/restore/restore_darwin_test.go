@@ -13,6 +13,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/testutil"
+	"github.com/shimlabs/undo/internal/tree"
 )
 
 // lockFile sets the flag Finder's Locked checkbox sets, and clears it from
@@ -377,5 +378,33 @@ func TestRestoreKeepsNewFolderHoldingLockedFile(t *testing.T) {
 	changes := apply(t, projectStore, 1)
 	if slices.Contains(changes.Removed, "k") || !slices.Contains(changes.Kept, "k") {
 		t.Fatalf("removed %v, kept %v; want k kept, as it holds a locked file", changes.Removed, changes.Kept)
+	}
+}
+
+// Renaming a folder back to the checkpoint's case needs write permission on
+// it, and one that holds only excluded files has nothing else that made it
+// writable first.
+func TestRestoreRenamesReadOnlyFolderBackToItsCase(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "docs", "node_modules", "x.js"), "x")
+	first := take(t, projectStore, "1")
+	if err := os.Rename(filepath.Join(root, "docs"), filepath.Join(root, "Docs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "Docs"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "docs"), 0o755)
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
+
+	apply(t, projectStore, first.ID)
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
+	if info, err := os.Stat(filepath.Join(root, "docs")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("docs mode = %v, %v; want 0755", info, err)
+	}
+	if storedName, err := tree.StoredName(filepath.Join(root, "docs")); err != nil || storedName != "docs" {
+		t.Fatalf("the folder is spelled %q, %v; want docs", storedName, err)
 	}
 }
