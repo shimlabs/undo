@@ -8,8 +8,8 @@ import (
 	"github.com/shimlabs/undo/internal/tree"
 )
 
-// markUnreportedChanges marks dirty the names created or removed in each
-// listed directory whose entry no longer matches the listing. Creating,
+// markUnreportedChanges marks dirty the names created, removed or replaced
+// in each listed directory whose entry no longer matches the listing. Creating,
 // removing or renaming anything in a directory changes the directory's
 // times, so a change whose event has not arrived shows here. It runs before
 // the events are applied, which update the entries of the directories they
@@ -40,7 +40,7 @@ func (t *tracker) markUnreportedChanges(dirty map[string]bool) error {
 			}
 		}
 		for rel := range t.children[dir] {
-			if !names[path.Base(rel)] {
+			if !names[path.Base(rel)] || t.isReplaced(parents, rel) {
 				markDirty(dirty, t.path(rel))
 			}
 		}
@@ -71,4 +71,17 @@ func (t *tracker) changedDirs() []string {
 		return nil
 	})
 	return changed
+}
+
+// isReplaced reports whether the listed name rel now holds another file, as
+// after a rename over it, which changes its directory's times but none of
+// its names.
+func (t *tracker) isReplaced(parents *parentDirs, rel string) bool {
+	dir, err := parents.open(path.Dir(rel))
+	if err != nil {
+		return true
+	}
+	entry, err := tree.StatAt(dir, path.Base(rel))
+	listed := t.listing[rel]
+	return err != nil || entry.Kind != listed.Kind || entry.Inode != listed.Inode
 }

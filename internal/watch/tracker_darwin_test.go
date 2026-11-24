@@ -141,3 +141,63 @@ func TestTrackerSeesRenameWhoseNewNameComesLate(t *testing.T) {
 	checkpoint := takeCheckpoint(t, projectTracker, "second")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
+
+// A rename onto a listed name changes its folder's times but none of its
+// names, so the check must also see that the name holds another file.
+func TestTrackerSeesLateRenameOntoListedName(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(t *testing.T, root string)
+		late   []string
+	}{
+		{
+			name: "save through a temporary file",
+			change: func(t *testing.T, root string) {
+				t.Helper()
+				testutil.WriteFile(t, filepath.Join(root, "src", ".main.go.tmp"), "package main // saved")
+				if err := os.Rename(filepath.Join(root, "src", ".main.go.tmp"), filepath.Join(root, "src", "main.go")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			late: []string{"src/main.go"},
+		},
+		{
+			name: "move over a listed file",
+			change: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.Rename(filepath.Join(root, "docs", "guide.md"), filepath.Join(root, "README.md")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			late: []string{"README.md"},
+		},
+		{
+			name: "replace a file by a folder",
+			change: func(t *testing.T, root string) {
+				t.Helper()
+				testutil.WriteFile(t, filepath.Join(root, "src", "other.go"), "package main")
+				if err := os.Remove(filepath.Join(root, "src", "main.go")); err != nil {
+					t.Fatal(err)
+				}
+				testutil.WriteFile(t, filepath.Join(root, "src", "main.go", "inner.go"), "package inner")
+			},
+			late: []string{"src/main.go", "src/main.go/inner.go"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projectTracker, projectStore, root := newTrackerWithFiles(t)
+			takeCheckpoint(t, projectTracker, "first")
+			test.change(t, root)
+			if !projectTracker.waitForMarker() {
+				t.Fatal("the events never arrived")
+			}
+			for _, rel := range test.late {
+				dropEvents(projectTracker, filepath.Join(root, rel))
+			}
+
+			checkpoint := takeCheckpoint(t, projectTracker, "second")
+			checkMatchesScan(t, projectStore, root, checkpoint.ID)
+		})
+	}
+}
