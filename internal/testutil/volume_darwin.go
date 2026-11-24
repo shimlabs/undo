@@ -2,10 +2,12 @@ package testutil
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // ExFATDir returns a new folder on an exFAT disk image, where macOS keeps
@@ -32,8 +34,8 @@ func VolumeDir(tb testing.TB, filesystem string) string {
 	// The test's context is canceled before cleanups run.
 	detachContext := context.WithoutCancel(tb.Context())
 	tb.Cleanup(func() {
-		if out, err := exec.CommandContext(detachContext, "hdiutil", "detach", "-force", mountPoint).CombinedOutput(); err != nil {
-			tb.Errorf("detach %s: %v: %s", mountPoint, err, out)
+		if err := detach(detachContext, mountPoint); err != nil {
+			tb.Error(err)
 		}
 	})
 	dir := filepath.Join(mountPoint, "project")
@@ -41,4 +43,20 @@ func VolumeDir(tb testing.TB, filesystem string) string {
 		tb.Fatal(err)
 	}
 	return dir
+}
+
+// detach detaches the disk image mounted at mountPoint. Spotlight and other
+// system services can hold a new volume busy for a few seconds, even against
+// -force, so it tries again for a while.
+func detach(ctx context.Context, mountPoint string) error {
+	var err error
+	for range 20 {
+		var out []byte
+		if out, err = exec.CommandContext(ctx, "hdiutil", "detach", "-force", mountPoint).CombinedOutput(); err == nil {
+			return nil
+		}
+		err = fmt.Errorf("detach %s: %w: %s", mountPoint, err, out)
+		time.Sleep(500 * time.Millisecond)
+	}
+	return err
 }
