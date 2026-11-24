@@ -94,7 +94,7 @@ func ScanDir(root, rel string, matcher *exclude.Matcher) (Listing, Skipped, erro
 	if err != nil {
 		return nil, Skipped{}, &fs.PathError{Op: "fstat", Path: file.Name(), Err: err}
 	}
-	dir := directory{path: filepath.Join(root, filepath.FromSlash(rel)), rel: rel, id: fileID{device: toUint64(stat.Dev), inode: stat.Ino}}
+	dir := directory{path: filepath.Join(root, filepath.FromSlash(rel)), rel: rel, id: toFileID(&stat)}
 	return scanFrom(dir, matcher, Listing{})
 }
 
@@ -209,7 +209,7 @@ func openListed(dir directory) (*os.File, error) {
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return nil, errors.Join(&fs.PathError{Op: "fstat", Path: dir.path, Err: err}, file.Close())
 	}
-	if (fileID{device: toUint64(stat.Dev), inode: stat.Ino}) != dir.id {
+	if toFileID(&stat) != dir.id {
 		return nil, errors.Join(errDirGone, file.Close())
 	}
 	return file, nil

@@ -63,7 +63,7 @@ func statAt(dirFd int, name string) (Entry, fileID, error) {
 	default:
 		entry.Kind = Other
 	}
-	return entry, fileID{device: toUint64(stat.Dev), inode: stat.Ino}, nil
+	return entry, toFileID(&stat), nil
 }
 
 func readlinkAt(dirFd int, name string) (string, error) {
@@ -136,4 +136,8 @@ func IsCaseInsensitive(dir string) bool {
 	}
 	other, err := os.Stat(swapped)
 	return err == nil && os.SameFile(original, other)
+}
+
+func toFileID(stat *unix.Stat_t) fileID {
+	return fileID{device: toUint64(stat.Dev), inode: stat.Ino}
 }
