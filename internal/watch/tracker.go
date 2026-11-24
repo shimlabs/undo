@@ -423,10 +423,16 @@ func markDirty(dirty map[string]bool, fullPath string) {
 	}
 }
 
-// isStaleExcluded reports whether the excluded path rel is gone. Its folder
+// isStaleExcluded reports whether the excluded path rel is gone or tracked
+// now. Its folder
 // must still be listed too: on a filesystem that ignores case, a stat
 // still finds rel under a folder renamed to another spelling.
 func (t *tracker) isStaleExcluded(rel string) bool {
+	// A path the listing holds is tracked now, such as a file in place of an
+	// excluded folder.
+	if _, isListed := t.listing[rel]; isListed {
+		return true
+	}
 	if parent := path.Dir(rel); parent != "." {
 		if entry, isListed := t.listing[parent]; !isListed || entry.Kind != tree.Dir {
 			return true

@@ -254,6 +254,18 @@ func TestTrackerRecordsExcludedFolderMadeAgain(t *testing.T) {
 	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "made again").ID)
 }
 
+func TestTrackerDropsExcludedFolderReplacedByFile(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	takeCheckpoint(t, projectTracker, "first")
+	if err := os.RemoveAll(filepath.Join(root, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	// The default rule excludes node_modules only as a folder.
+	testutil.WriteFile(t, filepath.Join(root, "node_modules"), "a plain file")
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "replaced").ID)
+}
+
 // A path inside an excluded folder can reach the tracker, as a new name for
 // a listed file does, but only the folder is excluded.
 func TestTrackerRecordsOnlyTopmostExcludedPath(t *testing.T) {
