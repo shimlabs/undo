@@ -55,7 +55,10 @@ type Manifest struct {
 	// Unreadable is cumulative: every directory that could not be listed at
 	// this checkpoint, not only new ones, plus the files that could not be
 	// cloned now.
-	Unreadable      []string
+	Unreadable []string
+	// Excluded are the excluded paths that were in the project, which no
+	// checkpoint holds, so a restore can name the ones it cannot bring back.
+	Excluded        []string
 	ExcludePatterns []string
 }
 
@@ -70,6 +73,9 @@ type Changes struct {
 	// Unreadable are all the directories the caller cannot list now, not
 	// only new ones.
 	Unreadable []string
+	// Excluded are the paths in the project that the exclude rules leave
+	// out.
+	Excluded []string
 	// ExcludePatterns are the exclude rules the changes were found with.
 	ExcludePatterns []string
 }
@@ -121,6 +127,7 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 		Changed:         changed,
 		Deleted:         deleted,
 		Unreadable:      skipped.Unreadable,
+		Excluded:        skipped.Excluded,
 		ExcludePatterns: matcher.Patterns(),
 	})
 	if err != nil {
@@ -246,6 +253,7 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		Changed:         map[string]tree.Entry{},
 		Deleted:         changes.Deleted,
 		Unreadable:      changes.Unreadable,
+		Excluded:        withoutStoreDirs(changes.Excluded),
 		ExcludePatterns: changes.ExcludePatterns,
 	}
 	if manifest.Deleted == nil {
@@ -475,4 +483,12 @@ func (s *Store) cloneStable(dirs dirPair, rel string, entry tree.Entry) (tree.En
 			return entry, false, nil
 		}
 	}
+}
+
+// withoutStoreDirs drops the stores undo keeps next to projects, which are
+// excluded but are not the project's own.
+func withoutStoreDirs(excluded []string) []string {
+	return slices.DeleteFunc(slices.Clone(excluded), func(rel string) bool {
+		return strings.HasPrefix(path.Base(rel), storeDirPrefix)
+	})
 }

@@ -191,7 +191,7 @@ func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact
 	if err != nil {
 		t.Fatal(err)
 	}
-	scanned, _, err := tree.Scan(projectStore.Root(), matcher)
+	scanned, skipped, err := tree.Scan(projectStore.Root(), matcher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,6 +218,9 @@ func listingDifferences(t *testing.T, projectStore *store.Store, id int, isExact
 	}
 	for _, rel := range deleted {
 		fmt.Fprintf(&lines, "  %s: stored %+v, not in the scan\n", rel, stored[rel])
+	}
+	if !slices.Equal(manifest.Excluded, skipped.Excluded) {
+		fmt.Fprintf(&lines, "  excluded paths: recorded %v, scanned %v\n", manifest.Excluded, skipped.Excluded)
 	}
 	return lines.String()
 }

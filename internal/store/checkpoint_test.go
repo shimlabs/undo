@@ -116,6 +116,34 @@ func TestTakeIgnoresExcluded(t *testing.T) {
 	}
 }
 
+func TestTakeRecordsExcludedPaths(t *testing.T) {
+	projectStore, root := newProject(t, map[string]string{
+		"node_modules/pkg/index.js":      "x",
+		"src/__pycache__/main.pyc":       "x",
+		".undo-0123456789ab/index.jsonl": "",
+		"main.js":                        "x",
+	})
+	checkpoint := take(t, projectStore, "first")
+	assertExcluded(t, projectStore, checkpoint.ID, []string{"node_modules", "src/__pycache__"})
+
+	if err := os.RemoveAll(filepath.Join(root, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint = take(t, projectStore, "second")
+	assertExcluded(t, projectStore, checkpoint.ID, []string{"src/__pycache__"})
+}
+
+func assertExcluded(t *testing.T, projectStore *Store, id int, want []string) {
+	t.Helper()
+	manifest, err := projectStore.Manifest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(manifest.Excluded, want) {
+		t.Fatalf("checkpoint %d records excluded paths %v, want %v", id, manifest.Excluded, want)
+	}
+}
+
 func TestTakeLockedConcurrently(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha"})
 	take(t, projectStore, "first")

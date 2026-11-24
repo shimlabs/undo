@@ -77,7 +77,7 @@ func checkMatchesScan(t *testing.T, projectStore *store.Store, root string, id i
 	if err != nil {
 		t.Fatal(err)
 	}
-	scanned, _, err := tree.Scan(root, matcher)
+	scanned, skipped, err := tree.Scan(root, matcher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +88,13 @@ func checkMatchesScan(t *testing.T, projectStore *store.Store, root string, id i
 	if !maps.Equal(scanned, stored) {
 		changed, deleted := tree.Changed(stored, scanned)
 		t.Fatalf("checkpoint %d differs from a scan: changed %v, deleted %v", id, changed, deleted)
+	}
+	manifest, err := projectStore.Manifest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(manifest.Excluded, skipped.Excluded) {
+		t.Fatalf("checkpoint %d records excluded paths %v, a scan finds %v", id, manifest.Excluded, skipped.Excluded)
 	}
 }
 
@@ -212,6 +219,53 @@ func TestTrackerFollowsExcludeRuleChanges(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "data", "important.db")); string(data) != "precious" {
 		t.Fatalf("data/important.db = %q after the restore", data)
+	}
+}
+
+func TestTrackerRecordsExcludedPaths(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "x")
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "installed").ID)
+
+	if err := os.RemoveAll(filepath.Join(root, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "removed").ID)
+
+	if err := os.Rename(filepath.Join(root, "web"), filepath.Join(root, "site")); err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "renamed").ID)
+}
+
+func TestTrackerRecordsExcludedFolderMadeAgain(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	takeCheckpoint(t, projectTracker, "first")
+	if err := os.RemoveAll(filepath.Join(root, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "removed").ID)
+	if err := os.Mkdir(filepath.Join(root, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "made again").ID)
+}
+
+// A path inside an excluded folder can reach the tracker, as a new name for
+// a listed file does, but only the folder is excluded.
+func TestTrackerRecordsOnlyTopmostExcludedPath(t *testing.T) {
+	projectTracker, _, root := newTrackerWithFiles(t)
+	inside := filepath.Join(root, "node_modules", "pkg", "index.js")
+	testutil.WriteFile(t, inside, "x")
+	takeCheckpoint(t, projectTracker, "first")
+	if _, _, err := projectTracker.applyDirty(map[string]bool{inside: false}); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(projectTracker.excluded, "node_modules/pkg/index.js") {
+		t.Fatalf("excluded paths = %v, want only node_modules", projectTracker.excluded)
 	}
 }
 

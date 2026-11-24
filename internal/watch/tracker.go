@@ -57,6 +57,10 @@ type tracker struct {
 	// request at a time.
 	listing    tree.Listing
 	unreadable []string
+	// excluded are the excluded paths in the project. Removing one changes
+	// nothing the listing holds, so every checkpoint checks they are still
+	// there.
+	excluded []string
 	// unsavedFiles are files the last checkpoint could not store, usually
 	// because they cannot be read. Every checkpoint tries them again, as a
 	// scan would, so each one records them as unsaved.
@@ -189,6 +193,7 @@ func (t *tracker) loadListing(id int) error {
 	t.replaceListing(listing)
 	t.lastID = id
 	t.unreadable, t.unsavedFiles = nil, nil
+	t.excluded = slices.Clone(manifest.Excluded)
 	for _, rel := range manifest.Unreadable {
 		if listing[rel].Kind == tree.Dir {
 			t.unreadable = append(t.unreadable, rel)
@@ -308,7 +313,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		}
 		changed, deleted = tree.Changed(t.listing, current)
 		t.replaceListing(current)
-		t.unreadable = skipped.Unreadable
+		t.unreadable, t.excluded = skipped.Unreadable, skipped.Excluded
 	}
 
 	checkpoint, err := t.store.Commit(latest.ID, options, store.Changes{
@@ -316,6 +321,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		Changed:         changed,
 		Deleted:         deleted,
 		Unreadable:      t.unreadable,
+		Excluded:        t.excluded,
 		ExcludePatterns: t.matcher.Load().Patterns(),
 	})
 	if errors.Is(err, store.ErrStale) {
@@ -356,6 +362,7 @@ func (t *tracker) applyEvents(dirty map[string]bool) (changed, deleted []string,
 		return nil, nil, false, err
 	}
 	t.unreadable = slices.DeleteFunc(t.unreadable, t.isReadableOrGone)
+	t.excluded = slices.DeleteFunc(slices.Compact(slices.Sorted(slices.Values(t.excluded))), t.isStaleExcluded)
 	t.updateHardLinked(changed, deleted)
 	t.children.update(changed, deleted)
 	return changed, deleted, false, nil
@@ -416,6 +423,19 @@ func markDirty(dirty map[string]bool, fullPath string) {
 	if _, isDirty := dirty[fullPath]; !isDirty {
 		dirty[fullPath] = false
 	}
+}
+
+// isStaleExcluded reports whether the excluded path rel is gone. Its folder
+// must still be listed too: on a filesystem that ignores case, a stat
+// still finds rel under a folder renamed to another spelling.
+func (t *tracker) isStaleExcluded(rel string) bool {
+	if parent := path.Dir(rel); parent != "." {
+		if entry, isListed := t.listing[parent]; !isListed || entry.Kind != tree.Dir {
+			return true
+		}
+	}
+	_, err := os.Lstat(t.path(rel))
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 // isReadableOrGone reports whether the directory rel can be listed now, or
@@ -479,6 +499,7 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 		t.removeStaleSpellings(changes)
 	}
 	changes.finish()
+	t.excluded = append(t.excluded, changes.excluded...)
 	return slices.Sorted(maps.Keys(changes.changed)), slices.Sorted(maps.Keys(changes.deleted)), nil
 }
 
@@ -545,7 +566,7 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 	case matcher.Excludes(rel, entry.Kind == tree.Dir):
 		// What the listing held here, such as a file where an excluded
 		// directory now is, is gone from what the project tracks.
-		changes.removeTree(rel, wasDir)
+		changes.removeExcluded(rel, wasDir, isTopmostExcluded(matcher, rel))
 		return nil
 	}
 	// A directory renamed into place, even the one that was here before, can
@@ -565,6 +586,13 @@ func (t *tracker) applyPath(changes *changeSet, matcher *exclude.Matcher, parent
 		return t.addUnder(changes, matcher, fullPath)
 	}
 	return nil
+}
+
+// isTopmostExcluded reports whether the excluded path rel is in a folder the
+// project tracks, rather than inside another excluded path.
+func isTopmostExcluded(matcher *exclude.Matcher, rel string) bool {
+	parent := path.Dir(rel)
+	return parent == "." || !matcher.Excludes(parent, true)
 }
 
 // hasLinkCountChange reports whether the same file gained or lost a name.
@@ -625,10 +653,11 @@ func (t *tracker) addUnder(changes *changeSet, matcher *exclude.Matcher, dir str
 	}
 	// A directory that cannot be read is left out, so its entries reach the
 	// listing only with the next full comparison.
-	found, _, err := tree.ScanDir(t.root, filepath.ToSlash(rel), matcher)
+	found, skipped, err := tree.ScanDir(t.root, filepath.ToSlash(rel), matcher)
 	if err != nil {
 		return err
 	}
+	changes.excluded = append(changes.excluded, skipped.Excluded...)
 	for rel, entry := range found {
 		changes.update(rel, entry)
 	}

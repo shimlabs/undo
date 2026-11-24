@@ -23,6 +23,8 @@ type changeSet struct {
 	// Unicode form, the listing may still hold that name in another
 	// spelling.
 	uncertainDirs map[string]bool
+	// excluded are the excluded paths found.
+	excluded []string
 	// hasLinkCountChange is set when a listed path gained or lost a name.
 	// The other name can be anywhere, and only a full comparison finds it.
 	hasLinkCountChange bool
@@ -63,6 +65,16 @@ func (c *changeSet) removeGone(rel string, wasTracked, wasDir bool) {
 		c.removeTree(rel, wasDir)
 	} else {
 		c.uncertainDirs[path.Dir(rel)] = true
+	}
+}
+
+// removeExcluded removes what the listing held at rel, which the exclude
+// rules leave out, and records rel as excluded when it is the topmost
+// excluded path.
+func (c *changeSet) removeExcluded(rel string, wasDir, isTopmost bool) {
+	c.removeTree(rel, wasDir)
+	if isTopmost {
+		c.excluded = append(c.excluded, rel)
 	}
 }
 
