@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -614,19 +615,36 @@ func TestProjectPathInsideDeletedSubfolderFindsProject(t *testing.T) {
 	}
 }
 
-func TestOlderStoreSaysHowToStartOver(t *testing.T) {
+// writeStoreFormat sets the format the store in dir says it was written in.
+func writeStoreFormat(t *testing.T, dir, root string, format int) {
+	t.Helper()
+	config, err := json.Marshal(map[string]any{"format": format, "root": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(dir, "config.json"), string(config))
+}
+
+func TestStoreOfOtherFormatNamesProjectAndWhatToDo(t *testing.T) {
 	root := newProject(t)
 	mustRun(t, root, "checkpoint")
 	projectStore, err := store.Open(defaultStoreHome(t), root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(projectStore.Dir(), "config.json")
+	dir := projectStore.Dir()
 	projectStore.Close()
-	testutil.WriteFile(t, configPath, `{"format":1,"root":"`+root+`"}`)
+	writeStoreFormat(t, dir, root, 1)
 
 	code, out := run(t, root, "", "list")
-	if code != 1 || !strings.Contains(out, "written by an older version of undo") || !strings.Contains(out, "Move that folder aside") {
-		t.Fatalf("exit %d:\n%s", code, out)
+	if code != 1 || !strings.Contains(out, "Error: The checkpoints of "+displayPath(root)+" were saved by an older version of undo, which this version cannot read.") ||
+		!strings.Contains(out, "Run mv "+shellPath(dir)+" "+shellPath(dir+".old")+" to start new checkpoints; the old ones stay there.") {
+		t.Fatalf("older format: exit %d:\n%s", code, out)
+	}
+
+	writeStoreFormat(t, dir, root, 99)
+	code, out = run(t, root, "", "list")
+	if code != 1 || !strings.Contains(out, "were saved by a newer version of undo.") || !strings.Contains(out, "Install the latest undo to read them.") {
+		t.Fatalf("newer format: exit %d:\n%s", code, out)
 	}
 }

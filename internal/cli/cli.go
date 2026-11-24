@@ -79,8 +79,8 @@ func Run(args []string, env Env) int {
 	case errors.Is(err, store.ErrCloneUnsupported):
 		printError(errOut, withHint(fmt.Errorf("%w, so undo cannot protect this project cheaply", err),
 			fmt.Sprintf("Run %s once to keep full copies instead. They take as much disk as the project.", errOut.Bold("undo checkpoint --copy"))))
-	case errors.Is(err, store.ErrOlderFormat):
-		printError(errOut, withHint(err, "This version cannot read its checkpoints. Move that folder aside to start a new store."))
+	case errors.As(err, new(*store.FormatError)):
+		printFormatError(errOut, err)
 	case isUnreadableIgnoreFile(err):
 		printError(errOut, withHint(err, fmt.Sprintf("Run %s in the project folder, then try again.", errOut.Bold("chmod u+r "+exclude.IgnoreFile))))
 	case errors.Is(err, project.ErrNotProject):
@@ -103,4 +103,19 @@ func isUnreadableIgnoreFile(err error) bool {
 // project.
 func printNotProjectHint(out *terminal.Writer) {
 	out.Printf("Run %s inside a project folder.\n", out.Bold("undo"))
+}
+
+// printFormatError says which project's checkpoints a store of another
+// format holds, and what to do about it.
+func printFormatError(out *terminal.Writer, err error) {
+	formatErr, _ := errors.AsType[*store.FormatError](err)
+	project := displayPath(formatErr.Root)
+	if formatErr.IsNewer() {
+		out.Errorf("The checkpoints of %s were saved by a newer version of undo.", project)
+		out.Println("Install the latest undo to read them.")
+		return
+	}
+	out.Errorf("The checkpoints of %s were saved by an older version of undo, which this version cannot read.", project)
+	moveAside := "mv " + shellPath(formatErr.Dir) + " " + shellPath(formatErr.Dir+".old")
+	out.Printf("Run %s to start new checkpoints; the old ones stay there.\n", out.Bold(moveAside))
 }
