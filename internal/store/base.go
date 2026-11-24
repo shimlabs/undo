@@ -4,8 +4,10 @@ import (
 	"errors"
 	"io/fs"
 	"path"
+	"strings"
 	"sync"
 
+	"github.com/shimlabs/undo/internal/appledouble"
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/tree"
@@ -66,8 +68,11 @@ func (s *Store) cloneBase(matcher *exclude.Matcher) (tree.Listing, error) {
 	return before, nil
 }
 
-// removeUnlisted removes every path in the base that listing does not hold.
+// removeUnlisted removes every path in the base that listing does not hold,
+// except, where macOS keeps extended attributes in "._" files, the "._" file
+// of a listed path.
 func (s *Store) removeUnlisted(listing tree.Listing) error {
+	hasAppleDoubleFiles := appledouble.IsUsedIn(s.baseDir())
 	return walk.Dirs(".", func(dir string) ([]string, error) {
 		entries, err := s.readDir(s.basePath(dir))
 		if errors.Is(err, fs.ErrNotExist) {
@@ -84,6 +89,8 @@ func (s *Store) removeUnlisted(listing tree.Listing) error {
 			}
 			listed, isListed := listing[rel]
 			switch {
+			case hasAppleDoubleFiles && isAppleDoubleOfListed(listing, dir, entry.Name()):
+				// It holds the extended attributes of the file beside it.
 			case !isListed:
 				if err := s.removeAll(s.basePath(rel)); err != nil {
 					return nil, err
@@ -94,6 +101,17 @@ func (s *Store) removeUnlisted(listing tree.Listing) error {
 		}
 		return subdirs, nil
 	})
+}
+
+// isAppleDoubleOfListed reports whether name, in dir, is the "._" file of a
+// listed path in dir.
+func isAppleDoubleOfListed(listing tree.Listing, dir, name string) bool {
+	owner, isAppleDouble := strings.CutPrefix(name, appledouble.Prefix)
+	if !isAppleDouble {
+		return false
+	}
+	_, isListed := listing[path.Join(dir, owner)]
+	return isListed
 }
 
 // basePlan describes how to clone the project into the base: directories

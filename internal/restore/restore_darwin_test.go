@@ -512,3 +512,33 @@ func TestPlanOnExFATDoesNotReportAppleDoubleFilesMissing(t *testing.T) {
 		t.Fatalf("plan reports %v as excluded and gone", changes.MissingExcluded)
 	}
 }
+
+// On exFAT the store sits next to the project, on the same drive, and keeps
+// each file's extended attributes in a "._" file beside its copy. The first
+// checkpoint's copies must keep theirs too.
+func TestRestoreOnExFATBringsBackExtendedAttributes(t *testing.T) {
+	root := testutil.ExFATDir(t)
+	file := filepath.Join(root, "src", "a.ts")
+	testutil.WriteFile(t, file, "a")
+	if err := unix.Setxattr(file, "com.example.tag", []byte("red"), 0); err != nil {
+		t.Fatal(err)
+	}
+	projectStore, err := store.Create(t.TempDir(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projectStore.SetCopyMode(true); err != nil {
+		t.Fatal(err)
+	}
+	first := take(t, projectStore, "1")
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
+
+	apply(t, projectStore, first.ID)
+	value := make([]byte, 16)
+	size, err := unix.Getxattr(file, "com.example.tag", value)
+	if err != nil || string(value[:size]) != "red" {
+		t.Fatalf("com.example.tag = %q, %v; want red (store in %s)", value[:max(size, 0)], err, projectStore.Dir())
+	}
+}
