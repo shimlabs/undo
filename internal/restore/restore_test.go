@@ -1087,3 +1087,21 @@ func TestRestoreSetsFolderTimesAlongWithRealChanges(t *testing.T) {
 	}
 	requireSame(t, want, snapshot(t, root))
 }
+
+// allDefaultsRemoved is an .undoignore that brings back every default
+// exclude, so a checkpoint is taken with no exclude patterns at all.
+const allDefaultsRemoved = "!node_modules/\n!.venv/\n!venv/\n!__pycache__/\n!target/\n!.next/\n!.turbo/\n!.gradle/\n!.cache/\n!.undo-*/\n"
+
+func TestRestoreUsesCheckpointRulesWhenTheyExcludedNothing(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), allDefaultsRemoved)
+	testutil.WriteFile(t, filepath.Join(root, "target", "release.bin"), "built by hand")
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), strings.Replace(allDefaultsRemoved, "!target/\n", "", 1))
+	if err := os.RemoveAll(filepath.Join(root, "target")); err != nil {
+		t.Fatal(err)
+	}
+
+	apply(t, projectStore, 1)
+	assertContent(t, filepath.Join(root, "target", "release.bin"), "built by hand")
+}

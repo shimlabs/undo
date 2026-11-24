@@ -122,10 +122,9 @@ func loadRestoreInputs(projectStore *store.Store, id int) (restoreInputs, error)
 	if err != nil {
 		return restoreInputs{}, err
 	}
-	matcherThen := matcherNow
-	if manifest.ExcludePatterns != nil {
-		matcherThen = exclude.FromPatterns(manifest.ExcludePatterns)
-	}
+	// Gob reads an empty list back as nil, so nil means the checkpoint
+	// excluded nothing.
+	matcherThen := exclude.FromPatterns(manifest.ExcludePatterns)
 	target, err := projectStore.State(id)
 	if err != nil {
 		return restoreInputs{}, err
