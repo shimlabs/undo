@@ -29,6 +29,10 @@ type Changes struct {
 	// Lost are files whose stored copy is gone, as the newest checkpoint's
 	// copies can be after a power cut.
 	Lost []string
+	// MissingExcluded are the excluded paths the project had at the
+	// checkpoint and does not have now. No checkpoint holds them, so the
+	// restore cannot bring them back.
+	MissingExcluded []string
 }
 
 // KeepReason says why a restore left a path as it is.

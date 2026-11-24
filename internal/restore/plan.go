@@ -182,8 +182,24 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
 	p.changes = Changes{
 		Written: written, Removed: removed, Kept: kept, KeepReasons: p.keepReasons, Dirs: p.dirsAmong(written, removed, kept),
-		Unstable: inputs.manifest.Unstable, Lost: lost,
+		Unstable: inputs.manifest.Unstable, Lost: lost, MissingExcluded: p.missingExcluded(inputs),
 	}
+	for _, rel := range p.changes.MissingExcluded {
+		// A path that would match as a file too may have been either.
+		if !inputs.matcherThen.Match(rel, false) {
+			p.changes.Dirs[rel] = true
+		}
+	}
+}
+
+// missingExcluded returns the excluded paths the checkpoint recorded that the
+// project does not have now, excluded or not.
+func (p *restorePlan) missingExcluded(inputs restoreInputs) []string {
+	present := toSet(inputs.skipped.Excluded)
+	return slices.DeleteFunc(slices.Clone(inputs.manifest.Excluded), func(rel string) bool {
+		_, isListed := p.scanned[rel]
+		return isListed || present[rel]
+	})
 }
 
 // unchangedEntries returns the entries of the paths in written that an

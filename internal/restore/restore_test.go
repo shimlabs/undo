@@ -1043,3 +1043,27 @@ func TestReplannedRestoreKeepsFileUnreadableAtSafetyCheckpoint(t *testing.T) {
 		t.Fatalf("after undoing the restore, notes.txt holds %q: the restore overwrote work no checkpoint saved", got)
 	}
 }
+
+func TestPlanNamesExcludedPathsItCannotBringBack(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "x")
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "*.log\n")
+	testutil.WriteFile(t, filepath.Join(root, "build.log"), "output")
+	take(t, projectStore, "1")
+	for _, rel := range []string{"node_modules", "web", "build.log"} {
+		if err := os.RemoveAll(filepath.Join(root, rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changes, err := Plan(projectStore, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"build.log", "node_modules", "web/node_modules"}; !slices.Equal(changes.MissingExcluded, want) {
+		t.Fatalf("missing excluded paths = %v, want %v", changes.MissingExcluded, want)
+	}
+	if !changes.Dirs["node_modules"] || changes.Dirs["build.log"] {
+		t.Fatalf("dirs = %v, want node_modules marked and build.log not", changes.Dirs)
+	}
+}
