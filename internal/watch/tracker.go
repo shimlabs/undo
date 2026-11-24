@@ -70,7 +70,7 @@ type tracker struct {
 	// checkpoint checks them.
 	hardLinked map[string]bool
 	// children indexes the listing by folder. It is built the first time a
-	// spelling check needs it, and nil until then.
+	// spelling check or the late-event check needs it, and nil until then.
 	children          childIndex
 	lastID            int
 	isCaseInsensitive bool
