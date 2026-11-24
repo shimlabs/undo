@@ -1094,12 +1094,12 @@ func BenchmarkApplyDirty(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	dirOf := func(i int) string {
+	moduleDir := func(i int) string {
 		return filepath.Join(root, "src", fmt.Sprintf("pkg%02d", i/100), fmt.Sprintf("mod%04d", i))
 	}
 	for i := range 2000 {
-		for file := range 5 {
-			testutil.WriteFile(b, filepath.Join(dirOf(i), fmt.Sprintf("file%02d.go", file)), "x")
+		for fileIndex := range 5 {
+			testutil.WriteFile(b, filepath.Join(moduleDir(i), fmt.Sprintf("file%02d.go", fileIndex)), "x")
 		}
 	}
 	matcher, err := exclude.New(root)
@@ -1112,7 +1112,7 @@ func BenchmarkApplyDirty(b *testing.B) {
 	}
 	dirty := map[string]bool{}
 	for i := range 10_000 {
-		path := filepath.Join(dirOf(i%2000), fmt.Sprintf("file%02d.go", i/2000))
+		path := filepath.Join(moduleDir(i%2000), fmt.Sprintf("file%02d.go", i/2000))
 		testutil.WriteFile(b, path, "yy")
 		dirty[path] = false
 	}
