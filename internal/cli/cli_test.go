@@ -612,3 +612,35 @@ func TestNotProjectIsAnErrorForCommandsThatNeedOne(t *testing.T) {
 		}
 	}
 }
+
+func TestUndoInsideDeletedSubfolderOfExistingProject(t *testing.T) {
+	root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "src", "lib", "main.go"), "package main")
+	mustRun(t, root, "checkpoint")
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
+
+	inside := filepath.Join(root, "src", "lib")
+	if out := mustRun(t, inside, "list"); !strings.Contains(out, "undo checkpoint") {
+		t.Fatalf("list inside the deleted subfolder:\n%s", out)
+	}
+	if code, out := run(t, inside, "", "--yes"); code != 0 || !strings.Contains(out, "Run cd . to see the restored files.") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(inside, "main.go")); string(data) != "package main" {
+		t.Fatalf("src/lib/main.go = %q after undo inside the deleted subfolder", data)
+	}
+}
+
+func TestProjectPathInsideDeletedSubfolderFindsProject(t *testing.T) {
+	root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main")
+	mustRun(t, root, "checkpoint")
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
+	if out := mustRun(t, t.TempDir(), "list", "--project", filepath.Join(root, "src", "lib")); !strings.Contains(out, "undo checkpoint") {
+		t.Fatalf("list --project inside the deleted subfolder:\n%s", out)
+	}
+}

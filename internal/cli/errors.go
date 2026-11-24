@@ -59,10 +59,9 @@ var (
 	errAlreadyReported = errors.New("already reported")
 	// errNeedsTerminal means undo would ask before restoring, but no one
 	// can answer.
-	errNeedsTerminal           = errors.New("undo asks before it restores, and its input is not a terminal")
-	errProjectAndParentMissing = errors.New("does not exist, and neither does the folder it was in")
-	errNoSuchProject           = errors.New("does not exist, and undo has no checkpoints of it")
-	errFolderMissing           = errors.New("does not exist")
+	errNeedsTerminal = errors.New("undo asks before it restores, and its input is not a terminal")
+	errNoSuchProject = errors.New("does not exist, and undo has no checkpoints of it")
+	errFolderMissing = errors.New("does not exist")
 )
 
 // userMessage returns err as a sentence for people: a path in it is shown

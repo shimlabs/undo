@@ -147,8 +147,8 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 			fmt.Sprintf("Run %s to restore without asking.", env.stderr().Bold(projectCommand(env, parsed, commandLine+" --yes"))))
 	}
 	printCheckpointHeading(out, checkpoint, projectStore.Root())
-	_, statErr := os.Stat(projectStore.Root())
-	wasDeleted := errors.Is(statErr, fs.ErrNotExist)
+	// The shell may still be in a folder the restore brings back.
+	isShellFolderGone := parsed.project == "" && !exists(env.Dir)
 	changes, err := planOrApply(env, parsed, projectStore, checkpoint.ID)
 	if err != nil {
 		return err
@@ -171,21 +171,28 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 			return err
 		}
 	}
-	if printNotRestored(out, changes, shownKept) {
+	printRestored(env, parsed, changes, shownKept, isShellFolderGone)
+	return nil
+}
+
+// printRestored reports what a restore did, what it left alone beyond the
+// kept paths already shown, and how to take it back.
+func printRestored(env Env, parsed flags, applied restore.Changes, shownKept []string, isShellFolderGone bool) {
+	out := env.stdout()
+	if printNotRestored(out, applied, shownKept) {
 		out.Println()
 	}
-	count = restoredCount(changes)
+	count := restoredCount(applied)
 	pronoun := "them"
 	if count == 1 {
 		pronoun = "it"
 	}
 	out.Successf("Restored %s. Run %s to put %s back.", pluralize(count, "path"), out.Bold(projectCommand(env, parsed, "undo")), pronoun)
-	if wasDeleted && parsed.project == "" {
+	if isShellFolderGone && exists(env.Dir) {
 		// The shell's folder is a new one now, which its old handle does not
 		// show.
 		out.Printf("Run %s to see the restored files.\n", out.Bold("cd ."))
 	}
-	return nil
 }
 
 // planOrApply plans the restore of checkpoint id, or with --yes, where
