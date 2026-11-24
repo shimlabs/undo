@@ -306,9 +306,7 @@ func TestStoreNeverWritesThroughSymlinkedFiles(t *testing.T) {
 			_, _ = projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
 			_, _ = projectStore.PruneIfDue(time.Now().Add(2*time.Hour), DefaultLimits())
 
-			if data, err := os.ReadFile(outside); err != nil || string(data) != "secret key" {
-				t.Fatalf("file outside the store = %q, %v", data, err)
-			}
+			testutil.AssertContent(t, outside, "secret key")
 		})
 	}
 }
@@ -347,9 +345,7 @@ func TestOpenStoreNeverDeletesThroughSwappedBase(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "n")
 	_, _ = projectStore.Take(CheckpointOptions{Label: "second", Dir: root})
 	for _, rel := range []string{"secret", "docs/guide.md"} {
-		if data, err := os.ReadFile(filepath.Join(outside, rel)); err != nil || string(data) != "do not delete" {
-			t.Errorf("%s outside the store = %q, %v", rel, data, err)
-		}
+		testutil.AssertContent(t, filepath.Join(outside, rel), "do not delete")
 	}
 }
 

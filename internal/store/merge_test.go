@@ -136,9 +136,7 @@ func TestFinishMergeNeverRemovesThroughBaseSymlink(t *testing.T) {
 	if err := projectStore.finishMerge(); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(filepath.Join(outside, "x")); err != nil || string(data) != "outside" {
-		t.Fatalf("merge changed a file outside the store: %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(outside, "x"), "outside")
 	if target, err := os.Readlink(projectStore.basePath("a")); err != nil || target != outside {
 		t.Fatalf("base a = %q, %v; want the symlink from layer 2", target, err)
 	}
