@@ -94,6 +94,9 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 		return restorePlan{}, err
 	}
 	plan := restorePlan{root: projectStore.Root(), target: inputs.target, current: maps.Clone(inputs.current), scanned: inputs.current}
+	if inputs.rewritten, err = plan.rewrittenPaths(projectStore); err != nil {
+		return restorePlan{}, err
+	}
 	plan.planChanges(inputs)
 	return plan, nil
 }
@@ -110,6 +113,9 @@ type restoreInputs struct {
 	// restored holds the entries an earlier restore to the same checkpoint
 	// left.
 	restored tree.Listing
+	// rewritten holds the paths that hold the checkpoint's content in a new
+	// clone, such as one an earlier restore to another checkpoint wrote.
+	rewritten tree.Listing
 }
 
 func loadRestoreInputs(projectStore *store.Store, id int) (restoreInputs, error) {
@@ -154,6 +160,7 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	// Paths that still match are left alone, so they need none of the checks
 	// below.
 	p.unchanged = unchangedEntries(inputs.restored, p.current, written)
+	maps.Copy(p.unchanged, inputs.rewritten)
 	isUnchanged := func(rel string) bool {
 		_, isUnchanged := p.unchanged[rel]
 		return isUnchanged

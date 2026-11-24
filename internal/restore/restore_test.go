@@ -1105,3 +1105,68 @@ func TestRestoreUsesCheckpointRulesWhenTheyExcludedNothing(t *testing.T) {
 	apply(t, projectStore, 1)
 	assertContent(t, filepath.Join(root, "target", "release.bin"), "built by hand")
 }
+
+// A restore writes files back as new clones, so their inode and change time
+// differ from every other checkpoint's, though their content may not.
+func TestPlanLeavesFilesRestoredWithSameContent(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "package main // edited")
+	take(t, projectStore, "2")
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	apply(t, projectStore, 2)
+
+	changes, err := Plan(projectStore, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(changes.Written, []string{"src/main.go"}) {
+		t.Fatalf("written = %v, want only src/main.go", changes.Written)
+	}
+}
+
+func TestPlanLeavesFileRestoredFromAnotherCheckpointWithSameContent(t *testing.T) {
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "x")
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, "a.txt"), "y")
+	take(t, projectStore, "2")
+	apply(t, projectStore, 1)
+	latest, _, err := projectStore.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(t, projectStore, latest.ID)
+
+	changes, err := Plan(projectStore, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.Written)+len(changes.Removed) != 0 {
+		t.Fatalf("written %v, removed %v, though a.txt holds what checkpoint 2 saved", changes.Written, changes.Removed)
+	}
+}
+
+func TestPlanListsFileRewrittenKeepingSizeAndTimes(t *testing.T) {
+	projectStore, root := newProject(t)
+	path := filepath.Join(root, "README.md")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, path, "# DEMO\n")
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := Plan(projectStore, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(changes.Written, "README.md") {
+		t.Fatalf("written = %v, want README.md, whose content changed", changes.Written)
+	}
+}

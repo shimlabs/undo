@@ -11,6 +11,8 @@ import (
 // Changes lists what a restore writes, removes and leaves alone, as paths
 // relative to the project root.
 type Changes struct {
+	// Written leaves out directories that differ only in their times or
+	// inode, and paths that hold the checkpoint's content in a new clone.
 	Written []string
 	Removed []string
 	// Skipped are sockets and devices, which a restore cannot recreate.
