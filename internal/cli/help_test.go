@@ -93,3 +93,12 @@ func TestHelpForUnknownCommandPointsToCommandList(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
+
+func TestHelpListsFlagsOfPlainUndo(t *testing.T) {
+	out := mustRun(t, t.TempDir(), "--help")
+	for _, flag := range []string{"-y, --yes", "--project <path>"} {
+		if !strings.Contains(out, flag) {
+			t.Errorf("help does not list %s:\n%s", flag, out)
+		}
+	}
+}

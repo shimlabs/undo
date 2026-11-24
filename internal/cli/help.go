@@ -68,6 +68,17 @@ func printHelp(out *terminal.Writer) {
 	}
 	out.Println()
 	out.Println(out.Bold("Flags:"))
+	for _, cmd := range all {
+		if cmd.name != "" {
+			continue
+		}
+		// Plain undo has no help page of its own, so its flags are listed
+		// here.
+		for _, name := range cmd.flags {
+			flag, _ := findFlag(name)
+			out.Printf("  %-*s  %s\n", width, flagListing(flag), flag.summary)
+		}
+	}
 	out.Printf("  %-*s  %s\n", width, helpFlagListing, "Show help for undo or a command")
 	out.Printf("  %-*s  %s\n", width, versionFlagListing, "Print the version")
 	printExamples(out, []example{
