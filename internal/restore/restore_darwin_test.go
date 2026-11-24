@@ -4,8 +4,10 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -441,4 +443,42 @@ func TestRestoreBringsBackExtendedAttributes(t *testing.T) {
 	if err != nil || string(value[:size]) != "one" {
 		t.Fatalf("tag after the restore = %q, %v; want one", value[:max(size, 0)], err)
 	}
+}
+
+// On exFAT, macOS keeps a file's extended attributes in a "._" file beside
+// it, and writes or removes it with that file. A restore must neither bring
+// those back as files of their own nor remove the ones it finds, or every
+// restore would leave changes behind.
+func TestRestoreOnExFATLeavesAppleDoubleFilesAlone(t *testing.T) {
+	root := testutil.ExFATDir(t)
+	for _, name := range []string{"a.ts", "b.ts"} {
+		file := filepath.Join(root, "src", name)
+		testutil.WriteFile(t, file, name)
+		if err := unix.Setxattr(file, "com.example.tag", []byte("x"), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projectStore, err := store.Create(t.TempDir(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projectStore.SetCopyMode(true); err != nil {
+		t.Fatal(err)
+	}
+	first := take(t, projectStore, "1")
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "._new"), "attributes of a file removed since")
+
+	changes, err := Plan(projectStore, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	isAppleDouble := func(rel string) bool { return strings.HasPrefix(path.Base(rel), "._") }
+	if slices.ContainsFunc(changes.Written, isAppleDouble) || slices.ContainsFunc(changes.Removed, isAppleDouble) {
+		t.Fatalf("plan writes %v and removes %v, ._ files among them", changes.Written, changes.Removed)
+	}
+	apply(t, projectStore, first.ID)
+	testutil.AssertContent(t, filepath.Join(root, "src", "a.ts"), "a.ts")
 }

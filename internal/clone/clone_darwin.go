@@ -60,6 +60,24 @@ func MkfifoAt(dir *os.File, name string, perm fs.FileMode) error {
 	return nil
 }
 
+// HasAppleDoubleFiles reports whether macOS keeps extended attributes in "._"
+// files on the filesystem that holds dir.
+func HasAppleDoubleFiles(dir string) bool {
+	var stat unix.Statfs_t
+	return unix.Statfs(dir, &stat) == nil && isAppleDoubleFilesystem(stat)
+}
+
+// isAppleDoubleFilesystem reports whether stat is of a filesystem without
+// extended attributes of its own, on which macOS keeps a file's attributes in
+// a "._" file beside it.
+func isAppleDoubleFilesystem(stat unix.Statfs_t) bool {
+	switch unix.ByteSliceToString(stat.Fstypename[:]) {
+	case "msdos", "exfat", "smbfs", "webdav":
+		return true
+	}
+	return false
+}
+
 // IsSupportedIn reports whether the filesystem that holds dir can clone
 // files. It only reads the filesystem's type, so it changes nothing.
 func IsSupportedIn(dir string) bool {

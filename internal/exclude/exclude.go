@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"golang.org/x/sys/unix"
 )
 
@@ -24,6 +25,10 @@ func defaultPatterns() []string {
 		".undo-*/",
 	}
 }
+
+// appleDoublePattern matches the "._" files in which macOS keeps extended
+// attributes on filesystems without them, such as FAT and exFAT.
+const appleDoublePattern = "._*"
 
 // Matcher checks project paths against the exclude patterns.
 type Matcher struct {
@@ -57,6 +62,11 @@ var (
 // .undoignore file.
 func New(root string) (*Matcher, error) {
 	patterns := defaultPatterns()
+	if clone.HasAppleDoubleFiles(root) {
+		// These hold the extended attributes of the files beside them,
+		// which macOS writes and removes with those files.
+		patterns = append(patterns, appleDoublePattern)
+	}
 	file, err := openIgnoreFile(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return &Matcher{patterns: patterns}, nil
