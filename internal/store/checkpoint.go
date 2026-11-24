@@ -256,9 +256,6 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		Excluded:        withoutStoreDirs(changes.Excluded),
 		ExcludePatterns: changes.ExcludePatterns,
 	}
-	if manifest.Deleted == nil {
-		manifest.Deleted = []string{}
-	}
 	files := splitChanged(changes, &manifest)
 	if len(files) == 0 {
 		return manifest, nil

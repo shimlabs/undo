@@ -20,7 +20,7 @@ import (
 
 // format is the version of the on-disk layout. A store written with a
 // higher number is refused instead of misread.
-const format = 1
+const format = 2
 
 var (
 	// ErrCloneUnsupported means the project's filesystem cannot clone files
