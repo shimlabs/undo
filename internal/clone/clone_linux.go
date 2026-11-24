@@ -21,7 +21,7 @@ const CanCloneDirs = false
 // and returns an error matching errors.ErrUnsupported when the filesystem
 // cannot clone.
 func FileAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
-	return copyTreeAt(srcDir, srcName, dir, name, copier{content: cloneContent})
+	return copyTreeAt(srcDir, srcName, dir, name, copyOptions{copyContent: cloneContent})
 }
 
 // markUnsupported marks the errors FICLONE returns on filesystems without

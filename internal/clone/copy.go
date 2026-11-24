@@ -22,27 +22,27 @@ import (
 // where macOS keeps extended attributes in such files; that name is removed
 // and created again.
 func CopyAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
-	return copyTreeAt(srcDir, srcName, dir, name, copier{content: copyContent, shouldCopyAttributes: true})
+	return copyTreeAt(srcDir, srcName, dir, name, copyOptions{copyContent: copyBytes, shouldCopyAttributes: true})
 }
 
-// copier says how copyTreeAt fills what it creates.
-type copier struct {
-	// content fills the regular file out with the bytes of in.
-	content func(in, out *os.File) error
+// copyOptions says how copyTreeAt fills what it creates.
+type copyOptions struct {
+	// copyContent fills the regular file out with the bytes of in.
+	copyContent func(in, out *os.File) error
 	// shouldCopyAttributes says whether files and directories get the
 	// source's extended attributes too, as clones on macOS do.
 	shouldCopyAttributes bool
 }
 
-// copyContent copies the bytes of in to out.
-func copyContent(in, out *os.File) error {
+// copyBytes copies the bytes of in to out.
+func copyBytes(in, out *os.File) error {
 	_, err := io.Copy(out, in)
 	return err
 }
 
 // copyTreeAt recreates srcName in srcDir as name in dir and fills each
-// regular file as c says. Sockets and devices are skipped.
-func copyTreeAt(srcDir *os.File, srcName string, dir *os.File, name string, c copier) error {
+// regular file as options say. Sockets and devices are skipped.
+func copyTreeAt(srcDir *os.File, srcName string, dir *os.File, name string, options copyOptions) error {
 	srcFd, dirFd := int(srcDir.Fd()), int(dir.Fd())
 	var stat unix.Stat_t
 	if err := unix.Fstatat(srcFd, srcName, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
@@ -52,9 +52,9 @@ func copyTreeAt(srcDir *os.File, srcName string, dir *os.File, name string, c co
 	var err error
 	switch stat.Mode & unix.S_IFMT {
 	case unix.S_IFREG:
-		err = copyFileAt(srcFd, srcName, dirFd, name, perm, c)
+		err = copyFileAt(srcFd, srcName, dirFd, name, perm, options)
 	case unix.S_IFDIR:
-		err = copyDirAt(srcFd, srcName, dir, name, perm, c)
+		err = copyDirAt(srcFd, srcName, dir, name, perm, options)
 	case unix.S_IFLNK:
 		err = copySymlinkAt(srcFd, srcName, dirFd, name)
 	case unix.S_IFIFO:
@@ -72,7 +72,7 @@ func copyTreeAt(srcDir *os.File, srcName string, dir *os.File, name string, c co
 	return nil
 }
 
-func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, c copier) error {
+func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, options copyOptions) error {
 	// A file swapped for a named pipe since it was listed would block a
 	// plain open, and is no longer the file to copy.
 	inFd, err := unix.Openat(srcFd, srcName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
@@ -103,8 +103,8 @@ func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, 
 		return openatError(name, err)
 	}
 	out := os.NewFile(uintptr(outFd), name)
-	err = c.content(in, out)
-	if err == nil && c.shouldCopyAttributes {
+	err = options.copyContent(in, out)
+	if err == nil && options.shouldCopyAttributes {
 		err = copyExtendedAttributes(in, out)
 	}
 	if err == nil {
@@ -119,7 +119,7 @@ func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, 
 	return err
 }
 
-func copyDirAt(srcFd int, srcName string, dir *os.File, name string, perm uint32, c copier) error {
+func copyDirAt(srcFd int, srcName string, dir *os.File, name string, perm uint32, options copyOptions) error {
 	dirFd := int(dir.Fd())
 	if err := unix.Mkdirat(dirFd, name, 0o700); err != nil {
 		return &os.PathError{Op: "mkdirat", Path: name, Err: err}
@@ -134,7 +134,7 @@ func copyDirAt(srcFd int, srcName string, dir *os.File, name string, perm uint32
 		return err
 	}
 	defer dst.Close()
-	if c.shouldCopyAttributes {
+	if options.shouldCopyAttributes {
 		if err := copyExtendedAttributes(src, dst); err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func copyDirAt(srcFd int, srcName string, dir *os.File, name string, perm uint32
 		return err
 	}
 	for _, entry := range entries {
-		err := copyTreeAt(src, entry.Name(), dst, entry.Name(), c)
+		err := copyTreeAt(src, entry.Name(), dst, entry.Name(), options)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return JoinErrorPath(name, err)
 		}
