@@ -113,11 +113,11 @@ func TestCreateRefusesHomeAndDiskRoot(t *testing.T) {
 
 func TestOpenRefusesOtherFormats(t *testing.T) {
 	for _, test := range []struct {
-		format int
-		want   error
+		format      int
+		wantIsNewer bool
 	}{
-		{format + 1, ErrNewerFormat},
-		{format - 1, ErrOlderFormat},
+		{format + 1, true},
+		{format - 1, false},
 	} {
 		home, root := t.TempDir(), t.TempDir()
 		projectStore, err := Create(home, root)
@@ -127,8 +127,10 @@ func TestOpenRefusesOtherFormats(t *testing.T) {
 		if err := projectStore.writeJSON(projectStore.configPath(), config{Format: test.format, Root: root}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Open(home, root); !errors.Is(err, test.want) {
-			t.Errorf("Open of format %d = %v, want %v", test.format, err, test.want)
+		_, err = Open(home, root)
+		formatErr, ok := errors.AsType[*FormatError](err)
+		if !ok || formatErr.Format != test.format || formatErr.IsNewer() != test.wantIsNewer {
+			t.Errorf("Open of format %d = %v, want a FormatError with IsNewer %v", test.format, err, test.wantIsNewer)
 		}
 	}
 }

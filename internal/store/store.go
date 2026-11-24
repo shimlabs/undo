@@ -28,11 +28,6 @@ var (
 	// into the store. Copy mode works there, at the cost of a full copy of the
 	// project.
 	ErrCloneUnsupported = errors.New("this filesystem cannot make copy-on-write clones")
-	// ErrNewerFormat means a newer version of undo wrote the store.
-	ErrNewerFormat = errors.New("this store was written by a newer version of undo")
-	// ErrOlderFormat means an older version of undo wrote the store, in a
-	// layout this version cannot read.
-	ErrOlderFormat = errors.New("this store was written by an older version of undo")
 	// ErrUnsafeStore means a store directory exists that is not a private
 	// directory of the current user, so someone else could change it.
 	ErrUnsafeStore = errors.New("the store folder must be a folder owned by you and private to you")
@@ -145,25 +140,15 @@ type FormatError struct {
 }
 
 func (e *FormatError) Error() string {
-	return e.Dir + ": " + e.formatError().Error()
-}
-
-// Is reports whether target is ErrNewerFormat or ErrOlderFormat, whichever
-// the store's format is.
-func (e *FormatError) Is(target error) bool {
-	return target == e.formatError()
+	if e.IsNewer() {
+		return e.Dir + ": this store was written by a newer version of undo"
+	}
+	return e.Dir + ": this store was written by an older version of undo"
 }
 
 // IsNewer reports whether a newer version of undo wrote the store.
 func (e *FormatError) IsNewer() bool {
 	return e.Format > format
-}
-
-func (e *FormatError) formatError() error {
-	if e.IsNewer() {
-		return ErrNewerFormat
-	}
-	return ErrOlderFormat
 }
 
 // CreateIfCloneable returns the store of the project at root, as Create
