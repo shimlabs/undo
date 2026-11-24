@@ -53,7 +53,7 @@ func FileAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
 
 // maxReplacedRetries bounds how often FileAt clones a name again that a
 // rename replaced while it was cloned.
-const maxReplacedRetries = 8
+const maxReplacedRetries = 100
 
 func existsAt(dir *os.File, name string) bool {
 	var stat unix.Stat_t
