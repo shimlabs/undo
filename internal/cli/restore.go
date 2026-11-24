@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/shimlabs/undo/internal/exclude"
+	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
@@ -104,7 +105,14 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 		return nil, store.Checkpoint{}, usageError{message: fmt.Sprintf("%q is not a checkpoint id, which undo list shows", parsed.args[0])}
 	}
 	projectStore, err := openStore(env, parsed)
-	if isMissingProject(err) {
+	if errors.Is(err, project.ErrNotProject) {
+		// The folder may still hold deleted projects to pick from.
+		if printDeletedProjects(env) {
+			return nil, store.Checkpoint{}, errAlreadyReported
+		}
+		return nil, store.Checkpoint{}, err
+	}
+	if errors.Is(err, fs.ErrNotExist) {
 		if err := printNoCheckpoints(env, parsed); err != nil {
 			return nil, store.Checkpoint{}, err
 		}

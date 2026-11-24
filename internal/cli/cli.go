@@ -81,11 +81,17 @@ func Run(args []string, env Env) int {
 			fmt.Sprintf("Run %s once to keep full copies instead. They take as much disk as the project.", errOut.Bold("undo checkpoint --copy"))))
 	case errors.Is(err, project.ErrNotProject):
 		errOut.Errorf("%s", sentence(notProjectMessage(err)))
-		errOut.Printf("Run %s, or start your agent, inside a project folder.\n", errOut.Bold("undo"))
+		printNotProjectHint(errOut)
 	default:
 		printError(errOut, err)
 	}
 	return 1
+}
+
+// printNotProjectHint says where undo works, after saying a folder is not a
+// project.
+func printNotProjectHint(out *terminal.Writer) {
+	out.Printf("Run %s inside a project folder.\n", out.Bold("undo"))
 }
 
 // projectRoot returns the root of the project in env.Dir, or of the project
