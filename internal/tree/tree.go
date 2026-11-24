@@ -32,16 +32,16 @@ const (
 // disk. Mode holds fs.FileMode bits, which Go's compatibility promise keeps
 // stable, so stored entries stay readable by later versions.
 type Entry struct {
-	Kind       Kind        `json:"kind"`
-	Mode       fs.FileMode `json:"mode"`
-	Size       int64       `json:"size"`
-	ModTime    int64       `json:"mtime"`
-	ChangeTime int64       `json:"ctime"`
-	Inode      uint64      `json:"ino"`
-	Link       string      `json:"link,omitempty"`
+	Kind       Kind
+	Mode       fs.FileMode
+	Size       int64
+	ModTime    int64
+	ChangeTime int64
+	Inode      uint64
+	Link       string
 	// LinkCount is how many names a file, named pipe or symlink has, and 0
 	// when it has one. A write through any of them changes all of them.
-	LinkCount uint64 `json:"link_count,omitempty"`
+	LinkCount uint64
 }
 
 // Listing maps paths to their entries. Paths are slash-separated and relative

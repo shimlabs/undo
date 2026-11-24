@@ -49,14 +49,14 @@ type Checkpointer func(projectStore *Store, options CheckpointOptions) (Checkpoi
 // be saved at all. ExcludePatterns are the exclude rules the checkpoint was
 // taken with, so a restore leaves alone what that checkpoint never saw.
 type Manifest struct {
-	Changed  map[string]tree.Entry `json:"changed"`
-	Deleted  []string              `json:"deleted"`
-	Unstable []string              `json:"unstable,omitempty"`
+	Changed  map[string]tree.Entry
+	Deleted  []string
+	Unstable []string
 	// Unreadable is cumulative: every directory that could not be listed at
 	// this checkpoint, not only new ones, plus the files that could not be
 	// cloned now.
-	Unreadable      []string `json:"unreadable,omitempty"`
-	ExcludePatterns []string `json:"exclude_patterns"`
+	Unreadable      []string
+	ExcludePatterns []string
 }
 
 // Changes are what a caller that tracks the project itself found since the
@@ -177,7 +177,7 @@ func (s *Store) commit(latestID int, options CheckpointOptions, changes Changes)
 	if err := s.mkdirAll(s.layerDir(id)); err != nil {
 		return Checkpoint{}, err
 	}
-	if err := s.writeJSON(s.manifestPath(id), manifest); err != nil {
+	if err := s.writeGob(s.manifestPath(id), manifest); err != nil {
 		return Checkpoint{}, err
 	}
 	options.Label = shortLabel(options.Label)

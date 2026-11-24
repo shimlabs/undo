@@ -75,7 +75,7 @@ func (s *Store) State(id int) (map[string]Source, error) {
 // Manifest returns the manifest of checkpoint id.
 func (s *Store) Manifest(id int) (Manifest, error) {
 	var manifest Manifest
-	if err := s.readJSON(s.manifestPath(id), &manifest); err != nil {
+	if err := s.readGob(s.manifestPath(id), &manifest); err != nil {
 		return Manifest{}, err
 	}
 	paths := slices.Concat(manifest.Deleted, manifest.Unstable, manifest.Unreadable, slices.Collect(maps.Keys(manifest.Changed)))

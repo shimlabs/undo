@@ -1,7 +1,8 @@
 package restore
 
 import (
-	"encoding/json"
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"maps"
 	"os"
@@ -620,11 +621,11 @@ func TestRestoreReportsUnstableFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest.Unstable = []string{"README.md"}
-	data, err := json.Marshal(manifest)
-	if err != nil {
+	var data bytes.Buffer
+	if err := gob.NewEncoder(&data).Encode(manifest); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectStore.Dir(), "layers", "1", "manifest.json"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(projectStore.Dir(), "layers", "1", "manifest.gob"), data.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "damaged")
