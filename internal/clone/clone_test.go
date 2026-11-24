@@ -164,15 +164,39 @@ func TestFileAtNeverFollowsSymlinkInSourceName(t *testing.T) {
 	}
 }
 
-// On FAT and exFAT, macOS keeps a file's extended attributes in a "._" file
-// beside it, which it makes as soon as the file is copied. The project's own
-// "._" file must then replace it.
-func TestCopyAtReplacesAppleDoubleFile(t *testing.T) {
-	src, dst := t.TempDir(), t.TempDir()
-	testutil.WriteFile(t, filepath.Join(src, "._b.ts"), "project metadata")
-	testutil.WriteFile(t, filepath.Join(dst, "._b.ts"), "made by the kernel")
-	if err := copyByPath(t, CopyAt, filepath.Join(src, "._b.ts"), filepath.Join(dst, "._b.ts")); err != nil {
+// Only where macOS makes "._" files may an existing one be replaced; a "._"
+// name elsewhere is an ordinary file, link or pipe like any other.
+func TestCopyAtNeverOpensExistingAppleDoubleName(t *testing.T) {
+	src, dst, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	testutil.WriteFile(t, filepath.Join(src, "._x"), "payload")
+	victim := filepath.Join(outside, "id_ed25519")
+	testutil.WriteFile(t, victim, "secret")
+	if err := os.Chmod(victim, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	testutil.AssertContent(t, filepath.Join(dst, "._b.ts"), "project metadata")
+	if err := os.Link(victim, filepath.Join(dst, "._x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyByPath(t, CopyAt, filepath.Join(src, "._x"), filepath.Join(dst, "._x")); err == nil {
+		t.Error("CopyAt wrote onto an existing ._x")
+	}
+	testutil.AssertContent(t, victim, "secret")
+	if info, err := os.Stat(victim); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("victim mode = %v, %v; want -rw-------", info.Mode(), err)
+	}
+
+	if err := syscall.Mkfifo(filepath.Join(dst, "._p"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(src, "._p"), "payload")
+	finished := make(chan error, 1)
+	go func() { finished <- copyByPath(t, CopyAt, filepath.Join(src, "._p"), filepath.Join(dst, "._p")) }()
+	select {
+	case err := <-finished:
+		if err == nil {
+			t.Error("CopyAt wrote into an existing ._p named pipe")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("CopyAt blocked on an existing ._p named pipe")
+	}
 }

@@ -67,6 +67,11 @@ func HasAppleDoubleFiles(dir string) bool {
 	return unix.Statfs(dir, &stat) == nil && isAppleDoubleFilesystem(stat)
 }
 
+func hasAppleDoubleFilesAt(dirFd int) bool {
+	var stat unix.Statfs_t
+	return unix.Fstatfs(dirFd, &stat) == nil && isAppleDoubleFilesystem(stat)
+}
+
 // isAppleDoubleFilesystem reports whether stat is of a filesystem without
 // extended attributes of its own, on which macOS keeps a file's attributes in
 // a "._" file beside it.

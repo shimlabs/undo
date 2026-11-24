@@ -16,7 +16,8 @@ import (
 // directory, keeping modes and modification times. It is for filesystems
 // that cannot clone. It works relative to both directories and never follows
 // a symlink, so a symlink placed in either tree cannot lead it elsewhere. It
-// fails if name already exists.
+// fails if name already exists, unless name is a "._" file in which macOS
+// keeps extended attributes, which is replaced.
 func CopyAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
 	return copyTreeAt(srcDir, srcName, dir, name, copyContent)
 }
@@ -80,12 +81,16 @@ func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, 
 		return &os.PathError{Op: "copy", Path: srcName, Err: unix.ENOENT}
 	}
 	flags := unix.O_WRONLY | unix.O_CREAT | unix.O_EXCL | unix.O_NOFOLLOW | unix.O_CLOEXEC
-	if strings.HasPrefix(name, appleDoublePrefix) {
-		// On FAT and exFAT, macOS keeps a file's extended attributes in a
-		// "._" file beside it, which it made when that file was copied.
-		flags = flags&^unix.O_EXCL | unix.O_TRUNC
-	}
 	outFd, err := unix.Openat(dirFd, name, flags, 0o600)
+	if errors.Is(err, unix.EEXIST) && strings.HasPrefix(name, appleDoublePrefix) && hasAppleDoubleFilesAt(dirFd) {
+		// macOS made this "._" file when the file it belongs to was copied.
+		// Removing the name, rather than opening it, never writes through
+		// whatever stands there.
+		if err := unix.Unlinkat(dirFd, name, 0); err != nil {
+			return &os.PathError{Op: "unlinkat", Path: name, Err: err}
+		}
+		outFd, err = unix.Openat(dirFd, name, flags, 0o600)
+	}
 	if err != nil {
 		return openatError(name, err)
 	}
