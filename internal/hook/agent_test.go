@@ -178,8 +178,13 @@ func TestInstallRefusesInvalidJSON(t *testing.T) {
 	path := filepath.Join(home, ".cursor", "hooks.json")
 	testutil.WriteFile(t, path, "{\n  // a comment\n  \"version\": 1\n}")
 
-	if _, err := cursor().Install(testutil.PrivateBinary(t, "bin")); err == nil {
-		t.Fatal("Install rewrote a file it could not parse")
+	_, err := cursor().Install(testutil.PrivateBinary(t, "bin"))
+	syntaxErr, ok := errors.AsType[*SettingsSyntaxError](err)
+	if !ok {
+		t.Fatalf("Install = %v, want a SettingsSyntaxError", err)
+	}
+	if syntaxErr.Line != 2 || syntaxErr.Column != 3 {
+		t.Errorf("error at line %d, column %d, want line 2, column 3", syntaxErr.Line, syntaxErr.Column)
 	}
 	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "// a comment") {
 		t.Fatalf("file changed: %s", data)
