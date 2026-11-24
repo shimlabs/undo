@@ -148,7 +148,11 @@ func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store, che
 			info, err := os.Lstat(filepath.Join(projectStore.Root(), filepath.FromSlash(rel)))
 			names[i] = displayRel(rel, err == nil && info.IsDir())
 		}
-		printField(out, "Unreadable", out.Yellow(strings.Join(names, ", "))+" (undo has no permission to read these, so they are not covered)")
+		reason := " (undo has no permission to read these, so they are not covered)"
+		if len(names) == 1 {
+			reason = " (undo has no permission to read it, so it is not covered)"
+		}
+		printField(out, "Unreadable", out.Yellow(strings.Join(names, ", "))+reason)
 	}
 	if unstableCount > 0 {
 		printField(out, "Changing", out.Yellow(pluralize(unstableCount, "checkpoint"))+" hold files that changed while they were saved; a restore lists them")

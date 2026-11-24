@@ -88,7 +88,11 @@ func printNothingToRestore(out *terminal.Writer, changes restore.Changes, id int
 	switch {
 	case len(changes.Kept) > 0:
 		out.Println()
-		out.Warningf("Nothing undo can restore; fix the kept paths above and run undo again.")
+		paths := "paths"
+		if len(changes.Kept) == 1 {
+			paths = "path"
+		}
+		out.Warningf("Nothing undo can restore; fix the kept %s above and run undo again.", paths)
 	case len(changes.MissingExcluded) == 0:
 		out.Successf("Nothing to restore: the project already matches checkpoint %d.", id)
 		return true

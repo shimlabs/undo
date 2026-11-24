@@ -64,3 +64,18 @@ func TestUnreadableIgnoreFileSaysCannotOpen(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
+
+func TestStatusNamesOneUnreadableFolderInSingular(t *testing.T) {
+	testutil.SkipIfRoot(t)
+	root := newProject(t)
+	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+	if err := os.Mkdir(filepath.Join(root, "pgdata"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
+	mustRun(t, root, "checkpoint")
+
+	if out := mustRun(t, root, "status"); !strings.Contains(out, "pgdata/ (undo has no permission to read it, so it is not covered)") {
+		t.Fatalf("status with one unreadable folder:\n%s", out)
+	}
+}

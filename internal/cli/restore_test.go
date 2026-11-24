@@ -158,7 +158,7 @@ func TestDiffShowsPathsTheRestoreKeeps(t *testing.T) {
 	makeChangedFileUnreadable(t, root)
 
 	out := mustRun(t, root, "diff", "1")
-	if !strings.Contains(out, "kept  f.txt  undo cannot read it") || !strings.Contains(out, "Nothing undo can restore") || strings.Contains(out, "already matches") {
+	if !strings.Contains(out, "kept  f.txt  undo cannot read it") || !strings.Contains(out, "Nothing undo can restore; fix the kept path above and run undo again.") || strings.Contains(out, "already matches") {
 		t.Fatalf("diff with only an unreadable change:\n%s", out)
 	}
 }
