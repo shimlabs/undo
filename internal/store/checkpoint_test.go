@@ -271,9 +271,7 @@ func TestCommitRefusesStaleChanges(t *testing.T) {
 }
 
 func TestTakeSkipsUnreadableDirectories(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read every directory")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t, map[string]string{"a.txt": "a", "pgdata/base/1": "rows"})
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
 		t.Fatal(err)

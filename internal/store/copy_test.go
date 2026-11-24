@@ -41,19 +41,10 @@ func TestCopyModeRestoresExactly(t *testing.T) {
 	}
 }
 
-// plainProject returns a project directory on a filesystem without clones, set
-// by UNDO_TEST_PLAIN_DIR. The Linux CI job points it at ext4 or overlayfs.
+// plainProject returns a project on a filesystem without clones.
 func plainProject(t *testing.T) (*store.Store, string) {
 	t.Helper()
-	plain := os.Getenv("UNDO_TEST_PLAIN_DIR")
-	if plain == "" {
-		t.Skip("UNDO_TEST_PLAIN_DIR is not set")
-	}
-	root, err := os.MkdirTemp(plain, "project-") //nolint:usetesting // the project must be on the filesystem UNDO_TEST_PLAIN_DIR names
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(root) })
+	root := testutil.PlainDir(t)
 	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	projectStore, err := store.Create(t.TempDir(), root)
 	if err != nil {
