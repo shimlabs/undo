@@ -138,15 +138,12 @@ func isMissingProject(err error) bool {
 // of a deleted folder is how people look for it.
 func printNoCheckpoints(env Env, parsed flags) error {
 	out := env.stdout()
-	if printDeletedProjects(env) {
+	root, err := rootWithoutCheckpoints(env, parsed)
+	if errors.Is(err, errAlreadyReported) {
 		return nil
 	}
-	root, err := projectRoot(env, parsed)
 	if err != nil {
 		return err
-	}
-	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("%s %w", displayPath(root), errNoSuchProject)
 	}
 	out.Printf("No checkpoints yet in %s.\n", displayPath(root))
 	if !clone.IsSupportedIn(root) {
@@ -159,6 +156,24 @@ func printNoCheckpoints(env Env, parsed flags) error {
 	}
 	out.Printf("The next agent command takes one, or run %s to take one now.\n", out.Bold("undo checkpoint"))
 	return nil
+}
+
+// rootWithoutCheckpoints returns the root of a project that has no store.
+// When deleted projects directly inside the folder have stores, it lists
+// them and returns errAlreadyReported; a root that does not exist is
+// errNoSuchProject.
+func rootWithoutCheckpoints(env Env, parsed flags) (string, error) {
+	if printDeletedProjects(env) {
+		return "", errAlreadyReported
+	}
+	root, err := projectRoot(env, parsed)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("%s %w", displayPath(root), errNoSuchProject)
+	}
+	return root, nil
 }
 
 // printDeletedProjects says how to bring back each deleted project directly

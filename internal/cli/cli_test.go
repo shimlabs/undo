@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -51,16 +52,29 @@ func mustRun(t *testing.T, dir string, args ...string) string {
 func run(t *testing.T, dir string, stdin string, args ...string) (int, string) {
 	t.Helper()
 	var out bytes.Buffer
-	code := Run(args, Env{
+	code := runTo(t, dir, stdin, &out, &out, args...)
+	return code, out.String()
+}
+
+// runSeparately runs undo as run does, keeping stdout and stderr apart.
+func runSeparately(t *testing.T, dir string, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	var outBuffer, errBuffer bytes.Buffer
+	code = runTo(t, dir, "", &outBuffer, &errBuffer, args...)
+	return code, outBuffer.String(), errBuffer.String()
+}
+
+func runTo(t *testing.T, dir string, stdin string, stdout, stderr io.Writer, args ...string) int {
+	t.Helper()
+	return Run(args, Env{
 		Dir:        dir,
 		Stdin:      strings.NewReader(stdin),
-		Stdout:     &out,
-		Stderr:     &out,
+		Stdout:     stdout,
+		Stderr:     stderr,
 		StoreHome:  defaultStoreHome(t),
 		SocketDir:  watch.DefaultSocketDir(),
 		Executable: testutil.PrivateBinary(t, "bin"),
 	})
-	return code, out.String()
 }
 
 func TestRunCheckpointsThenRuns(t *testing.T) {
@@ -278,6 +292,21 @@ func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
 	}
 	if out := mustRun(t, root, "checkpoint", "--copy"); strings.Contains(out, "now keep full copies") {
 		t.Fatalf("a second --copy announced copy mode again:\n%s", out)
+	}
+}
+
+// A restore to a checkpoint that does not exist fails on stderr, however many
+// checkpoints the project has.
+func TestRestoreToCheckpointOfProjectWithoutAnyFails(t *testing.T) {
+	root := newProject(t)
+	for _, args := range [][]string{{"to", "1", "--yes"}, {"diff", "1"}} {
+		code, stdout, stderr := runSeparately(t, root, args...)
+		if code != 1 || stdout != "" || !strings.HasPrefix(stderr, "Error: No checkpoint 1; ") || !strings.Contains(stderr, "has no checkpoints yet.") {
+			t.Errorf("undo %v: exit %d, stdout %q, stderr %q", args, code, stdout, stderr)
+		}
+		if !strings.Contains(stderr, "undo checkpoint") {
+			t.Errorf("undo %v does not say how to take a checkpoint: %q", args, stderr)
+		}
 	}
 }
 

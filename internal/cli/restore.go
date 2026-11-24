@@ -4,14 +4,13 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"strconv"
 	"strings"
 
 	"golang.org/x/term"
 
-	"github.com/shimlabs/undo/internal/project"
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
@@ -90,26 +89,16 @@ func printNothingToRestore(out *terminal.Writer, changes restore.Changes, id int
 }
 
 // findCheckpoint opens the project's store and finds the checkpoint the
-// first argument names. A project with no checkpoints gets the same
-// explanation as undo list gives.
+// first argument names. A project with no checkpoints gets an error that
+// says how to take one.
 func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, error) {
 	id, err := strconv.Atoi(parsed.args[0])
 	if err != nil || id < 1 {
 		return nil, store.Checkpoint{}, usageError{message: fmt.Sprintf("%q is not a checkpoint id, which undo list shows", parsed.args[0])}
 	}
 	projectStore, err := openStore(env, parsed)
-	if errors.Is(err, project.ErrNotProject) {
-		// The folder may still hold deleted projects to pick from.
-		if printDeletedProjects(env) {
-			return nil, store.Checkpoint{}, errAlreadyReported
-		}
-		return nil, store.Checkpoint{}, err
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		if err := printNoCheckpoints(env, parsed); err != nil {
-			return nil, store.Checkpoint{}, err
-		}
-		return nil, store.Checkpoint{}, errAlreadyReported
+	if isMissingProject(err) {
+		return nil, store.Checkpoint{}, noCheckpointsError(env, parsed, id)
 	}
 	if err != nil {
 		return nil, store.Checkpoint{}, err
@@ -123,6 +112,22 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 		return nil, store.Checkpoint{}, err
 	}
 	return projectStore, checkpoint, nil
+}
+
+// noCheckpointsError explains that checkpoint id does not exist because the
+// project has no checkpoints, and says how to take one. When the folder holds
+// deleted projects instead, it lists them.
+func noCheckpointsError(env Env, parsed flags, id int) error {
+	root, err := rootWithoutCheckpoints(env, parsed)
+	if err != nil {
+		return err
+	}
+	checkpointCommand := "undo checkpoint"
+	if !clone.IsSupportedIn(root) {
+		checkpointCommand += " --copy"
+	}
+	return withHint(fmt.Errorf("%w %d; %s has no checkpoints yet", store.ErrNoCheckpoint, id, displayPath(root)),
+		fmt.Sprintf("Run %s to take one now.", env.stderr().Bold(projectCommand(env, parsed, checkpointCommand))))
 }
 
 // restoreTo shows what restoring checkpoint changes and, unless --yes was
