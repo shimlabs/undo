@@ -14,8 +14,9 @@ import (
 )
 
 // newRewrittenProject returns a project of fileCount files in folderCount
-// folders that a restore to checkpoint 2 wrote back as new clones. Checkpoint 1 holds the same entries,
-// so planning a restore to it compares every file with its stored copy.
+// folders that a restore to checkpoint 2 wrote back as new clones.
+// Checkpoint 1 holds the same entries, so planning a restore to it compares
+// every file with its stored copy.
 func newRewrittenProject(tb testing.TB, fileCount, folderCount int) *store.Store {
 	tb.Helper()
 	root := testutil.TempDir(tb)
