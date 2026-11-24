@@ -369,9 +369,7 @@ func TestRestoreLeavesNewlyExcludedPaths(t *testing.T) {
 }
 
 func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read every directory")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	take(t, projectStore, "first")
 	testutil.WriteFile(t, filepath.Join(root, "pgdata", "rows"), "data")
@@ -390,9 +388,7 @@ func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
 }
 
 func TestRestoreKeepsUnreadableFiles(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read every file")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "secret.key"), "key")
 	if err := os.Chmod(filepath.Join(root, "secret.key"), 0o000); err != nil {
@@ -416,9 +412,7 @@ func TestRestoreKeepsUnreadableFiles(t *testing.T) {
 }
 
 func TestRestoreLeavesDirectoryUnreadableAtCheckpoint(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read every directory")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "pgdata", "rows"), "data")
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
@@ -469,9 +463,7 @@ func TestRestoreNeverWritesThroughSymlinkExcludedLater(t *testing.T) {
 }
 
 func TestRestoreKeepsChangedFileItCannotReadNow(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read any file")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	secret := filepath.Join(root, "secret.key")
 	testutil.WriteFile(t, secret, "v1")
@@ -749,9 +741,7 @@ func TestRestoreReportsStoredFilesThatAreGone(t *testing.T) {
 // "cache" was a file at checkpoint 1. It is now a directory that holds a file
 // undo cannot read, which the restore must keep, so the directory stays.
 func TestRestoreKeepsDirectoryWithUnreadableFileWhereFileWas(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "cache"), "file")
 	take(t, projectStore, "1")
@@ -844,9 +834,7 @@ func TestRestoreKeepsDirectoryWithNestedExcludedContentWhereFileWas(t *testing.T
 }
 
 func TestRestoreKeepsDirectoryWithNestedUnreadableContentWhereFileWas(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read any file")
-	}
+	testutil.SkipIfRoot(t)
 	for name, unreadableRel := range map[string]string{"file": "sub/secret", "directory": "sub/unreadable", "itself": "."} {
 		t.Run(name, func(t *testing.T) {
 			var unreadable string
@@ -921,9 +909,7 @@ func TestApplyWithChangesInManyDirectories(t *testing.T) {
 }
 
 func TestRestoreWithUnreadableFileTakesOneCheckpoint(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root reads everything")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "secret.key"), "k")
 	if err := os.Chmod(filepath.Join(root, "secret.key"), 0); err != nil {
@@ -979,9 +965,7 @@ func readAsOwner(t *testing.T, path string) string {
 }
 
 func TestRestoreKeepsFileUnreadableAtSafetyCheckpoint(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads every file")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "v1")
 	take(t, projectStore, "1")
@@ -995,9 +979,7 @@ func TestRestoreKeepsFileUnreadableAtSafetyCheckpoint(t *testing.T) {
 }
 
 func TestRestoreKeepsNewFileUnreadableAtSafetyCheckpoint(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads every file")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	take(t, projectStore, "1")
 	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "unsaved work")
@@ -1012,9 +994,7 @@ func TestRestoreKeepsNewFileUnreadableAtSafetyCheckpoint(t *testing.T) {
 // The file is unreadable only while the safety checkpoint runs, and another
 // change makes the restore plan again once it is readable.
 func TestReplannedRestoreKeepsFileUnreadableAtSafetyCheckpoint(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads every file")
-	}
+	testutil.SkipIfRoot(t)
 	projectStore, root := newProject(t)
 	notes := filepath.Join(root, "notes.txt")
 	testutil.WriteFile(t, notes, "v1")
