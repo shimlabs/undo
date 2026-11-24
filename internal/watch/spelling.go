@@ -61,15 +61,17 @@ func (t *tracker) removeStaleSpellings(changes *changeSet) {
 	if t.children == nil {
 		t.children = newChildIndex(t.listing)
 	}
-	for dir, names := range namesInDir {
-		// The index holds the listing as the last checkpoint left it, so the
-		// paths this batch added are checked as well.
-		listed := slices.Collect(maps.Keys(t.children[dir]))
-		for rel := range changes.changed {
-			if rel != "." && path.Dir(rel) == dir {
-				listed = append(listed, rel)
-			}
+	// The index holds the listing as the last checkpoint left it, so the
+	// paths this batch added are checked as well, grouped by folder in one
+	// pass.
+	addedInDir := map[string][]string{}
+	for rel := range changes.changed {
+		if dir := path.Dir(rel); rel != "." && namesInDir[dir] != nil {
+			addedInDir[dir] = append(addedInDir[dir], rel)
 		}
+	}
+	for dir, names := range namesInDir {
+		listed := append(slices.Collect(maps.Keys(t.children[dir])), addedInDir[dir]...)
 		for _, rel := range listed {
 			if entry, isListed := changes.listing[rel]; isListed && !names[path.Base(rel)] {
 				changes.removeTree(rel, entry.Kind == tree.Dir)
