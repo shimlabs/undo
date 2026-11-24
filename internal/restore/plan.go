@@ -76,6 +76,10 @@ type restorePlan struct {
 	// cloned holds the paths written as part of a whole directory cloned
 	// from the base, which keeps the lock flags they had at the checkpoint.
 	cloned map[string]bool
+	// retimed are the directories whose only difference is their times, as
+	// after a temporary file came and went. They are no change on their own,
+	// and get their times back along with real changes.
+	retimed []string
 }
 
 // planRestore plans a restore of checkpoint id. It never touches a path the
@@ -180,6 +184,8 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	// A checkpoint of a project that was missing has no root, but removing
 	// the project folder itself would act outside it, so it stays, empty.
 	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
+	p.retimed = slices.DeleteFunc(slices.Clone(written), func(rel string) bool { return !p.differsOnlyInTimes(rel) })
+	written = slices.DeleteFunc(written, p.differsOnlyInTimes)
 	p.changes = Changes{
 		Written: written, Removed: removed, Kept: kept, KeepReasons: p.keepReasons, Dirs: p.dirsAmong(written, removed, kept),
 		Unstable: inputs.manifest.Unstable, Lost: lost, MissingExcluded: p.missingExcluded(inputs),
@@ -190,6 +196,19 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 			p.changes.Dirs[rel] = true
 		}
 	}
+}
+
+// differsOnlyInTimes reports whether rel is a directory, now and at the
+// checkpoint, that differs only in its modification and change times. A
+// file whose only difference is its change time still counts, since a write
+// that keeps its size and modification time differs only there.
+func (p *restorePlan) differsOnlyInTimes(rel string) bool {
+	current, target := p.current[rel], p.target[rel].Entry
+	if current.Kind != tree.Dir || target.Kind != tree.Dir {
+		return false
+	}
+	current.ModTime, current.ChangeTime = target.ModTime, target.ChangeTime
+	return current == target
 }
 
 // missingExcluded returns the excluded paths the checkpoint recorded that the

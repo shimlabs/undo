@@ -1047,3 +1047,43 @@ func TestPlanNamesExcludedPathsItCannotBringBack(t *testing.T) {
 		t.Fatalf("dirs = %v, want node_modules marked and build.log not", changes.Dirs)
 	}
 }
+
+// makeTemporaryFile creates and removes a file in dir, which changes only
+// the folder's times.
+func makeTemporaryFile(t *testing.T, dir string) {
+	t.Helper()
+	time.Sleep(10 * time.Millisecond)
+	testutil.WriteFile(t, filepath.Join(dir, ".tmp"), "x")
+	if err := os.Remove(filepath.Join(dir, ".tmp")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyWithOnlyFolderTimesChangedTakesNoCheckpoint(t *testing.T) {
+	projectStore, root := newProject(t)
+	first := take(t, projectStore, "1")
+	makeTemporaryFile(t, root)
+	makeTemporaryFile(t, filepath.Join(root, "src"))
+
+	changes := apply(t, projectStore, first.ID)
+	if len(changes.Written)+len(changes.Removed) != 0 {
+		t.Fatalf("written %v, removed %v for folders whose only change is their times", changes.Written, changes.Removed)
+	}
+	if latest, _, err := projectStore.Latest(); err != nil || latest.ID != first.ID {
+		t.Fatalf("a restore of folder times alone took checkpoint %d, %v", latest.ID, err)
+	}
+}
+
+func TestRestoreSetsFolderTimesAlongWithRealChanges(t *testing.T) {
+	projectStore, root := newProject(t)
+	want := snapshot(t, root)
+	take(t, projectStore, "1")
+	makeTemporaryFile(t, filepath.Join(root, "src"))
+	testutil.WriteFile(t, filepath.Join(root, "README.md"), "changed")
+
+	changes := apply(t, projectStore, 1)
+	if slices.Contains(changes.Written, "src") {
+		t.Fatalf("written %v lists src, whose only change is its times", changes.Written)
+	}
+	requireSame(t, want, snapshot(t, root))
+}

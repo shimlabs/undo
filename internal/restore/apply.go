@@ -40,7 +40,7 @@ func (p *restorePlan) apply(projectStore *store.Store, id int) error {
 	if err != nil {
 		return err
 	}
-	dirs, err := p.restoreDirModeAndTimes(slices.Concat(p.changes.Written, p.changes.Removed))
+	dirs, err := p.restoreDirModeAndTimes(slices.Concat(p.changes.Written, p.changes.Removed, p.retimed))
 	if err != nil {
 		return err
 	}
