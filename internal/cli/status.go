@@ -68,7 +68,11 @@ func printStore(out *terminal.Writer, env Env, projectStore *store.Store) error 
 		return err
 	}
 	printField(out, "Store", displayPath(projectStore.Dir()))
-	if err := printCheckpointSummary(out, projectStore); err != nil {
+	checkpoints, err := projectStore.List()
+	if err != nil {
+		return err
+	}
+	if err := printCheckpointSummary(out, projectStore, checkpoints); err != nil {
 		return err
 	}
 	if projectStore.IsCopyMode() {
@@ -85,20 +89,34 @@ func printStore(out *terminal.Writer, env Env, projectStore *store.Store) error 
 	default:
 		printField(out, "Watcher", out.Yellow("not running")+", so checkpoints scan the project")
 	}
-	if line := projectStore.LastError(); line != "" {
+	if line := projectStore.LastError(); line != "" && isNewerThanLatest(line, checkpoints) {
 		printField(out, "Last error", out.Red(logLine(line)))
 	}
 	return nil
 }
 
+// isNewerThanLatest reports whether the log line was written after the
+// latest checkpoint started. A failure a later checkpoint got past no longer
+// matters.
+func isNewerThanLatest(line string, checkpoints []store.Checkpoint) bool {
+	moment, err := logTime(line)
+	if err != nil || len(checkpoints) == 0 {
+		return true
+	}
+	// Log times are whole seconds.
+	return !moment.Before(checkpoints[len(checkpoints)-1].Time.Truncate(time.Second))
+}
+
+// logTime returns the time a line of the error log was written.
+func logTime(line string) (time.Time, error) {
+	stamp, _, _ := strings.Cut(line, " ")
+	return time.Parse(time.RFC3339, stamp)
+}
+
 // printCheckpointSummary prints how many checkpoints there are, what the
 // latest one could not save, and how many hold files that were changing while
 // they were saved.
-func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store) error {
-	checkpoints, err := projectStore.List()
-	if err != nil {
-		return err
-	}
+func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store, checkpoints []store.Checkpoint) error {
 	if len(checkpoints) == 0 {
 		printField(out, "Checkpoints", "0")
 		return nil
@@ -126,8 +144,8 @@ func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store) err
 // logLine returns a line of the error log for people: its time as an age,
 // then its message as a sentence.
 func logLine(line string) string {
-	stamp, message, hasStamp := strings.Cut(line, " ")
-	moment, err := time.Parse(time.RFC3339, stamp)
+	_, message, hasStamp := strings.Cut(line, " ")
+	moment, err := logTime(line)
 	if !hasStamp || err != nil {
 		return terminal.Printable(line)
 	}
