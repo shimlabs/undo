@@ -111,33 +111,25 @@ func TestCreateRefusesHomeAndDiskRoot(t *testing.T) {
 	}
 }
 
-func TestOpenRefusesNewerFormat(t *testing.T) {
-	home, root := t.TempDir(), t.TempDir()
-	projectStore, err := Create(home, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := projectStore.writeJSON(projectStore.configPath(), config{Format: format + 1, Root: root}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Open(home, root); !errors.Is(err, ErrNewerFormat) {
-		t.Fatalf("Open = %v, want ErrNewerFormat", err)
-	}
-}
-
-func TestOpenRefusesOlderFormat(t *testing.T) {
-	home, root := t.TempDir(), t.TempDir()
-	projectStore, err := Create(home, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := projectStore.writeJSON(projectStore.configPath(), config{Format: format - 1, Root: root}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Open(home, root); !errors.Is(err, ErrOlderFormat) {
-		t.Fatalf("Open = %v, want ErrOlderFormat", err)
+func TestOpenRefusesOtherFormats(t *testing.T) {
+	for _, test := range []struct {
+		format int
+		want   error
+	}{
+		{format + 1, ErrNewerFormat},
+		{format - 1, ErrOlderFormat},
+	} {
+		home, root := t.TempDir(), t.TempDir()
+		projectStore, err := Create(home, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := projectStore.writeJSON(projectStore.configPath(), config{Format: test.format, Root: root}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(home, root); !errors.Is(err, test.want) {
+			t.Errorf("Open of format %d = %v, want %v", test.format, err, test.want)
+		}
 	}
 }
 

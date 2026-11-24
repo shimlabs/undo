@@ -31,11 +31,15 @@ func TestShellPathEscapesControlCharacters(t *testing.T) {
 	}
 }
 
-func TestListShowsLabelAsTyped(t *testing.T) {
+// A label is shown as typed, even one that starts with "before", which the
+// heading of a restore leaves out.
+func TestListShowsLabels(t *testing.T) {
 	root := newProject(t)
-	mustRun(t, root, "checkpoint", "--label", "before refactor")
-	if out := mustRun(t, root, "list"); !strings.Contains(out, "before refactor") {
-		t.Fatalf("list changed the label:\n%s", out)
+	mustRun(t, root, "checkpoint", "--label", "before npm run build")
+
+	code, out := run(t, root, "", "list")
+	if code != 0 || !strings.Contains(out, "before npm run build") {
+		t.Fatalf("exit %d, output %q", code, out)
 	}
 }
 

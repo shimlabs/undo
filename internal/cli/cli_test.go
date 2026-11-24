@@ -136,16 +136,6 @@ func TestDiffListsPaths(t *testing.T) {
 	}
 }
 
-func TestListShowsLabels(t *testing.T) {
-	root := newProject(t)
-	mustRun(t, root, "checkpoint", "--label", "npm run build")
-
-	code, out := run(t, root, "", "list")
-	if code != 0 || !strings.Contains(out, "npm run build") {
-		t.Fatalf("exit %d, output %q", code, out)
-	}
-}
-
 func TestUsageExitCode(t *testing.T) {
 	root := newProject(t)
 	if code, _ := run(t, root, "", "frobnicate"); code != 2 {
