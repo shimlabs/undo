@@ -25,13 +25,7 @@ func TestFileAtRefusesExisting(t *testing.T) {
 	if err := copyByPath(t, FileAt, src, dst); err == nil {
 		t.Fatal("FileAt overwrote an existing destination")
 	}
-	data, err := os.ReadFile(dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "old" {
-		t.Fatalf("destination changed to %q", data)
-	}
+	testutil.AssertContent(t, dst, "old")
 }
 
 // sourceTree builds a directory with a nested file, an executable, a symlink

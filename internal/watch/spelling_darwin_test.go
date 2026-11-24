@@ -197,10 +197,7 @@ func TestCaseRenameThroughThirdSpellingAndEditThenRestore(t *testing.T) {
 	if _, err := restore.Apply(projectStore, third.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(root, "Lib", "a.go"))
-	if string(data) != "v2 latest work" {
-		t.Fatalf("Lib/a.go = %q, %v after restoring checkpoint %d; want v2 latest work", data, err, third.ID)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "Lib", "a.go"), "v2 latest work")
 }
 
 func TestSwapThroughOtherSpelling(t *testing.T) {

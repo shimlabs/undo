@@ -40,15 +40,6 @@ func newProject(t *testing.T, files map[string]string) (*Store, string) {
 	return projectStore, root
 }
 
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
 func TestFirstTakeClonesBase(t *testing.T) {
 	projectStore, root := newProject(t, map[string]string{"a.txt": "alpha"})
 
@@ -57,9 +48,7 @@ func TestFirstTakeClonesBase(t *testing.T) {
 	if checkpoint.ID != 1 {
 		t.Fatalf("first checkpoint id = %d, want 1", checkpoint.ID)
 	}
-	if got := readFile(t, projectStore.basePath("a.txt")); got != "alpha" {
-		t.Fatalf("base a.txt = %q", got)
-	}
+	testutil.AssertContent(t, projectStore.basePath("a.txt"), "alpha")
 	checkpoints, err := projectStore.List()
 	if err != nil {
 		t.Fatal(err)
@@ -93,9 +82,7 @@ func TestTakeRecordsChangedAndDeleted(t *testing.T) {
 	if !slices.Equal(manifest.Deleted, []string{"b.txt"}) {
 		t.Errorf("deleted = %v, want [b.txt]", manifest.Deleted)
 	}
-	if got := readFile(t, projectStore.layerFile(2, "a.txt")); got != "alpha two" {
-		t.Errorf("layer a.txt = %q", got)
-	}
+	testutil.AssertContent(t, projectStore.layerFile(2, "a.txt"), "alpha two")
 }
 
 func TestTakeIgnoresExcluded(t *testing.T) {
@@ -185,9 +172,7 @@ func TestFirstTakeNeverReadsExcluded(t *testing.T) {
 	if _, err := projectStore.Take(CheckpointOptions{Label: "first", Dir: root}); err != nil {
 		t.Fatalf("first checkpoint read an excluded directory: %v", err)
 	}
-	if got := readFile(t, projectStore.basePath("lib/util.js")); got != "u" {
-		t.Fatalf("base lib/util.js = %q", got)
-	}
+	testutil.AssertContent(t, projectStore.basePath("lib/util.js"), "u")
 }
 
 func TestListingAtRebuildsWhenSavedCopyIsMissing(t *testing.T) {
@@ -251,9 +236,7 @@ func TestCommitRecordsGivenChanges(t *testing.T) {
 	if _, ok := manifest.Changed["a.txt"]; !ok || !slices.Equal(manifest.Deleted, []string{"b.txt"}) {
 		t.Fatalf("manifest = %+v", manifest)
 	}
-	if got := readFile(t, projectStore.layerFile(checkpoint.ID, "a.txt")); got != "alpha two" {
-		t.Fatalf("layer a.txt = %q", got)
-	}
+	testutil.AssertContent(t, projectStore.layerFile(checkpoint.ID, "a.txt"), "alpha two")
 }
 
 func TestCommitRefusesStaleChanges(t *testing.T) {

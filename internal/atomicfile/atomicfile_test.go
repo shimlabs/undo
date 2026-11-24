@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func TestWriteFileReplacesContent(t *testing.T) {
@@ -18,10 +20,7 @@ func TestWriteFileReplacesContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, _ := os.ReadFile(path)
-	if string(data) != "new" {
-		t.Fatalf("content = %q", data)
-	}
+	testutil.AssertContent(t, path, "new")
 	entries, _ := os.ReadDir(filepath.Dir(path))
 	if len(entries) != 1 {
 		t.Fatalf("temporary file left behind: %v", entries)
