@@ -3,6 +3,7 @@ package restore
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/shimlabs/undo/internal/store"
@@ -40,6 +41,23 @@ func planRewrittenProject(tb testing.TB, projectStore *store.Store) restorePlan 
 	}
 	unlock()
 	return plan
+}
+
+func TestPlanComparesRewrittenFilesWithoutBuffersForEach(t *testing.T) {
+	const fileCount = 200
+	projectStore := newRewrittenProject(t, fileCount)
+	if plan := planRewrittenProject(t, projectStore); len(plan.unchanged) < fileCount {
+		t.Fatalf("plan found %d unchanged paths, want at least %d", len(plan.unchanged), fileCount)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	planRewrittenProject(t, projectStore)
+	runtime.ReadMemStats(&after)
+	// Two 64 KB chunks for each file would allocate 25.6 MB.
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > fileCount*64<<10 {
+		t.Errorf("planning allocated %d KB to compare %d files", allocated>>10, fileCount)
+	}
 }
 
 // BenchmarkPlanAfterRestore measures planning a restore that compares 10,000

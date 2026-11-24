@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/clone"
@@ -22,6 +23,9 @@ import (
 type Extractor struct {
 	store      *Store
 	storedDirs *dirCache
+	// chunkPool holds the buffer pairs HasContent compares files in, so
+	// comparing many small files does not allocate two chunks for each.
+	chunkPool sync.Pool
 }
 
 // NewExtractor returns an Extractor for the store. The store must stay locked
@@ -74,15 +78,20 @@ func (e *Extractor) HasContent(rel string, source Source, file *os.File) (bool, 
 		return false, err
 	}
 	defer stored.Close()
-	return sameBytes(stored, file)
+	chunks, isPooled := e.chunkPool.Get().(*[2][]byte)
+	if !isPooled {
+		chunks = &[2][]byte{make([]byte, contentChunkSize), make([]byte, contentChunkSize)}
+	}
+	defer e.chunkPool.Put(chunks)
+	return sameBytes(stored, file, chunks[0], chunks[1])
 }
 
 // contentChunkSize is how much of each file sameBytes compares at a time.
 const contentChunkSize = 64 << 10
 
-// sameBytes reports whether first and second hold the same bytes.
-func sameBytes(first, second io.Reader) (bool, error) {
-	firstChunk, secondChunk := make([]byte, contentChunkSize), make([]byte, contentChunkSize)
+// sameBytes reports whether first and second hold the same bytes, reading
+// them into firstChunk and secondChunk, which must be the same size.
+func sameBytes(first, second io.Reader, firstChunk, secondChunk []byte) (bool, error) {
 	for {
 		firstCount, firstErr := io.ReadFull(first, firstChunk)
 		secondCount, secondErr := io.ReadFull(second, secondChunk)
