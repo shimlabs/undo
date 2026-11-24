@@ -98,7 +98,7 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 	}
 	projectStore, err := openStore(env, parsed)
 	if isMissingProject(err) {
-		return nil, store.Checkpoint{}, noCheckpointsError(env, parsed, id)
+		return nil, store.Checkpoint{}, reportNoCheckpoints(env, parsed, id)
 	}
 	if err != nil {
 		return nil, store.Checkpoint{}, err
@@ -114,11 +114,11 @@ func findCheckpoint(env Env, parsed flags) (*store.Store, store.Checkpoint, erro
 	return projectStore, checkpoint, nil
 }
 
-// noCheckpointsError explains that checkpoint id does not exist because the
+// reportNoCheckpoints explains that checkpoint id does not exist because the
 // project has no checkpoints, and says how to take one. When the folder holds
 // deleted projects instead, it lists them.
-func noCheckpointsError(env Env, parsed flags, id int) error {
-	root, err := rootWithoutCheckpoints(env, parsed)
+func reportNoCheckpoints(env Env, parsed flags, id int) error {
+	root, err := findRootWithoutCheckpoints(env, parsed)
 	if err != nil {
 		return err
 	}

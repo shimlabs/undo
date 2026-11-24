@@ -138,7 +138,7 @@ func isMissingProject(err error) bool {
 // of a deleted folder is how people look for it.
 func printNoCheckpoints(env Env, parsed flags) error {
 	out := env.stdout()
-	root, err := rootWithoutCheckpoints(env, parsed)
+	root, err := findRootWithoutCheckpoints(env, parsed)
 	if errors.Is(err, errAlreadyReported) {
 		return nil
 	}
@@ -158,11 +158,11 @@ func printNoCheckpoints(env Env, parsed flags) error {
 	return nil
 }
 
-// rootWithoutCheckpoints returns the root of a project that has no store.
+// findRootWithoutCheckpoints returns the root of a project that has no store.
 // When deleted projects directly inside the folder have stores, it lists
 // them and returns errAlreadyReported; a root that does not exist is
 // errNoSuchProject.
-func rootWithoutCheckpoints(env Env, parsed flags) (string, error) {
+func findRootWithoutCheckpoints(env Env, parsed flags) (string, error) {
 	if printDeletedProjects(env) {
 		return "", errAlreadyReported
 	}
