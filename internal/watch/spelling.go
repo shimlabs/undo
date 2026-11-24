@@ -46,7 +46,7 @@ func (t *tracker) storedNameIn(parents *parentDirs, fullPath string) (string, er
 
 // removeStaleSpellings removes the listed paths in changes.uncertainDirs that
 // their directory no longer holds under that exact name.
-func (t *tracker) removeStaleSpellings(changes *changeSet) {
+func (t *tracker) removeStaleSpellings(parents *parentDirs, changes *changeSet) {
 	if len(changes.uncertainDirs) == 0 {
 		return
 	}
@@ -54,7 +54,7 @@ func (t *tracker) removeStaleSpellings(changes *changeSet) {
 	for dir := range changes.uncertainDirs {
 		// A directory that is gone or cannot be read is left alone: its own
 		// event or the next full comparison updates what it held.
-		if names, err := readNames(t.root, dir); err == nil {
+		if names, err := readNames(parents, dir); err == nil {
 			namesInDir[dir] = names
 		}
 	}
@@ -120,12 +120,12 @@ func (index childIndex) update(changed, deleted []string) {
 	}
 }
 
-// readNames returns the names the directory dir below root holds, as it
-// stores them. The directory is opened one name at a time, so a named pipe
-// or symlink in its place fails at once instead of blocking or leading
+// readNames returns the names the directory dir holds, as it stores them.
+// The directory is opened in its parent reached through parents, so a named
+// pipe or symlink in its place fails at once instead of blocking or leading
 // elsewhere.
-func readNames(root, dir string) (map[string]bool, error) {
-	file, err := tree.OpenDir(root, dir)
+func readNames(parents *parentDirs, dir string) (map[string]bool, error) {
+	file, err := parents.openUncached(dir)
 	if err != nil {
 		return nil, err
 	}

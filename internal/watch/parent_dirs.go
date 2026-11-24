@@ -2,6 +2,7 @@ package watch
 
 import (
 	"os"
+	"path"
 
 	"github.com/shimlabs/undo/internal/tree"
 )
@@ -31,7 +32,7 @@ func (d *parentDirs) open(rel string) (*os.File, error) {
 	if len(d.files) >= maxOpenParents {
 		d.close()
 	}
-	file, err := tree.OpenDir(d.root, rel)
+	file, err := d.openUncached(rel)
 	if err != nil {
 		return nil, err
 	}
@@ -44,4 +45,18 @@ func (d *parentDirs) close() {
 		file.Close()
 	}
 	clear(d.files)
+}
+
+// openUncached opens rel in its parent, itself opened through the cache, so
+// each folder on the way is opened once per batch rather than once per path.
+// The file it returns is not cached, so its offset is the caller's own.
+func (d *parentDirs) openUncached(rel string) (*os.File, error) {
+	if rel == "." {
+		return tree.OpenDir(d.root, ".")
+	}
+	parent, err := d.open(path.Dir(rel))
+	if err != nil {
+		return nil, err
+	}
+	return tree.OpenDirAt(parent, path.Base(rel))
 }

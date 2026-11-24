@@ -553,7 +553,7 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 		return nil, nil, errNeedsFullComparison
 	}
 	if t.isCaseInsensitive {
-		t.removeStaleSpellings(changes)
+		t.removeStaleSpellings(parents, changes)
 	}
 	changes.finish()
 	if len(changes.excluded) > 0 {

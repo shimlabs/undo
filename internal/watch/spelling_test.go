@@ -40,7 +40,9 @@ func BenchmarkRemoveStaleSpellings(b *testing.B) {
 					listing[rel] = tree.Entry{Kind: tree.File}
 					changes.uncertainDirs[filepath.Dir(rel)] = true
 				}
-				projectTracker.removeStaleSpellings(changes)
+				parents := newParentDirs(root)
+				projectTracker.removeStaleSpellings(parents, changes)
+				parents.close()
 			}
 		})
 	}
