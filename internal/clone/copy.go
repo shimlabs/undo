@@ -17,8 +17,9 @@ import (
 // directory, keeping modes and modification times. It is for filesystems
 // that cannot clone. It works relative to both directories and never follows
 // a symlink, so a symlink placed in either tree cannot lead it elsewhere. It
-// fails if name already exists, unless name is a "._" file in which macOS
-// keeps extended attributes, which is replaced.
+// fails if name already exists, unless name starts with "._" on a filesystem
+// where macOS keeps extended attributes in such files; that name is removed
+// and created again.
 func CopyAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
 	return copyTreeAt(srcDir, srcName, dir, name, copyContent)
 }
