@@ -68,7 +68,7 @@ func printCheckpoints(out *terminal.Writer, checkpoints []store.Checkpoint, root
 	}
 	prefixWidth := 2 + idWidth + 2 + ageWidth + 2
 	for i, checkpoint := range checkpoints {
-		label, details := fitRow(displayLabel(checkpoint.Label), checkpointDetails(checkpoint, root), out.Width()-prefixWidth)
+		label, details := fitRow(terminal.Printable(checkpoint.Label), checkpointDetails(checkpoint, root), out.Width()-prefixWidth)
 		line := fmt.Sprintf("  %s  %s  %s", out.Bold(fmt.Sprintf("%*d", idWidth, checkpoint.ID)), out.Dim(fmt.Sprintf("%-*s", ageWidth, ages[i])), label)
 		if details != "" {
 			line += "  " + out.Dim(details)

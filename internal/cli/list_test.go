@@ -28,3 +28,11 @@ func TestShellPathEscapesControlCharacters(t *testing.T) {
 		t.Fatalf("shellPath printed control characters raw: %q", shown)
 	}
 }
+
+func TestListShowsLabelAsTyped(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint", "--label", "before refactor")
+	if out := mustRun(t, root, "list"); !strings.Contains(out, "before refactor") {
+		t.Fatalf("list changed the label:\n%s", out)
+	}
+}
