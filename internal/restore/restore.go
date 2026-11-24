@@ -52,7 +52,9 @@ const (
 	KeptExcluded
 	// KeptOccupied means something the restore must not touch stands where
 	// the checkpoint had another kind of entry, such as a directory holding
-	// excluded files where a file was.
+	// excluded files where a file was, or a folder the restore would remove
+	// holds a path it keeps, such as a locked file. The rest of what that
+	// folder holds is removed.
 	KeptOccupied
 )
 

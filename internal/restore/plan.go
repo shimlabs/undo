@@ -184,9 +184,11 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	if len(unreadable)+len(locked)+len(blocked) > 0 {
 		written, removed = tree.Changed(p.current, p.targetListing())
 	}
+	removed = slices.DeleteFunc(removed, isInsideAny(slices.Sorted(maps.Keys(p.keepReasons))))
 	// A directory the restore would remove cannot go while it holds a kept
-	// path, such as a locked file in a folder made after the checkpoint.
-	holdingKept := ancestorsOf(slices.Collect(maps.Keys(p.keepReasons)))
+	// path, such as a locked file in a folder made after the checkpoint. The
+	// rest of what it holds is still removed.
+	holdingKept := ancestorDirs(slices.Collect(maps.Keys(p.keepReasons)))
 	occupied := slices.DeleteFunc(slices.Clone(removed), func(rel string) bool { return !holdingKept[rel] })
 	p.keep(KeptOccupied, occupied)
 	kept := slices.Sorted(maps.Keys(p.keepReasons))
@@ -194,7 +196,6 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	written = slices.DeleteFunc(written, isInsideAny(kept))
 	written = slices.DeleteFunc(written, isUnchanged)
 	written = slices.DeleteFunc(written, p.isUnchangedDir)
-	removed = slices.DeleteFunc(removed, isInsideAny(kept))
 	// A checkpoint of a project that was missing has no root, but removing
 	// the project folder itself would act outside it, so it stays, empty.
 	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
@@ -419,9 +420,8 @@ func isInsideAny(dirs []string) func(rel string) bool {
 	}
 }
 
-// isAtOrInside reports whether rel is one of dirs or inside one of them.
-// ancestorsOf returns the folders that hold any of paths, the root aside.
-func ancestorsOf(paths []string) map[string]bool {
+// ancestorDirs returns the folders that hold any of paths, the root aside.
+func ancestorDirs(paths []string) map[string]bool {
 	ancestors := map[string]bool{}
 	for _, rel := range paths {
 		for dir := path.Dir(rel); rel != "." && dir != "."; dir = path.Dir(dir) {
@@ -431,6 +431,7 @@ func ancestorsOf(paths []string) map[string]bool {
 	return ancestors
 }
 
+// isAtOrInside reports whether rel is one of dirs or inside one of them.
 func isAtOrInside(rel string, dirs []string) bool {
 	return slices.ContainsFunc(dirs, func(dir string) bool {
 		return rel == dir || strings.HasPrefix(rel, dir+"/")

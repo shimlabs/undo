@@ -2,6 +2,7 @@ package restore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -104,3 +105,5 @@ func watcherCheckpointer(t *testing.T, client watch.Client) store.Checkpointer {
 		return checkpoint, err
 	}
 }
+
+var errWatcherGone = errors.New("the test's watcher is gone")

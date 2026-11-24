@@ -373,11 +373,22 @@ func TestRestoreKeepsNewFolderHoldingLockedFile(t *testing.T) {
 	projectStore, root := newProject(t)
 	take(t, projectStore, "1")
 	testutil.WriteFile(t, filepath.Join(root, "k", "f"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "k", "g"), "x")
+	testutil.WriteFile(t, filepath.Join(root, "k", "sub", "deep.txt"), "x")
 	lockFile(t, filepath.Join(root, "k", "f"), root, projectStore.Dir())
 
 	changes := apply(t, projectStore, 1)
 	if slices.Contains(changes.Removed, "k") || !slices.Contains(changes.Kept, "k") {
 		t.Fatalf("removed %v, kept %v; want k kept, as it holds a locked file", changes.Removed, changes.Kept)
+	}
+	// Only the locked file holds the folder; the rest of it goes.
+	for _, rel := range []string{"k/g", "k/sub"} {
+		if !slices.Contains(changes.Removed, rel) {
+			t.Errorf("removed %v, want %s", changes.Removed, rel)
+		}
+		if _, err := os.Lstat(filepath.Join(root, rel)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s is still there: %v", rel, err)
+		}
 	}
 }
 

@@ -1,7 +1,6 @@
 package restore
 
 import (
-	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -157,12 +156,18 @@ func unexpectedDifferences(t *testing.T, projectStore *store.Store, id int, chan
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A folder the checkpoint lacked, kept only because it holds kept paths,
+	// keeps nothing else in it.
+	keptWhole := slices.DeleteFunc(slices.Clone(changes.Kept), func(rel string) bool {
+		_, isWanted := want[filepath.FromSlash(rel)]
+		return changes.KeepReasons[rel] == KeptOccupied && !isWanted
+	})
 	return slices.DeleteFunc(testutil.SnapshotDiff(want, got), func(rel string) bool {
 		if !isExact && (strings.HasPrefix(want[rel], "fifo ") || strings.HasPrefix(got[rel], "fifo ")) {
 			return true
 		}
 		rel = filepath.ToSlash(rel)
-		return isAtOrInside(rel, changes.Kept) || isAtOrInside(rel, manifest.Unreadable) || isAroundKept(rel, want, got, changes.Kept)
+		return isAtOrInside(rel, keptWhole) || isAtOrInside(rel, manifest.Unreadable) || isAroundKept(rel, want, got, changes.Kept)
 	})
 }
 
@@ -257,5 +262,3 @@ func TestRandomHistoryWithWatcher(t *testing.T) {
 		runRandomHistory(t, seed, projectStore, watcherCheckpointer(t, startWatcher(t, projectStore)), false)
 	}
 }
-
-var errWatcherGone = errors.New("the test's watcher is gone")
