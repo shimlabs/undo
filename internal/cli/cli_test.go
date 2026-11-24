@@ -573,18 +573,12 @@ func TestCommandsThatNeedTheFolderRefuseMissingProjectPath(t *testing.T) {
 	}
 }
 
-func TestNotProjectIsAnErrorForCommandsThatNeedOne(t *testing.T) {
+func TestNotProjectIsAnError(t *testing.T) {
 	home := testutil.AgentHome(t)
 	t.Setenv("UNDO_HOME", t.TempDir())
-	for _, args := range [][]string{{"to", "1"}, {"diff", "1"}, {"status"}, {"checkpoint"}} {
+	for _, args := range [][]string{{}, {"list"}, {"to", "1"}, {"diff", "1"}, {"status"}, {"checkpoint"}} {
 		code, out := run(t, home, "", args...)
 		if code != 1 || !strings.Contains(out, "Error: ~ is your home folder, not a project.\nRun undo inside a project folder.\n") {
-			t.Errorf("undo %v: exit %d:\n%s", args, code, out)
-		}
-	}
-	for _, args := range [][]string{{}, {"list"}} {
-		code, out := run(t, home, "", args...)
-		if code != 0 || strings.Contains(out, "Error:") || !strings.Contains(out, "Run undo inside a project folder.") {
 			t.Errorf("undo %v: exit %d:\n%s", args, code, out)
 		}
 	}
