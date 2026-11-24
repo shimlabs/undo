@@ -518,6 +518,25 @@ func BenchmarkTrackerCheckpoint(b *testing.B) {
 	}
 }
 
+// BenchmarkTrackerCheckpointWithManyExcludedFolders measures a checkpoint
+// after one file changed in a project with a __pycache__ folder in each of
+// 2,000 packages.
+func BenchmarkTrackerCheckpointWithManyExcludedFolders(b *testing.B) {
+	root := testutil.TempDir(b)
+	for i := range 2000 {
+		dir := filepath.Join(root, fmt.Sprintf("pkg%04d", i))
+		testutil.WriteFile(b, filepath.Join(dir, "module.py"), "pass")
+		testutil.WriteFile(b, filepath.Join(dir, "__pycache__", "module.pyc"), "x")
+	}
+	projectTracker, _, _ := startTracker(b, root)
+	takeCheckpoint(b, projectTracker, "first")
+	changed := filepath.Join(root, "pkg0000", "module.py")
+	for i := 0; b.Loop(); i++ {
+		testutil.WriteFile(b, changed, fmt.Sprint("pass # ", i))
+		takeCheckpoint(b, projectTracker, "edit")
+	}
+}
+
 func TestTrackerNeverActsThroughSymlinkedParent(t *testing.T) {
 	for name, create := range map[string]string{"file": "a/secret", "directory": "a/home/deep"} {
 		t.Run(name, func(t *testing.T) {

@@ -360,10 +360,41 @@ func (t *tracker) applyEvents(dirty map[string]bool) (changed, deleted []string,
 		return nil, nil, false, err
 	}
 	t.unreadable = slices.DeleteFunc(t.unreadable, t.isReadableOrGone)
-	t.excluded = slices.DeleteFunc(slices.Compact(slices.Sorted(slices.Values(t.excluded))), t.isStaleExcluded)
+	touched := t.touchedPaths(dirty, changed, deleted)
+	t.excluded = slices.DeleteFunc(t.excluded, func(rel string) bool {
+		return isAtOrBelowAny(touched, rel) && t.isStaleExcluded(rel)
+	})
 	t.updateHardLinked(changed, deleted)
 	t.children.update(changed, deleted)
 	return changed, deleted, false, nil
+}
+
+// touchedPaths returns the paths a batch of events reported or changed, the
+// root aside. Removing or renaming an excluded path, or a folder above it,
+// reports that path or folder, so only excluded paths at or below one of
+// these can have gone.
+func (t *tracker) touchedPaths(dirty map[string]bool, changed, deleted []string) map[string]bool {
+	touched := make(map[string]bool, len(dirty)+len(changed)+len(deleted))
+	for _, rel := range slices.Concat(changed, deleted) {
+		touched[rel] = true
+	}
+	for fullPath := range dirty {
+		if rel, err := filepath.Rel(t.root, fullPath); err == nil {
+			touched[filepath.ToSlash(rel)] = true
+		}
+	}
+	delete(touched, ".")
+	return touched
+}
+
+// isAtOrBelowAny reports whether rel or a folder above it is in paths.
+func isAtOrBelowAny(paths map[string]bool, rel string) bool {
+	for ; rel != "."; rel = path.Dir(rel) {
+		if paths[rel] {
+			return true
+		}
+	}
+	return false
 }
 
 // replaceListing makes listing the tracker's view of the project, and drops
@@ -504,7 +535,9 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 		t.removeStaleSpellings(changes)
 	}
 	changes.finish()
-	t.excluded = append(t.excluded, changes.excluded...)
+	if len(changes.excluded) > 0 {
+		t.excluded = slices.Compact(slices.Sorted(slices.Values(append(t.excluded, changes.excluded...))))
+	}
 	return slices.Sorted(maps.Keys(changes.changed)), slices.Sorted(maps.Keys(changes.deleted)), nil
 }
 
