@@ -1085,3 +1085,44 @@ func TestTrackerNeverStatsThroughParentSwappedForSymlink(t *testing.T) {
 		}
 	}
 }
+
+// BenchmarkApplyDirty measures applying 10,000 reported writes spread over
+// 2,000 folders, as a formatter or a branch switch makes.
+func BenchmarkApplyDirty(b *testing.B) {
+	root, err := filepath.EvalSymlinks(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	dirOf := func(i int) string {
+		return filepath.Join(root, "src", fmt.Sprintf("pkg%02d", i/100), fmt.Sprintf("mod%04d", i))
+	}
+	for i := range 2000 {
+		for file := range 5 {
+			testutil.WriteFile(b, filepath.Join(dirOf(i), fmt.Sprintf("file%02d.go", file)), "x")
+		}
+	}
+	matcher, err := exclude.New(root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	listing, _, err := tree.Scan(root, matcher)
+	if err != nil {
+		b.Fatal(err)
+	}
+	dirty := map[string]bool{}
+	for i := range 10_000 {
+		path := filepath.Join(dirOf(i%2000), fmt.Sprintf("file%02d.go", i/2000))
+		testutil.WriteFile(b, path, "yy")
+		dirty[path] = false
+	}
+	for b.Loop() {
+		b.StopTimer()
+		projectTracker := &tracker{root: root, listing: maps.Clone(listing), isCaseInsensitive: tree.IsCaseInsensitive(root)}
+		projectTracker.matcher.Store(matcher)
+		batch := maps.Clone(dirty)
+		b.StartTimer()
+		if _, _, err := projectTracker.applyDirty(batch); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

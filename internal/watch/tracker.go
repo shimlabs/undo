@@ -539,7 +539,9 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 	parents := newParentDirs(t.root)
 	defer parents.close()
 	storedDirs := map[string]string{}
-	for fullPath, isRenamed := range t.withHardLinks(dirty) {
+	dirty = t.withHardLinks(dirty)
+	for _, fullPath := range slices.Sorted(maps.Keys(dirty)) {
+		isRenamed := dirty[fullPath]
 		if t.isCaseInsensitive {
 			fullPath = t.storedSpelling(parents, storedDirs, fullPath)
 		}
