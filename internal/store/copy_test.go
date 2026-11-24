@@ -2,9 +2,11 @@ package store_test
 
 import (
 	"errors"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shimlabs/undo/internal/restore"
@@ -125,4 +127,39 @@ func TestCheckpointSeesCopyModeSetByAnotherProcess(t *testing.T) {
 	if !watcherStore.IsCopyMode() {
 		t.Fatal("a store opened earlier still takes clones after copy mode was set")
 	}
+}
+
+// A checkpoint refused for lack of clones must leave nothing behind, or the
+// project would show a store with no checkpoints from then on.
+func TestCreateIfCloneableLeavesNothingWithoutClones(t *testing.T) {
+	root := testutil.PlainDir(t)
+	home := t.TempDir()
+	if _, err := store.CreateIfCloneable(home, root); !errors.Is(err, store.ErrCloneUnsupported) {
+		t.Fatalf("CreateIfCloneable = %v, want ErrCloneUnsupported", err)
+	}
+	if _, err := store.Open(home, root); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Open after a refusal = %v, want no store", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".undo-") {
+			t.Fatalf("a refused checkpoint left %s next to the project", entry.Name())
+		}
+	}
+}
+
+func TestCreateIfCloneableOpensStoreInCopyMode(t *testing.T) {
+	projectStore, root := plainProject(t)
+	if err := projectStore.SetCopyMode(true); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Dir(projectStore.Dir())
+	reopened, err := store.CreateIfCloneable(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened.Close()
 }

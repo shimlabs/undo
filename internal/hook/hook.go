@@ -165,7 +165,7 @@ func (a Agent) takeCheckpoint(event hookEvent, storeHome string, checkpoint stor
 	if err != nil {
 		return nil, err
 	}
-	projectStore, err := store.Create(storeHome, root)
+	projectStore, err := store.CreateIfCloneable(storeHome, root)
 	if err != nil {
 		return nil, err
 	}

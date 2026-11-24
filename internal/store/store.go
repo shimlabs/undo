@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/shimlabs/undo/internal/atomicfile"
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/project"
 )
 
@@ -131,6 +132,20 @@ func Create(home, root string) (*Store, error) {
 		return nil, err
 	}
 	return openAt(dir, root)
+}
+
+// CreateIfCloneable returns the store of the project at root, as Create
+// does, but refuses to make a new one where the project's filesystem cannot
+// clone, with ErrCloneUnsupported. A checkpoint refused for that then leaves
+// nothing behind. An existing store, which may keep full copies, is opened.
+func CreateIfCloneable(home, root string) (*Store, error) {
+	if existing, err := Open(home, root); !errors.Is(err, fs.ErrNotExist) {
+		return existing, err
+	}
+	if !clone.IsSupportedIn(root) {
+		return nil, ErrCloneUnsupported
+	}
+	return Create(home, root)
 }
 
 // Close releases the store directory. The Store must not be used after.
