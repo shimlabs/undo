@@ -9,24 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
 func checkpointCommand(parsed flags, env Env) error {
-	if parsed.isCopyMode {
-		// Copy mode stays on for good, so where clones work it only costs
-		// disk.
-		root, err := existingProjectRoot(env, parsed)
-		if err != nil {
-			return err
-		}
-		if clone.IsSupportedIn(root) {
-			return usageError{message: "this filesystem can clone, so --copy is not needed here"}
-		}
-	}
 	projectStore, err := createStore(env, parsed)
 	if err != nil {
 		return err

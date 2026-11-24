@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
 )
@@ -56,13 +57,18 @@ func openStore(env Env, parsed flags) (*store.Store, error) {
 
 // createStore opens the store of the project, creating it if needed. The
 // project's folder must exist. Without --copy, a new store is made only
-// where the filesystem can clone.
+// where the filesystem can clone; with it, only where it cannot.
 func createStore(env Env, parsed flags) (*store.Store, error) {
 	root, err := existingProjectRoot(env, parsed)
 	if err != nil {
 		return nil, err
 	}
 	if parsed.isCopyMode {
+		// Copy mode stays on for good, so where clones work it only costs
+		// disk.
+		if clone.IsSupportedIn(root) {
+			return nil, usageError{message: "this filesystem can clone, so --copy is not needed here"}
+		}
 		return store.Create(env.StoreHome, root)
 	}
 	return store.CreateIfCloneable(env.StoreHome, root)
