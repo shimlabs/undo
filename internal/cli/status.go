@@ -148,10 +148,7 @@ func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store, che
 			info, err := os.Lstat(filepath.Join(projectStore.Root(), filepath.FromSlash(rel)))
 			names[i] = displayRel(rel, err == nil && info.IsDir())
 		}
-		reason := " (undo has no permission to read these, so they are not covered)"
-		if len(names) == 1 {
-			reason = " (undo has no permission to read it, so it is not covered)"
-		}
+		reason := pluralWord(len(names), " (undo has no permission to read it, so it is not covered)", " (undo has no permission to read these, so they are not covered)")
 		printField(out, "Unreadable", out.Yellow(strings.Join(names, ", "))+reason)
 	}
 	if unstableCount > 0 {

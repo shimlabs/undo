@@ -117,10 +117,7 @@ func printMissingExcluded(out *terminal.Writer, changes restore.Changes) {
 	if len(missing) > maxNamedPaths {
 		names = append(names, fmt.Sprintf("%d more", len(missing)-maxNamedPaths))
 	}
-	verb, pronoun := "are", "them"
-	if len(missing) == 1 {
-		verb, pronoun = "is", "it"
-	}
+	verb, pronoun := pluralWord(len(missing), "is", "are"), pluralWord(len(missing), "it", "them")
 	out.Warningf("%s %s excluded from checkpoints, so undo cannot bring %s back. Reinstall or rebuild %s.", joinWithAnd(names), verb, pronoun, pronoun)
 }
 

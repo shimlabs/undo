@@ -48,11 +48,8 @@ func listCommand(parsed flags, env Env) error {
 		// The note goes to stderr, so the last line of the output is still
 		// the newest checkpoint.
 		errOut := env.stderr()
-		verb := "are"
-		if older == 1 {
-			verb = "is"
-		}
-		errOut.Printf("%s %s not shown. Run %s to see them.\n", pluralize(older, "older checkpoint"), verb, errOut.Bold(projectCommand(env, parsed, "undo list --all")))
+		errOut.Printf("%s %s not shown. Run %s to see %s.\n", pluralize(older, "older checkpoint"), pluralWord(older, "is", "are"),
+			errOut.Bold(projectCommand(env, parsed, "undo list --all")), pluralWord(older, "it", "them"))
 	}
 	return nil
 }

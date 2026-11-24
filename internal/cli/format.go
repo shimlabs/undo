@@ -11,9 +11,9 @@ import (
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
-// formatCount returns n with thousands separators, such as 2,469.
-func formatCount(n int) string {
-	digits := strconv.Itoa(n)
+// formatCount returns count with thousands separators, such as 2,469.
+func formatCount(count int) string {
+	digits := strconv.Itoa(count)
 	var formatted strings.Builder
 	for i, digit := range digits {
 		if i > 0 && (len(digits)-i)%3 == 0 {
@@ -24,12 +24,20 @@ func formatCount(n int) string {
 	return formatted.String()
 }
 
-// pluralize returns n and noun, in the plural unless n is 1.
-func pluralize(n int, noun string) string {
-	if n == 1 {
+// pluralize returns count and noun, in the plural unless count is 1.
+func pluralize(count int, noun string) string {
+	if count == 1 {
 		return "1 " + noun
 	}
-	return formatCount(n) + " " + noun + "s"
+	return formatCount(count) + " " + noun + "s"
+}
+
+// pluralWord returns singular when count is 1, and plural otherwise.
+func pluralWord(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 func formatBytes(size int64) string {

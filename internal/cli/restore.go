@@ -69,11 +69,8 @@ func diffCommand(parsed flags, env Env) error {
 		return nil
 	}
 	out.Println()
-	paths := "these " + pluralize(count, "path")
-	if count == 1 {
-		paths = "it"
-	}
-	out.Printf("Run %s to restore %s.\n", out.Bold(projectCommand(env, parsed, "undo to "+strconv.Itoa(checkpoint.ID))), paths)
+	out.Printf("Run %s to restore %s.\n", out.Bold(projectCommand(env, parsed, "undo to "+strconv.Itoa(checkpoint.ID))),
+		pluralWord(count, "it", "these "+pluralize(count, "path")))
 	return nil
 }
 
@@ -84,11 +81,7 @@ func printNothingToRestore(out *terminal.Writer, changes restore.Changes, id int
 	switch {
 	case len(changes.Kept) > 0:
 		out.Println()
-		paths := "paths"
-		if len(changes.Kept) == 1 {
-			paths = "path"
-		}
-		out.Warningf("Nothing undo can restore; fix the kept %s above and run undo again.", paths)
+		out.Warningf("Nothing undo can restore; fix the kept %s above and run undo again.", pluralWord(len(changes.Kept), "path", "paths"))
 	case len(changes.MissingExcluded) == 0:
 		out.Successf("Nothing to restore: the project already matches checkpoint %d.", id)
 		return true
@@ -183,11 +176,7 @@ func printRestored(env Env, parsed flags, applied restore.Changes, shownKept []s
 		out.Println()
 	}
 	count := restoredCount(applied)
-	pronoun := "them"
-	if count == 1 {
-		pronoun = "it"
-	}
-	out.Successf("Restored %s. Run %s to put %s back.", pluralize(count, "path"), out.Bold(projectCommand(env, parsed, "undo")), pronoun)
+	out.Successf("Restored %s. Run %s to put %s back.", pluralize(count, "path"), out.Bold(projectCommand(env, parsed, "undo")), pluralWord(count, "it", "them"))
 	if isShellFolderGone && exists(env.Dir) {
 		// The shell's folder is a new one now, which its old handle does not
 		// show.
