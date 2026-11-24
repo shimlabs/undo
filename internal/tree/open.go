@@ -72,6 +72,20 @@ func OpenDirAt(dir *os.File, name string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path.Join(dir.Name(), name)), nil
 }
 
+// openFileFlags open a file for reading, and refuse a symlink in its place
+// or wait for no writer of a named pipe.
+const openFileFlags = unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC
+
+// OpenFileAt opens the file name in dir for reading, without following a
+// symlink or blocking on a named pipe.
+func OpenFileAt(dir *os.File, name string) (*os.File, error) {
+	fd, err := unix.Openat(int(dir.Fd()), name, openFileFlags, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "openat", Path: path.Join(dir.Name(), name), Err: err}
+	}
+	return os.NewFile(uintptr(fd), path.Join(dir.Name(), name)), nil
+}
+
 func openError(name string, err error) error {
 	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
 		return fmt.Errorf("%s: %w", name, fs.ErrNotExist)

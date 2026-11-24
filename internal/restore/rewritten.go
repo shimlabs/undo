@@ -1,10 +1,7 @@
 package restore
 
 import (
-	"os"
 	"path"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/store"
@@ -43,15 +40,17 @@ func (p *restorePlan) rewrittenPaths(projectStore *store.Store, restored tree.Li
 			isSame[i] = true
 			return nil
 		}
-		file, err := openProjectFile(p.root, rel)
+		dir, err := tree.OpenDir(p.root, path.Dir(rel))
+		if err != nil {
+			return nil
+		}
+		defer dir.Close()
+		file, err := tree.OpenFileAt(dir, path.Base(rel))
 		if err != nil {
 			return nil
 		}
 		defer file.Close()
-		isSame[i], err = extractor.HasContent(rel, p.target[rel], file)
-		if err != nil {
-			isSame[i] = false
-		}
+		isSame[i], _ = extractor.HasContent(rel, p.target[rel], file)
 		return nil
 	})
 	rewritten := tree.Listing{}
@@ -73,20 +72,4 @@ func differsOnlyInIdentity(current, target tree.Entry) bool {
 	}
 	current.Inode, current.ChangeTime = target.Inode, target.ChangeTime
 	return current == target
-}
-
-// openProjectFile opens the file rel below root for reading, reaching it one
-// name at a time and without following a symlink or blocking on a named
-// pipe.
-func openProjectFile(root, rel string) (*os.File, error) {
-	dir, err := tree.OpenDir(root, path.Dir(rel))
-	if err != nil {
-		return nil, err
-	}
-	defer dir.Close()
-	fd, err := unix.Openat(int(dir.Fd()), path.Base(rel), unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, &os.PathError{Op: "openat", Path: rel, Err: err}
-	}
-	return os.NewFile(uintptr(fd), rel), nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/shimlabs/undo/internal/atomicfile"
 	"github.com/shimlabs/undo/internal/clone"
+	"github.com/shimlabs/undo/internal/tree"
 	"golang.org/x/sys/unix"
 )
 
@@ -68,11 +69,10 @@ func (e *Extractor) HasContent(rel string, source Source, file *os.File) (bool, 
 		return false, err
 	}
 	defer release()
-	fd, err := unix.Openat(int(srcDir.Fd()), srcName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	stored, err := tree.OpenFileAt(srcDir, srcName)
 	if err != nil {
-		return false, &os.PathError{Op: "openat", Path: srcName, Err: err}
+		return false, err
 	}
-	stored := os.NewFile(uintptr(fd), srcName)
 	defer stored.Close()
 	return sameBytes(stored, file)
 }
