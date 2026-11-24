@@ -79,15 +79,14 @@ func (p *restorePlan) hasTargetContent(extractor *store.Extractor, dir *os.File,
 }
 
 // differsOnlyInIdentity reports whether current, a file, symlink or named
-// pipe, is another file than target that differs from it only in its inode
-// and change time. A file saved by replacing it, keeping its size and
+// pipe, differs from target only in its inode and change time, as a file a
+// restore wrote back does. A file saved by replacing it, keeping its size and
 // modification time, differs the same way, so a file's content must still be
 // compared.
 func differsOnlyInIdentity(current, target tree.Entry) bool {
-	// A path a restore wrote back is a new clone. The same file with a new
-	// change time may have new extended attributes, which content does not
-	// show.
-	if current == target || current.Kind == tree.Dir || current.Inode == target.Inode {
+	// A path a restore wrote back is a new clone, though XFS may give it the
+	// inode number the checkpoint recorded.
+	if current == target || current.Kind == tree.Dir || (clonesKeepExtendedAttributes && current.Inode == target.Inode) {
 		return false
 	}
 	current.Inode, current.ChangeTime = target.Inode, target.ChangeTime
