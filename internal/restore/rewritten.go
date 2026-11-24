@@ -1,7 +1,10 @@
 package restore
 
 import (
+	"maps"
+	"os"
 	"path"
+	"slices"
 
 	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/store"
@@ -15,51 +18,63 @@ import (
 // changed. A path that still holds what the last restore to this checkpoint
 // wrote, as restored records, is known to match and is not read again.
 func (p *restorePlan) rewrittenPaths(projectStore *store.Store, restored tree.Listing) tree.Listing {
-	var candidates []string
+	candidatesInDir := map[string][]string{}
 	for rel, source := range p.target {
 		current, isListed := p.current[rel]
 		if restoredEntry, isRestored := restored[rel]; isRestored && restoredEntry == current {
 			continue
 		}
 		if isListed && !source.IsLost && differsOnlyInIdentity(current, source.Entry) {
-			candidates = append(candidates, rel)
+			candidatesInDir[path.Dir(rel)] = append(candidatesInDir[path.Dir(rel)], rel)
 		}
 	}
-	if len(candidates) == 0 {
+	if len(candidatesInDir) == 0 {
 		return tree.Listing{}
 	}
+	// Sorted, so the store's folders are opened in an order its cache keeps.
+	dirs := slices.Sorted(maps.Keys(candidatesInDir))
 	extractor := projectStore.NewExtractor()
 	defer extractor.Close()
-	isSame := make([]bool, len(candidates))
+	isSameInDir := make([][]bool, len(dirs))
 	// It never fails: a file that cannot be compared counts as changed.
-	_ = parallel.For(len(candidates), func(i int) error {
-		rel := candidates[i]
-		if p.current[rel].Kind != tree.File {
-			// A symlink's target is in its entry, and other kinds hold no
-			// content.
-			isSame[i] = true
-			return nil
-		}
-		dir, err := tree.OpenDir(p.root, path.Dir(rel))
+	_ = parallel.For(len(dirs), func(i int) error {
+		candidates := candidatesInDir[dirs[i]]
+		isSameInDir[i] = make([]bool, len(candidates))
+		dir, err := tree.OpenDir(p.root, dirs[i])
 		if err != nil {
 			return nil
 		}
 		defer dir.Close()
-		file, err := tree.OpenFileAt(dir, path.Base(rel))
-		if err != nil {
-			return nil
+		for j, rel := range candidates {
+			isSameInDir[i][j] = p.hasTargetContent(extractor, dir, rel)
 		}
-		defer file.Close()
-		isSame[i], _ = extractor.HasContent(rel, p.target[rel], file)
 		return nil
 	})
 	rewritten := tree.Listing{}
-	for i, rel := range candidates {
-		if isSame[i] {
-			rewritten[rel] = p.current[rel]
+	for i, dir := range dirs {
+		for j, rel := range candidatesInDir[dir] {
+			if isSameInDir[i][j] {
+				rewritten[rel] = p.current[rel]
+			}
 		}
 	}
 	return rewritten
+}
+
+// hasTargetContent reports whether the path rel, in the open folder dir,
+// holds the target's content. A symlink's target is in its entry, and other
+// kinds than files hold no content.
+func (p *restorePlan) hasTargetContent(extractor *store.Extractor, dir *os.File, rel string) bool {
+	if p.current[rel].Kind != tree.File {
+		return true
+	}
+	file, err := tree.OpenFileAt(dir, path.Base(rel))
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	isSame, err := extractor.HasContent(rel, p.target[rel], file)
+	return err == nil && isSame
 }
 
 // differsOnlyInIdentity reports whether current, a file, symlink or named
