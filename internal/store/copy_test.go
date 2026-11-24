@@ -6,7 +6,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/shimlabs/undo/internal/restore"
@@ -134,21 +133,31 @@ func TestCheckpointSeesCopyModeSetByAnotherProcess(t *testing.T) {
 func TestCreateIfCloneableLeavesNothingWithoutClones(t *testing.T) {
 	root := testutil.PlainDir(t)
 	home := t.TempDir()
+	// Other tests keep their projects, and stores next to them, in the same
+	// folder.
+	before := siblingNames(t, root)
 	if _, err := store.CreateIfCloneable(home, root); !errors.Is(err, store.ErrCloneUnsupported) {
 		t.Fatalf("CreateIfCloneable = %v, want ErrCloneUnsupported", err)
 	}
 	if _, err := store.Open(home, root); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Open after a refusal = %v, want no store", err)
 	}
+	if after := siblingNames(t, root); !maps.Equal(before, after) {
+		t.Fatalf("a refused checkpoint left something next to the project: before %v, after %v", before, after)
+	}
+}
+
+func siblingNames(t *testing.T, root string) map[string]bool {
+	t.Helper()
 	entries, err := os.ReadDir(filepath.Dir(root))
 	if err != nil {
 		t.Fatal(err)
 	}
+	names := map[string]bool{}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".undo-") {
-			t.Fatalf("a refused checkpoint left %s next to the project", entry.Name())
-		}
+		names[entry.Name()] = true
 	}
+	return names
 }
 
 func TestCreateIfCloneableOpensStoreInCopyMode(t *testing.T) {
