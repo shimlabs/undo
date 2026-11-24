@@ -60,6 +60,10 @@ func MkfifoAt(dir *os.File, name string, perm fs.FileMode) error {
 	return nil
 }
 
+// errAttributeGone is the error for an extended attribute a file does not
+// have.
+const errAttributeGone = unix.ENOATTR
+
 // IsSupportedIn reports whether the filesystem that holds dir can clone
 // files. It only reads the filesystem's type, so it changes nothing.
 func IsSupportedIn(dir string) bool {

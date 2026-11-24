@@ -21,7 +21,7 @@ const CanCloneDirs = false
 // and returns an error matching errors.ErrUnsupported when the filesystem
 // cannot clone.
 func FileAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
-	return copyTreeAt(srcDir, srcName, dir, name, cloneContent)
+	return copyTreeAt(srcDir, srcName, dir, name, copier{content: cloneContent})
 }
 
 // markUnsupported marks the errors FICLONE returns on filesystems without
@@ -58,6 +58,10 @@ const (
 	xfsMagic      = 0x58465342
 	bcachefsMagic = 0xca451a4e
 )
+
+// errAttributeGone is the error for an extended attribute a file does not
+// have.
+const errAttributeGone = unix.ENODATA
 
 // IsSupportedIn reports whether the filesystem that holds dir can clone
 // files. It only reads the filesystem's type, so it changes nothing; an XFS
