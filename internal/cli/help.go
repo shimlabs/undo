@@ -68,17 +68,9 @@ func printHelp(out *terminal.Writer) {
 	}
 	out.Println()
 	out.Println(out.Bold("Flags:"))
-	for _, cmd := range all {
-		if cmd.name != "" {
-			continue
-		}
-		// Plain undo has no help page of its own, so its flags are listed
-		// here.
-		for _, name := range cmd.flags {
-			flag, _ := findFlag(name)
-			out.Printf("  %-*s  %s\n", width, flagListing(flag), flag.summary)
-		}
-	}
+	// Plain undo has no help page of its own, so its flags are listed here.
+	plain, _ := findCommand("")
+	printFlags(out, plain.flags, width)
 	out.Printf("  %-*s  %s\n", width, helpFlagListing, "Show help for undo or a command")
 	out.Printf("  %-*s  %s\n", width, versionFlagListing, "Print the version")
 	printExamples(out, []example{
@@ -109,12 +101,17 @@ func printCommandHelp(out *terminal.Writer, cmd command) {
 	width = max(width, len(helpFlagListing))
 	out.Println()
 	out.Println(out.Bold("Flags:"))
-	for _, name := range cmd.flags {
+	printFlags(out, cmd.flags, width)
+	out.Printf("  %-*s  %s\n", width, helpFlagListing, "Show this help")
+	printExamples(out, cmd.examples, 0)
+}
+
+// printFlags lists the flags with their summaries aligned width columns in.
+func printFlags(out *terminal.Writer, names []string, width int) {
+	for _, name := range names {
 		flag, _ := findFlag(name)
 		out.Printf("  %-*s  %s\n", width, flagListing(flag), flag.summary)
 	}
-	out.Printf("  %-*s  %s\n", width, helpFlagListing, "Show this help")
-	printExamples(out, cmd.examples, 0)
 }
 
 func flagListing(flag flagDefinition) string {
