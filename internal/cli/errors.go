@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/hook"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/terminal"
 )
@@ -82,6 +83,11 @@ func describeError(err error) string {
 			shown = "cannot open " + shown
 		}
 		message = strings.Replace(message, pathErr.Error(), shown, 1)
+	}
+	if settingsErr, ok := errors.AsType[*hook.SettingsSyntaxError](err); ok {
+		shown := *settingsErr
+		shown.Path = displayPath(settingsErr.Path)
+		message = strings.Replace(message, settingsErr.Error(), shown.Error(), 1)
 	}
 	if linkErr, ok := errors.AsType[*os.LinkError](err); ok {
 		message = strings.Replace(message, linkErr.Error(), displayPath(linkErr.New)+": "+linkErr.Err.Error(), 1)

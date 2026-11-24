@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -182,9 +183,47 @@ func readSettings(path string) (map[string]any, error) {
 		return nil, err
 	}
 	if err := json.Unmarshal(data, &settings); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON, left unchanged: %w", path, err)
+		return nil, newSettingsSyntaxError(path, data, err)
 	}
 	return settings, nil
+}
+
+// SettingsSyntaxError is an agent's settings file that is not valid JSON,
+// which undo leaves as it is. Line and Column, counted from 1, are where the
+// parser stopped, and 0 when it did not say.
+type SettingsSyntaxError struct {
+	Path   string
+	Line   int
+	Column int
+	Err    error
+}
+
+func (e *SettingsSyntaxError) Error() string {
+	if e.Line == 0 {
+		return e.Path + " is not valid JSON"
+	}
+	return fmt.Sprintf("%s is not valid JSON (line %d, column %d)", e.Path, e.Line, e.Column)
+}
+
+func (e *SettingsSyntaxError) Unwrap() error { return e.Err }
+
+func newSettingsSyntaxError(path string, data []byte, err error) *SettingsSyntaxError {
+	settingsErr := &SettingsSyntaxError{Path: path, Err: err}
+	var offset int64
+	if syntaxErr, ok := errors.AsType[*json.SyntaxError](err); ok {
+		offset = syntaxErr.Offset
+	} else if typeErr, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+		offset = typeErr.Offset
+	}
+	if offset <= 0 || offset > int64(len(data)) {
+		return settingsErr
+	}
+	// The parser reports how many bytes it read, the last of them the one
+	// it stopped at.
+	before := data[:offset-1]
+	settingsErr.Line = bytes.Count(before, []byte("\n")) + 1
+	settingsErr.Column = len(before) - bytes.LastIndexByte(before, '\n')
+	return settingsErr
 }
 
 // writeSettings replaces the settings file. A settings file that is a

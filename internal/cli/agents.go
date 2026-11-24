@@ -16,11 +16,11 @@ func installCommand(parsed flags, env Env) error {
 	}
 	wasInstalled, err := agent.IsInstalled()
 	if err != nil {
-		return err
+		return withSettingsHint(env, err, "undo install "+agent.Name)
 	}
 	path, err := agent.Install(env.Executable)
 	if err != nil {
-		return err
+		return withSettingsHint(env, err, "undo install "+agent.Name)
 	}
 	out := env.stdout()
 	if wasInstalled {
@@ -41,7 +41,7 @@ func uninstallCommand(parsed flags, env Env) error {
 	out := env.stdout()
 	isInstalled, err := agent.IsInstalled()
 	if err != nil {
-		return err
+		return withSettingsHint(env, err, "undo uninstall "+agent.Name)
 	}
 	if !isInstalled {
 		out.Printf("The undo hook for %s is not installed.\n", agent.Title)
@@ -49,10 +49,19 @@ func uninstallCommand(parsed flags, env Env) error {
 	}
 	path, err := agent.Uninstall()
 	if err != nil {
-		return err
+		return withSettingsHint(env, err, "undo uninstall "+agent.Name)
 	}
 	out.Successf("Removed the undo hook for %s from %s.", agent.Title, displayPath(path))
 	return nil
+}
+
+// withSettingsHint says, for an agent settings file that is not valid JSON,
+// that undo left it unchanged and how to try again.
+func withSettingsHint(env Env, err error, commandLine string) error {
+	if _, ok := errors.AsType[*hook.SettingsSyntaxError](err); !ok {
+		return err
+	}
+	return withHint(fmt.Errorf("%w, so undo left it unchanged", err), fmt.Sprintf("Fix the file, then run %s again.", env.stderr().Bold(commandLine)))
 }
 
 func parseAgent(commandName string, args []string) (hook.Agent, error) {
@@ -98,7 +107,10 @@ var (
 func agentHooks() (installed, unreadable []string) {
 	for _, agent := range hook.Agents() {
 		isInstalled, err := agent.IsInstalled()
+		settingsErr, isSyntaxError := errors.AsType[*hook.SettingsSyntaxError](err)
 		switch {
+		case isSyntaxError:
+			unreadable = append(unreadable, agent.Title+": "+displayPath(settingsErr.Path)+" is not valid JSON, so undo cannot tell whether its hook is installed")
 		case err != nil:
 			unreadable = append(unreadable, agent.Title+": "+userMessage(err))
 		case isInstalled:
