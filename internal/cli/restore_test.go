@@ -33,9 +33,7 @@ func TestRestoreRefusesToAskWithoutTerminal(t *testing.T) {
 	if code != 1 || !strings.Contains(out.String(), "Run undo to 1 --yes to restore without asking.") {
 		t.Fatalf("exit %d:\n%s", code, out.String())
 	}
-	if data, err := os.ReadFile(filepath.Join(root, "f.txt")); err != nil || string(data) != "changed" {
-		t.Fatalf("f.txt = %q, %v, want it untouched", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "f.txt"), "changed")
 }
 
 func TestRestoreWithNothingToDoTakesNoCheckpoint(t *testing.T) {

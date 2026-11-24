@@ -77,9 +77,7 @@ func TestRunCheckpointsThenRuns(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "f.txt")); string(data) != "keep me" {
-		t.Fatalf("f.txt = %q after restore", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "f.txt"), "keep me")
 }
 
 func TestRunReturnsCommandExitCode(t *testing.T) {
@@ -384,9 +382,7 @@ func TestUndoFindsDeletedProject(t *testing.T) {
 	if code, out := run(t, parent, "", "to", "1", "--yes", "--project", root); code != 0 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "main.go")); string(data) != "package main" {
-		t.Fatalf("main.go = %q after restoring the deleted project", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "main.go"), "package main")
 }
 
 func TestDeletedProjectHintIsQuotedForTheShell(t *testing.T) {
@@ -518,9 +514,7 @@ func TestUndoInsideDeletedProjectRestoresIt(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Run cd . to see the restored files.") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "f.txt")); string(data) != "keep me" {
-		t.Fatalf("f.txt = %q after undo inside the deleted project", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "f.txt"), "keep me")
 }
 
 func TestUndoInsideDeletedSubfolderRestoresProject(t *testing.T) {
@@ -534,9 +528,7 @@ func TestUndoInsideDeletedSubfolderRestoresProject(t *testing.T) {
 	if code, out := run(t, filepath.Join(root, "src"), "", "--yes"); code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package main" {
-		t.Fatalf("src/main.go = %q after undo inside the deleted subfolder", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main")
 }
 
 func TestListInsideDeletedProjectShowsItsCheckpoints(t *testing.T) {
@@ -609,9 +601,7 @@ func TestUndoInsideDeletedSubfolderOfExistingProject(t *testing.T) {
 	if code, out := run(t, inside, "", "--yes"); code != 0 || !strings.Contains(out, "Run cd . to see the restored files.") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(inside, "main.go")); string(data) != "package main" {
-		t.Fatalf("src/lib/main.go = %q after undo inside the deleted subfolder", data)
-	}
+	testutil.AssertContent(t, filepath.Join(inside, "main.go"), "package main")
 }
 
 func TestProjectPathInsideDeletedSubfolderFindsProject(t *testing.T) {
