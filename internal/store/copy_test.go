@@ -161,11 +161,17 @@ func siblingNames(t *testing.T, root string) map[string]bool {
 }
 
 func TestCreateIfCloneableOpensStoreInCopyMode(t *testing.T) {
-	projectStore, root := plainProject(t)
+	root := testutil.PlainDir(t)
+	home := t.TempDir()
+	projectStore, err := store.Create(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := projectStore.SetCopyMode(true); err != nil {
 		t.Fatal(err)
 	}
-	home := filepath.Dir(projectStore.Dir())
+	projectStore.Close()
+
 	reopened, err := store.CreateIfCloneable(home, root)
 	if err != nil {
 		t.Fatal(err)
