@@ -437,25 +437,6 @@ func TestStatusEscapesExcludePatterns(t *testing.T) {
 	}
 }
 
-func TestStatusShowsUnreadableDirectories(t *testing.T) {
-	testutil.SkipIfRoot(t)
-	root := newProject(t)
-	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
-	if err := os.MkdirAll(filepath.Join(root, "pgdata"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
-		t.Fatal(err)
-	}
-	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
-	mustRun(t, root, "checkpoint")
-
-	_, out := run(t, root, "", "status")
-	if !strings.Contains(out, "Unreadable   pgdata/ (") {
-		t.Fatalf("status does not report the unreadable directory:\n%s", out)
-	}
-}
-
 func TestErrorsAreEscaped(t *testing.T) {
 	root := newProject(t)
 	code, out := run(t, root, "", "to", "1", "--project", filepath.Join(root, "a\x1b]0;pwned\x07"))

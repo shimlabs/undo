@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,5 +29,20 @@ func TestRunFailsLikeAShell(t *testing.T) {
 	}
 	if list := mustRun(t, root, "list"); strings.Contains(list, "script.sh") {
 		t.Fatalf("a command that cannot run got a checkpoint:\n%s", list)
+	}
+}
+
+func TestUnreadableIgnoreFileSaysCannotOpen(t *testing.T) {
+	testutil.SkipIfRoot(t)
+	root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "dist/\n")
+	if err := os.Chmod(filepath.Join(root, ".undoignore"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, ".undoignore"), 0o644)
+
+	code, out := run(t, root, "", "checkpoint")
+	if code != 1 || !strings.Contains(out, "Error: Cannot open .undoignore: permission denied.\nRun chmod u+r .undoignore in the project folder, then try again.\n") {
+		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }

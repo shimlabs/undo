@@ -50,32 +50,21 @@ func TestStatusAfterRefusedCheckpointPointsToCopyMode(t *testing.T) {
 	}
 }
 
-func TestUnreadableIgnoreFileSaysCannotOpen(t *testing.T) {
-	testutil.SkipIfRoot(t)
-	root := newProject(t)
-	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "dist/\n")
-	if err := os.Chmod(filepath.Join(root, ".undoignore"), 0o000); err != nil {
-		t.Fatal(err)
-	}
-	testutil.RestoreModeOnCleanup(t, filepath.Join(root, ".undoignore"), 0o644)
-
-	code, out := run(t, root, "", "checkpoint")
-	if code != 1 || !strings.Contains(out, "Error: Cannot open .undoignore: permission denied.\nRun chmod u+r .undoignore in the project folder, then try again.\n") {
-		t.Fatalf("exit %d:\n%s", code, out)
-	}
-}
-
-func TestStatusNamesOneUnreadableFolderInSingular(t *testing.T) {
+func TestStatusShowsUnreadableDirectories(t *testing.T) {
 	testutil.SkipIfRoot(t)
 	root := newProject(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
-	if err := os.Mkdir(filepath.Join(root, "pgdata"), 0o000); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "pgdata"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o000); err != nil {
 		t.Fatal(err)
 	}
 	testutil.RestoreModeOnCleanup(t, filepath.Join(root, "pgdata"), 0o755)
 	mustRun(t, root, "checkpoint")
 
-	if out := mustRun(t, root, "status"); !strings.Contains(out, "pgdata/ (undo has no permission to read it, so it is not covered)") {
-		t.Fatalf("status with one unreadable folder:\n%s", out)
+	_, out := run(t, root, "", "status")
+	if !strings.Contains(out, "Unreadable   pgdata/ (undo has no permission to read it, so it is not covered)") {
+		t.Fatalf("status does not report the unreadable directory:\n%s", out)
 	}
 }
