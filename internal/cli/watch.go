@@ -25,8 +25,16 @@ func watchCommand(_ flags, env Env) error {
 	defer stop()
 	err = watch.Serve(ctx, projectStore, watch.Options{SocketDir: env.SocketDir, IdleTimeout: time.Hour, Limits: store.DefaultLimits()})
 	if err != nil && !errors.Is(err, watch.ErrRunning) {
-		projectStore.LogError(fmt.Errorf("watcher stopped: %w", err))
+		projectStore.LogError(watcherStoppedError(err))
 		return err
 	}
 	return nil
 }
+
+// watcherStoppedError is the error log's line for the watcher stopping with
+// err, worded as undo words errors on screen.
+func watcherStoppedError(err error) error {
+	return fmt.Errorf("%w: %s", errWatcherStopped, describeError(err))
+}
+
+var errWatcherStopped = errors.New("the watcher stopped")

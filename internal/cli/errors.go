@@ -68,6 +68,12 @@ var (
 // the way undo shows paths, without the name of the system call that
 // failed, and it starts with a capital letter and ends with a period.
 func userMessage(err error) string {
+	return sentence(terminal.Printable(describeError(err)))
+}
+
+// describeError returns err's message with a path in it shown the way undo
+// shows paths, without the name of the system call that failed.
+func describeError(err error) string {
 	message := err.Error()
 	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
 		shown := displayPath(pathErr.Path) + ": " + pathErr.Err.Error()
@@ -80,7 +86,7 @@ func userMessage(err error) string {
 	if linkErr, ok := errors.AsType[*os.LinkError](err); ok {
 		message = strings.Replace(message, linkErr.Error(), displayPath(linkErr.New)+": "+linkErr.Err.Error(), 1)
 	}
-	return sentence(terminal.Printable(message))
+	return message
 }
 
 // sentence capitalizes text, unless it starts with an undo command, and ends
