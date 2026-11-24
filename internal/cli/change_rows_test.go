@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/restore"
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
@@ -45,5 +46,30 @@ func TestPrintRowsAlignsDetailsAfterAccentedPaths(t *testing.T) {
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
 	if len(lines) != 2 || utf8.RuneCountInString(lines[0]) != utf8.RuneCountInString(lines[1]) {
 		t.Fatalf("details are not aligned:\n%s", out.String())
+	}
+}
+
+// A folder kept for the kept paths it holds points at them, while one kept
+// for excluded files, which are not listed, says so.
+func TestKeptRowsExplainOccupiedFolders(t *testing.T) {
+	changes := restore.Changes{
+		Kept: []string{"cache", "gen", "gen/y"},
+		KeepReasons: map[string]restore.KeepReason{
+			"cache": restore.KeptOccupied,
+			"gen":   restore.KeptOccupied,
+			"gen/y": restore.KeptLocked,
+		},
+		Dirs: map[string]bool{"cache": true, "gen": true},
+	}
+	rows := keptRows(terminal.NewWriter(&bytes.Buffer{}), changes, changes.Kept)
+	details := map[string]string{}
+	for _, row := range rows {
+		details[row.path] = row.detail
+	}
+	if want := "it holds paths undo keeps, listed below"; details["gen/"] != want {
+		t.Errorf("gen/ detail = %q, want %q", details["gen/"], want)
+	}
+	if want := "it holds files undo leaves alone, such as excluded ones"; details["cache/"] != want {
+		t.Errorf("cache/ detail = %q, want %q", details["cache/"], want)
 	}
 }

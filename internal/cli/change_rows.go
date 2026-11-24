@@ -71,9 +71,18 @@ func keptRows(out *terminal.Writer, changes restore.Changes, kept []string) []ch
 	reasons := keepReasons()
 	rows := make([]changeRow, 0, len(kept))
 	for _, rel := range kept {
-		rows = append(rows, changeRow{action: "kept", path: displayRel(rel, changes.Dirs[rel]), detail: reasons[changes.KeepReasons[rel]], color: out.Yellow})
+		detail := reasons[changes.KeepReasons[rel]]
+		if changes.KeepReasons[rel] == restore.KeptOccupied && holdsKeptPath(rel, kept) {
+			detail = "it holds paths undo keeps, listed below"
+		}
+		rows = append(rows, changeRow{action: "kept", path: displayRel(rel, changes.Dirs[rel]), detail: detail, color: out.Yellow})
 	}
 	return rows
+}
+
+// holdsKeptPath reports whether one of kept is inside dir.
+func holdsKeptPath(dir string, kept []string) bool {
+	return slices.ContainsFunc(kept, func(rel string) bool { return strings.HasPrefix(rel, dir+"/") })
 }
 
 func reasonRows(action string, paths []string, reason string, color func(string) string) []changeRow {
