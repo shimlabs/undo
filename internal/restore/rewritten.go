@@ -108,7 +108,7 @@ func (p *restorePlan) hasTargetContent(extractor *store.Extractor, dir *os.File,
 func differsOnlyInIdentity(current, target tree.Entry) bool {
 	// A path a restore wrote back is a new clone, though XFS may give it the
 	// inode number the checkpoint recorded.
-	if current == target || current.Kind == tree.Dir || (clonesKeepExtendedAttributes && current.Inode == target.Inode) {
+	if current == target || current.Kind == tree.Dir || (hasExtendedAttributesInClones && current.Inode == target.Inode) {
 		return false
 	}
 	current.Inode, current.ChangeTime = target.Inode, target.ChangeTime
