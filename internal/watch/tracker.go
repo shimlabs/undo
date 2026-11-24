@@ -469,8 +469,8 @@ func markDirty(dirty map[string]bool, fullPath string) {
 }
 
 // isStaleExcluded reports whether the excluded path rel is gone or tracked
-// now. Its folder must still be listed too: on a filesystem that ignores
-// case, a stat still finds rel under a folder renamed to another spelling.
+// now. On a filesystem that ignores case, rel and its folder must also still
+// be spelled the way they are recorded.
 func (t *tracker) isStaleExcluded(rel string) bool {
 	// A path the listing holds is tracked now, such as a file in place of an
 	// excluded folder.
@@ -482,8 +482,14 @@ func (t *tracker) isStaleExcluded(rel string) bool {
 			return true
 		}
 	}
-	_, err := os.Lstat(t.path(rel))
-	return errors.Is(err, fs.ErrNotExist)
+	if !t.isCaseInsensitive {
+		_, err := os.Lstat(t.path(rel))
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	// A stat finds rel under any spelling, such as after node_modules was
+	// renamed to Node_modules, which the rules no longer exclude.
+	storedName, err := tree.StoredName(t.path(rel))
+	return err != nil || storedName != path.Base(rel)
 }
 
 // isReadableOrGone reports whether the directory rel can be listed now, or

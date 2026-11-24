@@ -276,3 +276,15 @@ func TestTrackerDropsExcludedFolderRemovedUnderOtherCase(t *testing.T) {
 	}
 	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "removed").ID)
 }
+
+// The default rule excludes node_modules by its exact name, so the folder
+// renamed to another case is tracked and no longer excluded.
+func TestTrackerDropsExcludedFolderRenamedToOtherCase(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	testutil.WriteFile(t, filepath.Join(root, "node_modules", "pkg", "index.js"), "x")
+	takeCheckpoint(t, projectTracker, "first")
+	if err := os.Rename(filepath.Join(root, "node_modules"), filepath.Join(root, "Node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "renamed").ID)
+}
