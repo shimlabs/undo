@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestWriteFileReplacesContent(t *testing.T) {
@@ -34,5 +35,16 @@ func TestTempNameIsUniqueAndHidden(t *testing.T) {
 	}
 	if !strings.HasPrefix(first, ".main.go.undo-") {
 		t.Fatalf("TempName = %q", first)
+	}
+}
+
+func TestTempNameFitsLongestName(t *testing.T) {
+	name := strings.Repeat("é", 127) + "a"
+	got := TempName(name)
+	if len(got) > 255 {
+		t.Fatalf("TempName of a %d-byte name is %d bytes, over NAME_MAX", len(name), len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("TempName cut a character in two: %q", got)
 	}
 }

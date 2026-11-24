@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -48,13 +49,21 @@ func WriteFileIn(root *os.Root, name string, data []byte, perm os.FileMode) erro
 	return errors.Join(Sync(dir), dir.Close())
 }
 
+// maxNameBytes is NAME_MAX on APFS, Btrfs, ext4 and XFS.
+const maxNameBytes = 255
+
 // TempName returns an unused name in the same directory as name for building
 // its replacement. The name is random, so it never matches a file the user
-// created.
+// created. A long name is cut, so the result still fits in maxNameBytes.
 func TempName(name string) string {
 	suffix := make([]byte, 6)
 	rand.Read(suffix)
-	return "." + name + ".undo-" + hex.EncodeToString(suffix)
+	tail := ".undo-" + hex.EncodeToString(suffix)
+	room := maxNameBytes - len(".") - len(tail)
+	if len(name) > room {
+		name = strings.ToValidUTF8(name[:room], "")
+	}
+	return "." + name + tail
 }
 
 // Sync flushes file's data to the disk. It uses fsync(2) and not
