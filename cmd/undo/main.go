@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,8 +19,21 @@ import (
 	"github.com/shimlabs/undo/internal/watch"
 )
 
-func main() {
+// workingDir returns the folder undo runs in. On Linux, getcwd(3) fails for
+// a folder that was deleted, which is where a shell is after an agent
+// removes the folder it is in, so the shell's $PWD names it instead.
+func workingDir() (string, error) {
 	dir, err := os.Getwd()
+	if errors.Is(err, fs.ErrNotExist) {
+		if shellDir := os.Getenv("PWD"); filepath.IsAbs(shellDir) {
+			return filepath.Clean(shellDir), nil
+		}
+	}
+	return dir, err
+}
+
+func main() {
+	dir, err := workingDir()
 	if err != nil {
 		exitWithError(err)
 	}
