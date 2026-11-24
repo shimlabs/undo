@@ -69,3 +69,57 @@ func TestTrackerSeesChangesWhoseEventsComeLate(t *testing.T) {
 	checkpoint := takeCheckpoint(t, projectTracker, "second")
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
+
+// dropEvents forgets the events for paths, as if FSEvents had not delivered
+// them yet.
+func dropEvents(projectTracker *tracker, paths ...string) {
+	projectTracker.mu.Lock()
+	defer projectTracker.mu.Unlock()
+	for _, fullPath := range paths {
+		delete(projectTracker.dirty, fullPath)
+	}
+}
+
+// A folder whose event came on time is read again by the events applied, so
+// a second change in it whose event comes late must still be found.
+func TestTrackerSeesLateChangeInFolderWithEventOnTime(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
+	testutil.WriteFile(t, filepath.Join(root, "src", "on-time.go"), "package main")
+	testutil.WriteFile(t, filepath.Join(root, "src", "late.go"), "package main")
+	if !projectTracker.waitForMarker() {
+		t.Fatal("the events never arrived")
+	}
+	dropEvents(projectTracker, filepath.Join(root, "src", "late.go"))
+
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
+
+// A late event costs a read of its folder, not a comparison of the whole
+// project: a write into an existing file elsewhere, whose event is also late,
+// waits for the next checkpoint, as design.md says.
+func TestTrackerReadsOnlyTheFolderOfALateChange(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
+	testutil.WriteFile(t, filepath.Join(root, "docs", "guide.md"), "edited in place")
+	testutil.WriteFile(t, filepath.Join(root, "src", "late.go"), "package main")
+	if !projectTracker.waitForMarker() {
+		t.Fatal("the events never arrived")
+	}
+	projectTracker.mu.Lock()
+	clear(projectTracker.dirty)
+	projectTracker.mu.Unlock()
+
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
+	listing, err := projectStore.ListingAt(checkpoint.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := listing["src/late.go"]; !ok {
+		t.Error("the checkpoint lacks src/late.go")
+	}
+	if listing["docs/guide.md"].Size == int64(len("edited in place")) {
+		t.Error("a late change in src made the checkpoint compare the whole project")
+	}
+}
