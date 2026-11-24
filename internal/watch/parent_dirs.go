@@ -49,7 +49,8 @@ func (d *parentDirs) close() {
 
 // openUncached opens rel in its parent, itself opened through the cache, so
 // each folder on the way is opened once per batch rather than once per path.
-// The file it returns is not cached, so its offset is the caller's own.
+// open caches what it returns; a caller that reads the folder's entries,
+// such as readNames, calls it directly so the offset is its own.
 func (d *parentDirs) openUncached(rel string) (*os.File, error) {
 	if rel == "." {
 		return tree.OpenDir(d.root, ".")
