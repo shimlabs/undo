@@ -122,12 +122,12 @@ func noCheckpointsError(env Env, parsed flags, id int) error {
 	if err != nil {
 		return err
 	}
-	checkpointCommand := "undo checkpoint"
+	commandLine := "undo checkpoint"
 	if !clone.IsSupportedIn(root) {
-		checkpointCommand += " --copy"
+		commandLine += " --copy"
 	}
 	return withHint(fmt.Errorf("%w %d; %s has no checkpoints yet", store.ErrNoCheckpoint, id, displayPath(root)),
-		fmt.Sprintf("Run %s to take one now.", env.stderr().Bold(projectCommand(env, parsed, checkpointCommand))))
+		fmt.Sprintf("Run %s to take one now.", env.stderr().Bold(projectCommand(env, parsed, commandLine))))
 }
 
 // restoreTo shows what restoring checkpoint changes and, unless --yes was
