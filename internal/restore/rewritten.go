@@ -18,13 +18,15 @@ import (
 // changed. A path that still holds what the last restore to this checkpoint
 // wrote, as restored records, is known to match and is not read again.
 func (p *restorePlan) rewrittenPaths(projectStore *store.Store, restored tree.Listing) tree.Listing {
+	// Copies keep extended attributes, which clones keep only on macOS.
+	hasExtendedAttributes := hasExtendedAttributesInClones || projectStore.IsCopyMode()
 	candidatesInDir := map[string][]string{}
 	for rel, source := range p.target {
 		current, isListed := p.current[rel]
 		if restoredEntry, isRestored := restored[rel]; isRestored && restoredEntry == current {
 			continue
 		}
-		if isListed && !source.IsLost && differsOnlyInIdentity(current, source.Entry) {
+		if isListed && !source.IsLost && differsOnlyInIdentity(current, source.Entry, hasExtendedAttributes) {
 			dir := path.Dir(rel)
 			candidatesInDir[dir] = append(candidatesInDir[dir], rel)
 		}
@@ -104,11 +106,13 @@ func (p *restorePlan) hasTargetContent(extractor *store.Extractor, dir *os.File,
 // pipe, differs from target only in its inode and change time, as a file a
 // restore wrote back does. A file saved by replacing it, keeping its size and
 // modification time, differs the same way, so a file's content must still be
-// compared.
-func differsOnlyInIdentity(current, target tree.Entry) bool {
+// compared. hasExtendedAttributes says the store keeps extended attributes:
+// the same file with a new change time may then have new ones, which its
+// content does not show.
+func differsOnlyInIdentity(current, target tree.Entry, hasExtendedAttributes bool) bool {
 	// A path a restore wrote back is a new clone, though XFS may give it the
 	// inode number the checkpoint recorded.
-	if current == target || current.Kind == tree.Dir || (hasExtendedAttributesInClones && current.Inode == target.Inode) {
+	if current == target || current.Kind == tree.Dir || (hasExtendedAttributes && current.Inode == target.Inode) {
 		return false
 	}
 	current.Inode, current.ChangeTime = target.Inode, target.ChangeTime
