@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/shimlabs/undo/internal/appledouble"
 	"golang.org/x/sys/unix"
 )
 
@@ -62,10 +63,6 @@ func copyTreeAt(srcDir *os.File, srcName string, dir *os.File, name string, copy
 	return nil
 }
 
-// appleDoublePrefix starts the names of the files that hold another file's
-// extended attributes on filesystems without them.
-const appleDoublePrefix = "._"
-
 func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, copyData func(in, out *os.File) error) error {
 	// A file swapped for a named pipe since it was listed would block a
 	// plain open, and is no longer the file to copy.
@@ -84,7 +81,7 @@ func copyFileAt(srcFd int, srcName string, dirFd int, name string, perm uint32, 
 	}
 	flags := unix.O_WRONLY | unix.O_CREAT | unix.O_EXCL | unix.O_NOFOLLOW | unix.O_CLOEXEC
 	outFd, err := unix.Openat(dirFd, name, flags, 0o600)
-	if errors.Is(err, unix.EEXIST) && strings.HasPrefix(name, appleDoublePrefix) && hasAppleDoubleFilesAt(dirFd) {
+	if errors.Is(err, unix.EEXIST) && strings.HasPrefix(name, appledouble.Prefix) && appledouble.IsUsedAt(dirFd) {
 		// macOS made this "._" file when the file it belongs to was copied.
 		// Removing the name, rather than opening it, never writes through
 		// whatever stands there.

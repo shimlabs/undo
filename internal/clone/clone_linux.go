@@ -59,12 +59,6 @@ const (
 	bcachefsMagic = 0xca451a4e
 )
 
-// HasAppleDoubleFiles reports whether extended attributes are kept in "._"
-// files on the filesystem that holds dir, which only macOS does.
-func HasAppleDoubleFiles(string) bool { return false }
-
-func hasAppleDoubleFilesAt(int) bool { return false }
-
 // IsSupportedIn reports whether the filesystem that holds dir can clone
 // files. It only reads the filesystem's type, so it changes nothing; an XFS
 // made without reflink still cannot clone.
