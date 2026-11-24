@@ -101,6 +101,34 @@ func projectRoot(env Env, parsed flags) (string, error) {
 	return project.Root(env.Dir)
 }
 
+// existingProjectRoot returns the root of the project in env.Dir, or of the
+// project that --project names, for a command that needs its folder.
+func existingProjectRoot(env Env, parsed flags) (string, error) {
+	dir := env.Dir
+	if parsed.project != "" {
+		dir = absolutePath(parsed.project, env.Dir)
+	}
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		err := fmt.Errorf("%s %w", displayPath(dir), errFolderMissing)
+		if hasCheckpoints(env, parsed) {
+			return "", withHint(err, fmt.Sprintf("Run %s to bring it back.", env.stderr().Bold(projectCommand(env, parsed, "undo"))))
+		}
+		return "", err
+	}
+	return project.Root(dir)
+}
+
+// hasCheckpoints reports whether the project, which may have been deleted,
+// has a store.
+func hasCheckpoints(env Env, parsed flags) bool {
+	projectStore, err := openStore(env, parsed)
+	if err != nil {
+		return false
+	}
+	projectStore.Close()
+	return true
+}
+
 // openStore opens the existing store of the project. It returns an error
 // matching fs.ErrNotExist if the project has no checkpoints yet.
 func openStore(env Env, parsed flags) (*store.Store, error) {
@@ -111,9 +139,10 @@ func openStore(env Env, parsed flags) (*store.Store, error) {
 	return store.Open(env.StoreHome, root)
 }
 
-// createStore opens the store of the project, creating it if needed.
+// createStore opens the store of the project, creating it if needed. The
+// project's folder must exist.
 func createStore(env Env, parsed flags) (*store.Store, error) {
-	root, err := projectRoot(env, parsed)
+	root, err := existingProjectRoot(env, parsed)
 	if err != nil {
 		return nil, err
 	}

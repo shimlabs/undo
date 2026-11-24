@@ -13,7 +13,7 @@ import (
 )
 
 func statusCommand(parsed flags, env Env) error {
-	root, err := projectRoot(env, parsed)
+	root, err := existingProjectRoot(env, parsed)
 	if err != nil {
 		return err
 	}

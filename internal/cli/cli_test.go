@@ -580,3 +580,30 @@ func TestListInsideDeletedProjectShowsItsCheckpoints(t *testing.T) {
 		t.Fatalf("list inside the deleted project:\n%s", out)
 	}
 }
+
+func TestCommandsThatNeedTheFolderRefuseDeletedProject(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"status"}, {"checkpoint"}, {"run", "--", "true"}} {
+		code, out := run(t, root, "", args...)
+		if code != 1 || !strings.Contains(out, "does not exist.") || !strings.Contains(out, "Run undo to bring it back.") {
+			t.Errorf("undo %v: exit %d:\n%s", args, code, out)
+		}
+	}
+}
+
+func TestCommandsThatNeedTheFolderRefuseMissingProjectPath(t *testing.T) {
+	root := newProject(t)
+	for _, args := range [][]string{{"checkpoint", "--project", "nope"}, {"status", "--project", "nope"}} {
+		code, out := run(t, root, "", args...)
+		if code != 1 || !strings.Contains(out, "nope does not exist.") {
+			t.Errorf("undo %v: exit %d:\n%s", args, code, out)
+		}
+	}
+	if _, out := run(t, root, "", "list", "--project", "nope"); !strings.Contains(out, "undo has no checkpoints of it") {
+		t.Fatalf("a refused checkpoint still made a store:\n%s", out)
+	}
+}
