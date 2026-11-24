@@ -55,13 +55,17 @@ func openStore(env Env, parsed flags) (*store.Store, error) {
 }
 
 // createStore opens the store of the project, creating it if needed. The
-// project's folder must exist.
+// project's folder must exist. Without --copy, a new store is made only
+// where the filesystem can clone.
 func createStore(env Env, parsed flags) (*store.Store, error) {
 	root, err := existingProjectRoot(env, parsed)
 	if err != nil {
 		return nil, err
 	}
-	return store.Create(env.StoreHome, root)
+	if parsed.isCopyMode {
+		return store.Create(env.StoreHome, root)
+	}
+	return store.CreateIfCloneable(env.StoreHome, root)
 }
 
 // findDeletedRoot returns the root of the project that held dir, which is

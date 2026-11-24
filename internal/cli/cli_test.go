@@ -266,15 +266,29 @@ func TestStatusShowsDiskUseAndWatcher(t *testing.T) {
 }
 
 func TestCheckpointCopyFlagSavesCopyMode(t *testing.T) {
-	root := newProject(t)
-	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
+	root := plainProject(t)
 
-	if code, out := run(t, root, "", "checkpoint", "--copy"); code != 0 {
+	code, out := run(t, root, "", "checkpoint", "--copy")
+	if code != 0 || !strings.Contains(out, "Checkpoints of this project now keep full copies") {
 		t.Fatalf("exit %d: %s", code, out)
 	}
-	_, out := run(t, root, "", "status")
-	if !strings.Contains(out, "Storage      full copies") {
+	if out := mustRun(t, root, "status"); !strings.Contains(out, "Storage      full copies") {
 		t.Fatalf("status does not show copy mode:\n%s", out)
+	}
+	if out := mustRun(t, root, "checkpoint", "--copy"); strings.Contains(out, "now keep full copies") {
+		t.Fatalf("a second --copy announced copy mode again:\n%s", out)
+	}
+}
+
+// Copy mode stays on for good, so where clones work it would only cost disk.
+func TestCheckpointRefusesCopyFlagWhereClonesWork(t *testing.T) {
+	root := newProject(t)
+	code, out := run(t, root, "", "checkpoint", "--copy")
+	if code != 2 || !strings.Contains(out, "This filesystem can clone, so --copy is not needed here.") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if _, out := run(t, root, "", "list"); !strings.Contains(out, "No checkpoints yet") {
+		t.Fatalf("a refused --copy took a checkpoint:\n%s", out)
 	}
 }
 

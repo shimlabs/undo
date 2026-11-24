@@ -9,18 +9,31 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shimlabs/undo/internal/clone"
 	"github.com/shimlabs/undo/internal/shell"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
 )
 
 func checkpointCommand(parsed flags, env Env) error {
+	if parsed.isCopyMode {
+		// Copy mode stays on for good, so where clones work it only costs
+		// disk.
+		root, err := existingProjectRoot(env, parsed)
+		if err != nil {
+			return err
+		}
+		if clone.IsSupportedIn(root) {
+			return usageError{message: "this filesystem can clone, so --copy is not needed here"}
+		}
+	}
 	projectStore, err := createStore(env, parsed)
 	if err != nil {
 		return err
 	}
 	defer projectStore.Close()
-	if parsed.isCopyMode {
+	isCopyModeNew := parsed.isCopyMode && !projectStore.IsCopyMode()
+	if isCopyModeNew {
 		if err := projectStore.SetCopyMode(true); err != nil {
 			return err
 		}
@@ -32,6 +45,10 @@ func checkpointCommand(parsed flags, env Env) error {
 	checkpoint, err := env.checkpointer()(projectStore, store.CheckpointOptions{Label: label, Dir: env.Dir})
 	if err != nil {
 		return err
+	}
+	if isCopyModeNew {
+		env.stdout().Successf("Took checkpoint %d. Checkpoints of this project now keep full copies, which take as much disk as the project.", checkpoint.ID)
+		return nil
 	}
 	env.stdout().Successf("Took checkpoint %d.", checkpoint.ID)
 	return nil
