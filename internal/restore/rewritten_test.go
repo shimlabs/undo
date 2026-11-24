@@ -2,8 +2,11 @@ package restore
 
 import (
 	"fmt"
+	"maps"
+	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/shimlabs/undo/internal/store"
@@ -66,5 +69,32 @@ func BenchmarkPlanAfterRestore(b *testing.B) {
 	projectStore := newRewrittenProject(b, 10_000)
 	for b.Loop() {
 		planRewrittenProject(b, projectStore)
+	}
+}
+
+// The restore record already says which paths still hold what the last
+// restore wrote, so planning the same restore again reads none of them.
+func TestPlanAfterRestoreComparesNoContent(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	for _, dir := range []string{"src", ".git"} {
+		if err := os.RemoveAll(filepath.Join(root, dir)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(t, projectStore, 1)
+
+	unlock, err := projectStore.RLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	inputs, err := loadRestoreInputs(projectStore, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := restorePlan{root: root, target: inputs.target, current: maps.Clone(inputs.current)}
+	if compared := plan.rewrittenPaths(projectStore, inputs.restored); len(compared) != 0 {
+		t.Fatalf("planning again read %v, which the restore record covers", slices.Sorted(maps.Keys(compared)))
 	}
 }
