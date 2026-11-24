@@ -12,10 +12,10 @@ import (
 // cloning, and fewer leave the filesystem idle.
 const concurrency = 8
 
-// For calls fn with every index from 0 to n-1, several at a time. After the
+// For calls fn with every index from 0 to count-1, several at a time. After the
 // first error it starts no new calls, and it returns that error once the
 // running calls are done.
-func For(n int, fn func(i int) error) error {
+func For(count int, fn func(i int) error) error {
 	var (
 		next      atomic.Int64
 		hasFailed atomic.Bool
@@ -23,11 +23,11 @@ func For(n int, fn func(i int) error) error {
 		firstErr  error
 		workers   sync.WaitGroup
 	)
-	for range min(concurrency, n) {
+	for range min(concurrency, count) {
 		workers.Go(func() {
 			for !hasFailed.Load() {
 				i := int(next.Add(1) - 1)
-				if i >= n {
+				if i >= count {
 					return
 				}
 				if err := fn(i); err != nil {
