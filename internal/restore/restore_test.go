@@ -364,9 +364,7 @@ func TestRestoreLeavesNewlyExcludedPaths(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, "build", "out.bin"), "new build")
 
 	apply(t, projectStore, 1)
-	if data, _ := os.ReadFile(filepath.Join(root, "build", "out.bin")); string(data) != "new build" {
-		t.Fatalf("restore changed an excluded file: build/out.bin = %q", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "build", "out.bin"), "new build")
 }
 
 func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
@@ -383,9 +381,7 @@ func TestRestoreLeavesUnreadableDirectories(t *testing.T) {
 	if err := os.Chmod(filepath.Join(root, "pgdata"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "pgdata", "rows")); string(data) != "data" {
-		t.Fatalf("restore removed a directory it could not read")
-	}
+	testutil.AssertContent(t, filepath.Join(root, "pgdata", "rows"), "data")
 }
 
 func TestRestoreKeepsUnreadableFiles(t *testing.T) {
@@ -425,9 +421,7 @@ func TestRestoreLeavesDirectoryUnreadableAtCheckpoint(t *testing.T) {
 	}
 
 	apply(t, projectStore, 1)
-	if data, _ := os.ReadFile(filepath.Join(root, "pgdata", "rows")); string(data) != "data" {
-		t.Fatal("restore removed files the checkpoint could not read")
-	}
+	testutil.AssertContent(t, filepath.Join(root, "pgdata", "rows"), "data")
 }
 
 func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
@@ -439,9 +433,7 @@ func TestRestoreBringsBackPathsExcludedLater(t *testing.T) {
 	}
 
 	apply(t, projectStore, 1)
-	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package main\n" {
-		t.Fatal("restore did not bring back a folder excluded only after the checkpoint")
-	}
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
 }
 
 func TestRestoreNeverWritesThroughSymlinkExcludedLater(t *testing.T) {
@@ -479,9 +471,7 @@ func TestRestoreKeepsChangedFileItCannotReadNow(t *testing.T) {
 	if err := os.Chmod(secret, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(secret); string(data) != "v2" {
-		t.Fatalf("secret.key = %q, want v2 left alone, since the restore could not save it first", data)
-	}
+	testutil.AssertContent(t, secret, "v2")
 	if !slices.Contains(changes.Kept, "secret.key") {
 		t.Fatalf("Kept = %v, want secret.key", changes.Kept)
 	}
@@ -698,9 +688,7 @@ func TestRestoreKeepsDirectoryWithExcludedContentWhereFileWas(t *testing.T) {
 	if !slices.Contains(changes.Kept, "cache") {
 		t.Errorf("Kept = %v, want cache", changes.Kept)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package main\n" {
-		t.Errorf("src/main.go = %q; the restore stopped at cache", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
 	if _, err := os.Stat(filepath.Join(root, "cache", "node_modules", "x.js")); err != nil {
 		t.Errorf("the excluded content in cache is gone: %v", err)
 	}
@@ -734,9 +722,7 @@ func TestRestoreReportsStoredFilesThatAreGone(t *testing.T) {
 	if !slices.Equal(changes.Lost, []string{"README.md"}) {
 		t.Fatalf("Lost = %v, want README.md", changes.Lost)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "src", "main.go")); string(data) != "package second\n" {
-		t.Fatalf("src/main.go = %q; the restore stopped at the missing copy", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package second\n")
 }
 
 // "cache" was a file at checkpoint 1. It is now a directory that holds a file
@@ -904,9 +890,7 @@ func TestApplyWithChangesInManyDirectories(t *testing.T) {
 	testutil.SetOpenFileLimit(t, 1024)
 
 	apply(t, projectStore, first.ID)
-	if data, err := os.ReadFile(filepath.Join(root, "dir0042", "file.txt")); err != nil || string(data) != "v1" {
-		t.Fatalf("dir0042/file.txt = %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "dir0042", "file.txt"), "v1")
 }
 
 func TestRestoreWithUnreadableFileTakesOneCheckpoint(t *testing.T) {
@@ -1119,7 +1103,7 @@ func TestRestoreUsesCheckpointRulesWhenTheyExcludedNothing(t *testing.T) {
 	}
 
 	apply(t, projectStore, 1)
-	assertContent(t, filepath.Join(root, "target", "release.bin"), "built by hand")
+	testutil.AssertContent(t, filepath.Join(root, "target", "release.bin"), "built by hand")
 }
 
 // A restore writes files back as new clones, so their inode and change time

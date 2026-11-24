@@ -22,7 +22,7 @@ func TestRestoreFileWithLongName(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, longName), "v2")
 	take(t, projectStore, "2")
 	apply(t, projectStore, 1)
-	assertContent(t, filepath.Join(root, longName), "v1")
+	testutil.AssertContent(t, filepath.Join(root, longName), "v1")
 }
 
 func TestRestoreAfterMergingFileWithLongName(t *testing.T) {
@@ -42,7 +42,7 @@ func TestRestoreAfterMergingFileWithLongName(t *testing.T) {
 	}
 	testutil.WriteFile(t, filepath.Join(root, longName), "v4")
 	apply(t, projectStore, checkpoints[0].ID)
-	assertContent(t, filepath.Join(root, longName), "v2")
+	testutil.AssertContent(t, filepath.Join(root, longName), "v2")
 }
 
 // latin1Name is "café.txt" in Latin-1: Linux filesystems accept it, but it
@@ -64,7 +64,7 @@ func TestRestoreKeepsNameThatIsNotUTF8(t *testing.T) {
 	testutil.WriteFile(t, filepath.Join(root, "README.md"), "changed")
 	take(t, projectStore, "3")
 	apply(t, projectStore, 2)
-	assertContent(t, filepath.Join(root, latin1Name), "v1")
+	testutil.AssertContent(t, filepath.Join(root, latin1Name), "v1")
 }
 
 func TestRestoreRemovedFileWithNameThatIsNotUTF8(t *testing.T) {
@@ -78,15 +78,7 @@ func TestRestoreRemovedFileWithNameThatIsNotUTF8(t *testing.T) {
 	}
 	take(t, projectStore, "3")
 	apply(t, projectStore, 2)
-	assertContent(t, filepath.Join(root, latin1Name), "v2")
-}
-
-func assertContent(t *testing.T, path, want string) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil || string(data) != want {
-		t.Fatalf("%s holds %q, %v; want %q", filepath.Base(path), data, err, want)
-	}
+	testutil.AssertContent(t, filepath.Join(root, latin1Name), "v2")
 }
 
 func TestRestoreAndMergeNamesNearTheLimit(t *testing.T) {
@@ -106,7 +98,7 @@ func TestRestoreAndMergeNamesNearTheLimit(t *testing.T) {
 		testutil.WriteFile(t, filepath.Join(root, name), "v3")
 		take(t, projectStore, "3")
 		apply(t, projectStore, 2)
-		assertContent(t, filepath.Join(root, name), "v2")
+		testutil.AssertContent(t, filepath.Join(root, name), "v2")
 		if _, err := projectStore.Prune(time.Now(), store.Limits{MaxAge: time.Hour, MaxCount: 1, MaxBytes: 1 << 40}); err != nil {
 			t.Fatalf("prune: %v", err)
 		}

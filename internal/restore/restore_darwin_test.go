@@ -77,9 +77,7 @@ func TestRestoreKeepsFileLockedInFinder(t *testing.T) {
 	if !slices.Contains(changes.Kept, "README.md") {
 		t.Errorf("Kept = %v, want the locked README.md", changes.Kept)
 	}
-	if data, err := os.ReadFile(filepath.Join(root, "src", "main.go")); err != nil || string(data) != "package main\n" {
-		t.Errorf("src/main.go = %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
 }
 
 // lockSymlink sets the lock flag on the symlink path itself, as chflags -h
@@ -115,9 +113,7 @@ func requireWorksAfterPrune(t *testing.T, projectStore *store.Store, root string
 	testutil.WriteFile(t, filepath.Join(root, "src", "main.go"), "broken")
 	take(t, projectStore, "damaged")
 	apply(t, projectStore, beforeDamage.ID)
-	if data, err := os.ReadFile(filepath.Join(root, "src", "main.go")); err != nil || string(data) != "package main\n" {
-		t.Fatalf("src/main.go = %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
 }
 
 func TestPruneWithFolderLockedInFinder(t *testing.T) {
@@ -188,9 +184,7 @@ func TestRestoreKeepsFilesInFolderLockedInFinder(t *testing.T) {
 		t.Errorf("Kept = %v, want docs/a.txt, which sits in a locked folder", changes.Kept)
 	}
 	for rel, want := range map[string]string{"src/main.go": "package main\n", "README.md": "# demo\n"} {
-		if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))); err != nil || string(data) != want {
-			t.Errorf("%s = %q, %v", rel, data, err)
-		}
+		testutil.AssertContent(t, filepath.Join(root, filepath.FromSlash(rel)), want)
 	}
 }
 
@@ -228,9 +222,7 @@ func TestRestoreDeletedFolderThatWasLockedInFinder(t *testing.T) {
 	take(t, projectStore, "2")
 
 	apply(t, projectStore, 1)
-	if data, err := os.ReadFile(filepath.Join(docs, "a.txt")); err != nil || string(data) != "v1" {
-		t.Fatalf("docs/a.txt = %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(docs, "a.txt"), "v1")
 	if restored, err := projectStore.RestoredEntries(1); err != nil || len(restored) == 0 {
 		t.Fatalf("restore record = %v, %v, want it saved", restored, err)
 	}
@@ -323,9 +315,7 @@ func renameThenLock(t *testing.T, from, to string) {
 	take(t, projectStore, "2")
 
 	apply(t, projectStore, 1)
-	if data, err := os.ReadFile(filepath.Join(root, "README.md")); err != nil || string(data) != "# demo\n" {
-		t.Fatalf("README.md = %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "README.md"), "# demo\n")
 }
 
 func TestRestoreWithLockedFolderRenamedInCase(t *testing.T) {
@@ -351,7 +341,5 @@ func TestRestoreWithLockedFileRenamedInCase(t *testing.T) {
 	if !slices.Contains(changes.Kept, "notes.txt") {
 		t.Errorf("Kept = %v, want notes.txt, which is locked under another case", changes.Kept)
 	}
-	if data, err := os.ReadFile(filepath.Join(root, "src", "main.go")); err != nil || string(data) != "package main\n" {
-		t.Fatalf("src/main.go = %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
 }
