@@ -177,10 +177,7 @@ func TestRestoreKeepsNodeModules(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "src", "main.go")); err != nil {
 		t.Fatal("src/main.go not restored")
 	}
-	data, err := os.ReadFile(filepath.Join(root, "web", "node_modules", "pkg", "index.js"))
-	if err != nil || string(data) != "v2" {
-		t.Fatalf("excluded file changed by restore: %q, %v", data, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "web", "node_modules", "pkg", "index.js"), "v2")
 }
 
 func TestRestoreIsUndoable(t *testing.T) {
@@ -803,14 +800,8 @@ func requireRestoredAroundCache(t *testing.T, projectStore *store.Store, root st
 	if !slices.Contains(changes.Kept, "cache") {
 		t.Errorf("Kept = %v, want cache", changes.Kept)
 	}
-	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
-	if err != nil || string(readme) != "# demo\n" {
-		t.Errorf("README.md = %q, %v", readme, err)
-	}
-	mainContent, err := os.ReadFile(filepath.Join(root, "src", "main.go"))
-	if err != nil || string(mainContent) != "package main\n" {
-		t.Errorf("src/main.go = %q, %v", mainContent, err)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "README.md"), "# demo\n")
+	testutil.AssertContent(t, filepath.Join(root, "src", "main.go"), "package main\n")
 }
 
 func TestRestoreKeepsDirectoryWithNestedExcludedContentWhereFileWas(t *testing.T) {
