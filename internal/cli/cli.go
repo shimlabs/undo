@@ -79,6 +79,8 @@ func Run(args []string, env Env) int {
 	case errors.Is(err, store.ErrCloneUnsupported):
 		printError(errOut, withHint(fmt.Errorf("%w, so undo cannot protect this project cheaply", err),
 			fmt.Sprintf("Run %s once to keep full copies instead. They take as much disk as the project.", errOut.Bold("undo checkpoint --copy"))))
+	case errors.Is(err, store.ErrOlderFormat):
+		printError(errOut, withHint(err, "This version cannot read its checkpoints. Move that folder aside to start a new store."))
 	case isUnreadableIgnoreFile(err):
 		printError(errOut, withHint(err, fmt.Sprintf("Run %s in the project folder, then try again.", errOut.Bold("chmod u+r "+exclude.IgnoreFile))))
 	case errors.Is(err, project.ErrNotProject):
