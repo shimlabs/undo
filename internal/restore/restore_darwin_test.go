@@ -482,3 +482,33 @@ func TestRestoreOnExFATLeavesAppleDoubleFilesAlone(t *testing.T) {
 	apply(t, projectStore, first.ID)
 	testutil.AssertContent(t, filepath.Join(root, "src", "a.ts"), "a.ts")
 }
+
+// macOS removes a file's "._" file with it and writes it back with it, so a
+// restore must not warn that the "._" file is excluded and cannot come back.
+func TestPlanOnExFATDoesNotReportAppleDoubleFilesMissing(t *testing.T) {
+	root := testutil.ExFATDir(t)
+	file := filepath.Join(root, "q.txt")
+	testutil.WriteFile(t, file, "q")
+	if err := unix.Setxattr(file, "com.example.tag", []byte("x"), 0); err != nil {
+		t.Fatal(err)
+	}
+	projectStore, err := store.Create(t.TempDir(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projectStore.SetCopyMode(true); err != nil {
+		t.Fatal(err)
+	}
+	first := take(t, projectStore, "1")
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := Plan(projectStore, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.MissingExcluded) > 0 {
+		t.Fatalf("plan reports %v as excluded and gone", changes.MissingExcluded)
+	}
+}

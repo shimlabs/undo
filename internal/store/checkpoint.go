@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/shimlabs/undo/internal/appledouble"
 	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/parallel"
 	"github.com/shimlabs/undo/internal/tree"
@@ -253,7 +254,7 @@ func (s *Store) cloneChanged(id int, changes Changes) (Manifest, error) {
 		Changed:         map[string]tree.Entry{},
 		Deleted:         changes.Deleted,
 		Unreadable:      changes.Unreadable,
-		Excluded:        withoutStoreDirs(changes.Excluded),
+		Excluded:        withoutAppleDoubleFiles(withoutStoreDirs(changes.Excluded)),
 		ExcludePatterns: changes.ExcludePatterns,
 	}
 	files := splitChanged(changes, &manifest)
@@ -480,6 +481,15 @@ func (s *Store) cloneStable(dirs dirPair, rel string, entry tree.Entry) (tree.En
 			return entry, false, nil
 		}
 	}
+}
+
+// withoutAppleDoubleFiles drops the "._" files macOS keeps beside files on
+// filesystems without extended attributes. macOS removes and writes them with
+// those files, so a restore must not report them gone.
+func withoutAppleDoubleFiles(excluded []string) []string {
+	return slices.DeleteFunc(excluded, func(rel string) bool {
+		return strings.HasPrefix(path.Base(rel), appledouble.Prefix)
+	})
 }
 
 // withoutStoreDirs drops the stores undo keeps next to projects, which are
