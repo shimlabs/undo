@@ -78,7 +78,7 @@ func (s *Store) Manifest(id int) (Manifest, error) {
 	if err := s.readGob(s.manifestPath(id), &manifest); err != nil {
 		return Manifest{}, err
 	}
-	paths := slices.Concat(manifest.Deleted, manifest.Unstable, manifest.Unreadable, slices.Collect(maps.Keys(manifest.Changed)))
+	paths := slices.Concat(manifest.Deleted, manifest.Unstable, manifest.Unreadable, manifest.Excluded, slices.Collect(maps.Keys(manifest.Changed)))
 	return manifest, checkLocal(slices.Values(paths))
 }
 
