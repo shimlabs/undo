@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shimlabs/undo/internal/testutil"
+	"golang.org/x/sys/unix"
 )
 
 func TestFileAtRefusesExisting(t *testing.T) {
@@ -227,5 +228,32 @@ func TestCopyAtNamesFailingPathInsideFolder(t *testing.T) {
 	pathErr, ok := errors.AsType[*fs.PathError](err)
 	if !ok || pathErr.Path != "tree/sub/secret" {
 		t.Fatalf("CopyAt = %v, want an error naming tree/sub/secret", err)
+	}
+}
+
+// checkCopyKeepsExtendedAttributes copies a folder holding a file, both
+// tagged with the extended attribute attributeName, into dst, and checks
+// that both copies keep it.
+func checkCopyKeepsExtendedAttributes(t *testing.T, dst, attributeName string) {
+	t.Helper()
+	src := t.TempDir()
+	file := filepath.Join(src, "tree", "tagged.txt")
+	testutil.WriteFile(t, file, "content")
+	for _, path := range []string{file, filepath.Dir(file)} {
+		if err := unix.Setxattr(path, attributeName, []byte("red"), 0); errors.Is(err, unix.ENOTSUP) {
+			t.Skip("this filesystem keeps no extended attributes")
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := copyByPath(t, CopyAt, filepath.Join(src, "tree"), filepath.Join(dst, "tree")); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"tree/tagged.txt", "tree"} {
+		value := make([]byte, 16)
+		size, err := unix.Getxattr(filepath.Join(dst, rel), attributeName, value)
+		if err != nil || string(value[:size]) != "red" {
+			t.Errorf("%s: %s = %q, %v; want red", rel, attributeName, value[:max(size, 0)], err)
+		}
 	}
 }
