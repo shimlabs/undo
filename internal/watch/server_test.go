@@ -360,10 +360,3 @@ func TestServerPrunesDuringCheckpoints(t *testing.T) {
 		time.Sleep(3 * time.Millisecond)
 	}
 }
-
-func TestStreamStoppedErrorShowsOnlyItsCause(t *testing.T) {
-	err := streamStoppedError{cause: errors.New("cannot open .undoignore")}
-	if !errors.Is(err, errStreamStopped) || err.Error() != "cannot open .undoignore" {
-		t.Fatalf("errors.Is = %v, message %q", errors.Is(err, errStreamStopped), err.Error())
-	}
-}

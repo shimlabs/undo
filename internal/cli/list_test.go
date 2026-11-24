@@ -2,14 +2,12 @@ package cli
 
 import (
 	"bytes"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
-	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func TestPrintCheckpointsEscapesStoredText(t *testing.T) {
@@ -40,22 +38,5 @@ func TestListShowsLabels(t *testing.T) {
 	code, out := run(t, root, "", "list")
 	if code != 0 || !strings.Contains(out, "before npm run build") {
 		t.Fatalf("exit %d, output %q", code, out)
-	}
-}
-
-func TestOlderStoreSaysHowToStartOver(t *testing.T) {
-	root := newProject(t)
-	mustRun(t, root, "checkpoint")
-	projectStore, err := store.Open(defaultStoreHome(t), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configPath := filepath.Join(projectStore.Dir(), "config.json")
-	projectStore.Close()
-	testutil.WriteFile(t, configPath, `{"format":1,"root":"`+root+`"}`)
-
-	code, out := run(t, root, "", "list")
-	if code != 1 || !strings.Contains(out, "written by an older version of undo") || !strings.Contains(out, "Move that folder aside") {
-		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }

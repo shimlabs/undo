@@ -605,3 +605,20 @@ func TestProjectPathInsideDeletedSubfolderFindsProject(t *testing.T) {
 		t.Fatalf("list --project inside the deleted subfolder:\n%s", out)
 	}
 }
+
+func TestOlderStoreSaysHowToStartOver(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	projectStore, err := store.Open(defaultStoreHome(t), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(projectStore.Dir(), "config.json")
+	projectStore.Close()
+	testutil.WriteFile(t, configPath, `{"format":1,"root":"`+root+`"}`)
+
+	code, out := run(t, root, "", "list")
+	if code != 1 || !strings.Contains(out, "written by an older version of undo") || !strings.Contains(out, "Move that folder aside") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}

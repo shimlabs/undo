@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -1124,5 +1125,12 @@ func BenchmarkApplyDirty(b *testing.B) {
 		if _, _, err := projectTracker.applyDirty(batch); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestStreamStoppedErrorShowsOnlyItsCause(t *testing.T) {
+	err := streamStoppedError{cause: errors.New("cannot open .undoignore")}
+	if !errors.Is(err, errStreamStopped) || err.Error() != "cannot open .undoignore" {
+		t.Fatalf("errors.Is = %v, message %q", errors.Is(err, errStreamStopped), err.Error())
 	}
 }
