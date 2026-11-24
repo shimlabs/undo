@@ -152,9 +152,7 @@ func makeChangedFileUnreadable(t *testing.T, root string) {
 }
 
 func TestDiffShowsPathsTheRestoreKeeps(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads every file")
-	}
+	testutil.SkipIfRoot(t)
 	root := newProject(t)
 	mustRun(t, root, "checkpoint")
 	makeChangedFileUnreadable(t, root)
@@ -166,9 +164,7 @@ func TestDiffShowsPathsTheRestoreKeeps(t *testing.T) {
 }
 
 func TestUndoShowsKeptPathsBeforeAsking(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads every file")
-	}
+	testutil.SkipIfRoot(t)
 	root := newProject(t)
 	mustRun(t, root, "checkpoint")
 	makeChangedFileUnreadable(t, root)

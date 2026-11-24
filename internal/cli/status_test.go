@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,21 +24,12 @@ func TestStatusHidesErrorsOlderThanLatestCheckpoint(t *testing.T) {
 	}
 }
 
-// plainProject returns a project on the filesystem without clones that
-// UNDO_TEST_PLAIN_DIR names.
+// plainProject returns a project on a filesystem without clones.
 func plainProject(t *testing.T) string {
 	t.Helper()
-	plain := os.Getenv("UNDO_TEST_PLAIN_DIR")
-	if plain == "" {
-		t.Skip("UNDO_TEST_PLAIN_DIR is not set")
-	}
+	root := testutil.PlainDir(t)
 	t.Setenv("UNDO_HOME", t.TempDir())
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
-	root, err := os.MkdirTemp(plain, "project-") //nolint:usetesting // the project must be on the filesystem UNDO_TEST_PLAIN_DIR names
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(root) })
 	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
 	return root
 }

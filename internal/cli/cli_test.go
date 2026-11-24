@@ -333,17 +333,7 @@ func TestHookCodexTakesCheckpoint(t *testing.T) {
 }
 
 func TestRefusalExplainsCopyMode(t *testing.T) {
-	plain := os.Getenv("UNDO_TEST_PLAIN_DIR")
-	if plain == "" {
-		t.Skip("UNDO_TEST_PLAIN_DIR is not set")
-	}
-	t.Setenv("UNDO_HOME", t.TempDir())
-	root, err := os.MkdirTemp(plain, "project-") //nolint:usetesting // the project must be on the filesystem UNDO_TEST_PLAIN_DIR names
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(root) })
-	testutil.WriteFile(t, filepath.Join(root, "main.go"), "package main")
+	root := plainProject(t)
 
 	code, out := run(t, root, "", "checkpoint")
 	if code != 1 || !strings.Contains(out, "undo checkpoint --copy") {
@@ -448,9 +438,7 @@ func TestStatusEscapesExcludePatterns(t *testing.T) {
 }
 
 func TestStatusShowsUnreadableDirectories(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read every directory")
-	}
+	testutil.SkipIfRoot(t)
 	root := newProject(t)
 	t.Setenv("UNDO_SOCKET_DIR", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(root, "pgdata"), 0o755); err != nil {
