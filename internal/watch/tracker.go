@@ -71,11 +71,9 @@ type tracker struct {
 	hardLinked map[string]bool
 	// children indexes the listing by folder. It is built the first time a
 	// spelling check needs it, and nil until then.
-	children childIndex
-	lastID   int
-	// ignoresCase is whether the project's filesystem treats names that
-	// differ only in case as the same.
-	ignoresCase bool
+	children          childIndex
+	lastID            int
+	isCaseInsensitive bool
 }
 
 // errStreamStopped means the tracker no longer watches the project, so the
@@ -97,14 +95,14 @@ func newTracker(projectStore *store.Store) (*tracker, error) {
 		return nil, err
 	}
 	t := &tracker{
-		store:        projectStore,
-		root:         projectStore.Root(),
-		markerDir:    markerDir,
-		markerPrefix: rand.Text()[:8],
-		dirty:        map[string]bool{},
-		shouldRescan: true,
-		markers:      map[string]chan struct{}{},
-		ignoresCase:  tree.IsCaseInsensitive(projectStore.Root()),
+		store:             projectStore,
+		root:              projectStore.Root(),
+		markerDir:         markerDir,
+		markerPrefix:      rand.Text()[:8],
+		dirty:             map[string]bool{},
+		shouldRescan:      true,
+		markers:           map[string]chan struct{}{},
+		isCaseInsensitive: tree.IsCaseInsensitive(projectStore.Root()),
 	}
 	if err := t.startStream(); err != nil {
 		return nil, err
@@ -485,7 +483,7 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 	parents := tree.NewParentChecker(t.root)
 	storedDirs := map[string]string{}
 	for fullPath, isRenamed := range t.withHardLinks(dirty) {
-		if t.ignoresCase {
+		if t.isCaseInsensitive {
 			fullPath = t.storedSpelling(storedDirs, fullPath)
 		}
 		if err := t.applyPath(changes, matcher, parents, fullPath, isRenamed); err != nil {
@@ -495,7 +493,7 @@ func (t *tracker) applyDirty(dirty map[string]bool) (changed, deleted []string, 
 	if changes.hasLinkCountChange {
 		return nil, nil, errNeedsFullComparison
 	}
-	if t.ignoresCase {
+	if t.isCaseInsensitive {
 		t.removeStaleSpellings(changes)
 	}
 	changes.finish()
