@@ -86,21 +86,20 @@ func findDeletedRoot(home, dir string) (string, error) {
 }
 
 // resolveExistingPrefix returns path with the part of it that still exists
-// resolved, as stores record roots, and that part.
-func resolveExistingPrefix(path string) (resolvedPath, existing string, err error) {
-	existing = filepath.Dir(path)
-	for !exists(existing) && existing != filepath.Dir(existing) {
-		existing = filepath.Dir(existing)
+// resolved, as stores record roots, and that part resolved.
+func resolveExistingPrefix(path string) (resolved, resolvedPrefix string, err error) {
+	prefix := filepath.Dir(path)
+	for !exists(prefix) && prefix != filepath.Dir(prefix) {
+		prefix = filepath.Dir(prefix)
 	}
-	resolved, err := filepath.EvalSymlinks(existing)
+	if resolvedPrefix, err = filepath.EvalSymlinks(prefix); err != nil {
+		return "", "", err
+	}
+	rest, err := filepath.Rel(prefix, path)
 	if err != nil {
 		return "", "", err
 	}
-	rest, err := filepath.Rel(existing, path)
-	if err != nil {
-		return "", "", err
-	}
-	return filepath.Join(resolved, rest), resolved, nil
+	return filepath.Join(resolvedPrefix, rest), resolvedPrefix, nil
 }
 
 // hasStore reports whether the project at root has a store.
