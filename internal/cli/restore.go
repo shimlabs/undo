@@ -32,7 +32,51 @@ func undoCommand(parsed flags, env Env) error {
 	if !hasLatest {
 		return printNoCheckpoints(env, parsed)
 	}
-	return restoreTo(env, parsed, projectStore, latest, true)
+	target, skipped, err := checkpointToUndo(projectStore, latest)
+	if err != nil {
+		return err
+	}
+	return restoreTo(env, parsed, projectStore, target, true, skippedNote(skipped, target))
+}
+
+// checkpointToUndo returns the checkpoint plain undo restores, and the newer
+// ones it skips. Agents take a checkpoint before read-only commands too, so
+// the newest checkpoint often matches the project already; undo then goes
+// back to the checkpoint before the newest one that recorded a change.
+func checkpointToUndo(projectStore *store.Store, latest store.Checkpoint) (store.Checkpoint, []store.Checkpoint, error) {
+	changes, err := restore.Plan(projectStore, latest.ID)
+	if err != nil {
+		return store.Checkpoint{}, nil, err
+	}
+	if len(changes.Written)+len(changes.Removed)+len(changes.Kept)+len(changes.MissingExcluded) > 0 {
+		return latest, nil, nil
+	}
+	checkpoints, err := projectStore.List()
+	if err != nil {
+		return store.Checkpoint{}, nil, err
+	}
+	for i := len(checkpoints) - 1; i > 0; i-- {
+		manifest, err := projectStore.Manifest(checkpoints[i].ID)
+		if err != nil {
+			return store.Checkpoint{}, nil, err
+		}
+		if len(manifest.Changed)+len(manifest.Deleted) > 0 {
+			return checkpoints[i-1], checkpoints[i:], nil
+		}
+	}
+	return latest, nil, nil
+}
+
+// skippedNote says which checkpoints plain undo skipped to reach target, or
+// is empty when it skipped none.
+func skippedNote(skipped []store.Checkpoint, target store.Checkpoint) string {
+	switch len(skipped) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("Checkpoint %d matches the project now, so undo goes back to %d.", skipped[0].ID, target.ID)
+	}
+	return fmt.Sprintf("Checkpoints %d–%d match the project now, so undo goes back to %d.", skipped[0].ID, skipped[len(skipped)-1].ID, target.ID)
 }
 
 func toCommand(parsed flags, env Env) error {
@@ -44,7 +88,7 @@ func toCommand(parsed flags, env Env) error {
 		return err
 	}
 	defer projectStore.Close()
-	return restoreTo(env, parsed, projectStore, checkpoint, false)
+	return restoreTo(env, parsed, projectStore, checkpoint, false, "")
 }
 
 func diffCommand(parsed flags, env Env) error {
@@ -133,8 +177,8 @@ func reportNoCheckpoints(env Env, parsed flags, id int) error {
 // restoreTo shows what restoring checkpoint changes and, unless --yes was
 // given, asks first. isLatest says the user ran plain undo, which a project
 // that already matches the latest checkpoint leaves with a pointer to the
-// earlier ones.
-func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint store.Checkpoint, isLatest bool) error {
+// earlier ones. A note, when there is one, is shown under the heading.
+func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint store.Checkpoint, isLatest bool, note string) error {
 	out := env.stdout()
 	if !parsed.isConfirmed && !isTerminal(env.Stdin) {
 		commandLine := "undo"
@@ -145,6 +189,10 @@ func restoreTo(env Env, parsed flags, projectStore *store.Store, checkpoint stor
 			fmt.Sprintf("Run %s to restore without asking.", env.stderr().Bold(projectCommand(env, parsed, commandLine+" --yes"))))
 	}
 	printCheckpointHeading(out, checkpoint, projectStore.Root())
+	if note != "" {
+		out.Println(out.Dim(note))
+		out.Println()
+	}
 	// The shell may still be in a folder the restore brings back.
 	isShellFolderGone := parsed.project == "" && !exists(env.Dir)
 	changes, err := planOrApply(env, parsed, projectStore, checkpoint.ID)

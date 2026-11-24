@@ -156,3 +156,32 @@ func TestRestoreThatOnlyKeepsPathsExitsNonZero(t *testing.T) {
 		t.Fatalf("diff exit %d:\n%s", code, out)
 	}
 }
+
+// Agents take a checkpoint before read-only commands too, so by the time
+// undo runs the newest checkpoint often matches the project. Plain undo then
+// goes back to the newest checkpoint the project differs from.
+func TestUndoSkipsCheckpointsThatMatchTheProject(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint", "--label", "rm f.txt")
+	if err := os.Remove(filepath.Join(root, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, root, "checkpoint", "--label", "ls")
+	mustRun(t, root, "checkpoint", "--label", "git status")
+
+	out := mustRun(t, root, "--yes")
+	if !strings.Contains(out, "Checkpoints 2–3 match the project now, so undo goes back to 1.") {
+		t.Errorf("undo does not say which checkpoints it skipped:\n%s", out)
+	}
+	testutil.AssertContent(t, filepath.Join(root, "f.txt"), "keep me")
+}
+
+func TestUndoSaysNothingToRestoreWhenNoCheckpointDiffers(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	mustRun(t, root, "checkpoint")
+
+	if out := mustRun(t, root, "--yes"); !strings.Contains(out, "Nothing to restore: the project already matches checkpoint 2.") {
+		t.Errorf("undo with no differing checkpoint:\n%s", out)
+	}
+}

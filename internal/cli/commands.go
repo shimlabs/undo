@@ -115,12 +115,13 @@ func commands() []command {
 	return []command{
 		{
 			name:     "",
-			summary:  "Restore the project to before the last command",
+			summary:  "Restore the project to before the last command that changed it",
 			group:    groupRestore,
 			flags:    []string{flagYes, flagProject},
 			run:      undoCommand,
 			examples: []example{{"undo", "Undo what the agent just did"}, {"undo --yes", "Undo it without the question"}},
 			description: "Shows what the last command changed and asks before it restores anything. " +
+				"Commands that changed nothing, such as ls, are skipped. " +
 				"It first takes a checkpoint of the project as it is, so running undo again puts everything back.",
 		},
 		{
