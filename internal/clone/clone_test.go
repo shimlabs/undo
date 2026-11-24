@@ -163,3 +163,16 @@ func TestFileAtNeverFollowsSymlinkInSourceName(t *testing.T) {
 		t.Fatalf("copy = %q, %v; want a symlink to %s", target, err, outside)
 	}
 }
+
+// On FAT and exFAT, macOS keeps a file's extended attributes in a "._" file
+// beside it, which it makes as soon as the file is copied. The project's own
+// "._" file must then replace it.
+func TestCopyAtReplacesAppleDoubleFile(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	testutil.WriteFile(t, filepath.Join(src, "._b.ts"), "project metadata")
+	testutil.WriteFile(t, filepath.Join(dst, "._b.ts"), "made by the kernel")
+	if err := copyByPath(t, CopyAt, filepath.Join(src, "._b.ts"), filepath.Join(dst, "._b.ts")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.AssertContent(t, filepath.Join(dst, "._b.ts"), "project metadata")
+}
