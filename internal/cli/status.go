@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -141,7 +143,12 @@ func printCheckpointSummary(out *terminal.Writer, projectStore *store.Store, che
 		return err
 	}
 	if len(latest.Unreadable) > 0 {
-		printField(out, "Unreadable", out.Yellow(terminal.Printable(strings.Join(latest.Unreadable, ", ")))+" (undo has no permission to read these, so they are not covered)")
+		names := make([]string, len(latest.Unreadable))
+		for i, rel := range latest.Unreadable {
+			info, err := os.Lstat(filepath.Join(projectStore.Root(), filepath.FromSlash(rel)))
+			names[i] = displayRel(rel, err == nil && info.IsDir())
+		}
+		printField(out, "Unreadable", out.Yellow(strings.Join(names, ", "))+" (undo has no permission to read these, so they are not covered)")
 	}
 	if unstableCount > 0 {
 		printField(out, "Changing", out.Yellow(pluralize(unstableCount, "checkpoint"))+" hold files that changed while they were saved; a restore lists them")

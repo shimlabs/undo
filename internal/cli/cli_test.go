@@ -463,7 +463,7 @@ func TestStatusShowsUnreadableDirectories(t *testing.T) {
 	mustRun(t, root, "checkpoint")
 
 	_, out := run(t, root, "", "status")
-	if !strings.Contains(out, "Unreadable   pgdata") {
+	if !strings.Contains(out, "Unreadable   pgdata/ (") {
 		t.Fatalf("status does not report the unreadable directory:\n%s", out)
 	}
 }
