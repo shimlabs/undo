@@ -2,7 +2,9 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,6 +53,10 @@ func VolumeDir(tb testing.TB, filesystem string) string {
 func detach(ctx context.Context, mountPoint string) error {
 	var err error
 	for range 20 {
+		if _, statErr := os.Stat(mountPoint); errors.Is(statErr, fs.ErrNotExist) {
+			// An earlier try detached it, though hdiutil reported a failure.
+			return nil
+		}
 		var out []byte
 		if out, err = exec.CommandContext(ctx, "hdiutil", "detach", "-force", mountPoint).CombinedOutput(); err == nil {
 			return nil
