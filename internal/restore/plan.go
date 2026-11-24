@@ -31,10 +31,11 @@ func lockAndPlan(projectStore *store.Store, id int) (restorePlan, func(), error)
 }
 
 // isCoveredBy reports whether the project still looks the way checkpoint id
-// recorded it, so everything the restore overwrites can be brought back. A
-// file the checkpoint could not read is not in its listing, and the restore
-// never touches it, so it does not count.
-func isCoveredBy(projectStore *store.Store, id int, current tree.Listing) (bool, error) {
+// recorded it, so everything plan overwrites or removes can be brought back.
+// A file the checkpoint could not read is not in its listing and does not
+// count, unless plan changes it: plan saw it readable, so it would change a
+// file no checkpoint holds.
+func isCoveredBy(projectStore *store.Store, id int, plan restorePlan) (bool, error) {
 	saved, err := projectStore.ListingAt(id)
 	if err != nil {
 		return false, err
@@ -44,7 +45,10 @@ func isCoveredBy(projectStore *store.Store, id int, current tree.Listing) (bool,
 		return false, err
 	}
 	unreadable := toSet(manifest.Unreadable)
-	changed, deleted := tree.Changed(saved, current)
+	for _, rel := range slices.Concat(plan.changes.Written, plan.changes.Removed) {
+		delete(unreadable, rel)
+	}
+	changed, deleted := tree.Changed(saved, plan.scanned)
 	changed = slices.DeleteFunc(changed, func(rel string) bool {
 		_, isSaved := saved[rel]
 		return !isSaved && unreadable[rel]

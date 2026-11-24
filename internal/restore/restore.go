@@ -128,7 +128,7 @@ func isPlanCurrent(projectStore *store.Store, plan restorePlan, safety, oldest i
 	if err != nil || oldestNow != oldest {
 		return false, err
 	}
-	return isCoveredBy(projectStore, safety, plan.scanned)
+	return isCoveredBy(projectStore, safety, plan)
 }
 
 // planCoveredBy plans the restore of checkpoint id under the store's shared
@@ -140,7 +140,7 @@ func planCoveredBy(projectStore *store.Store, id, safety int, options store.Chec
 	if err != nil {
 		return restorePlan{}, nil, err
 	}
-	isCovered, err := isCoveredBy(projectStore, safety, plan.scanned)
+	isCovered, err := isCoveredBy(projectStore, safety, plan)
 	if err != nil {
 		unlock()
 		return restorePlan{}, nil, err

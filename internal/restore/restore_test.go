@@ -954,3 +954,92 @@ func TestApplyWithNothingToDoTakesNoCheckpoint(t *testing.T) {
 		t.Fatalf("a restore with nothing to do took checkpoint %d, %v", latest.ID, err)
 	}
 }
+
+// makeUnreadableThenTake makes rel unreadable after the restore plans and
+// before its safety checkpoint, as a command running alongside it can.
+func makeUnreadableThenTake(rel string) store.Checkpointer {
+	return func(projectStore *store.Store, options store.CheckpointOptions) (store.Checkpoint, error) {
+		if err := os.Chmod(filepath.Join(projectStore.Root(), rel), 0); err != nil {
+			return store.Checkpoint{}, err
+		}
+		return projectStore.Take(options)
+	}
+}
+
+func readAsOwner(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestRestoreKeepsFileUnreadableAtSafetyCheckpoint(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	projectStore, root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "v1")
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, "notes.txt"), "unsaved work")
+	if _, err := Apply(projectStore, 1, makeUnreadableThenTake("notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readAsOwner(t, filepath.Join(root, "notes.txt")); got != "unsaved work" {
+		t.Fatalf("notes.txt holds %q: the restore overwrote work no checkpoint saved", got)
+	}
+}
+
+func TestRestoreKeepsNewFileUnreadableAtSafetyCheckpoint(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, filepath.Join(root, "new.txt"), "unsaved work")
+	if _, err := Apply(projectStore, 1, makeUnreadableThenTake("new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readAsOwner(t, filepath.Join(root, "new.txt")); got != "unsaved work" {
+		t.Fatalf("new.txt holds %q: the restore removed work no checkpoint saved", got)
+	}
+}
+
+// The file is unreadable only while the safety checkpoint runs, and another
+// change makes the restore plan again once it is readable.
+func TestReplannedRestoreKeepsFileUnreadableAtSafetyCheckpoint(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	projectStore, root := newProject(t)
+	notes := filepath.Join(root, "notes.txt")
+	testutil.WriteFile(t, notes, "v1")
+	take(t, projectStore, "1")
+	testutil.WriteFile(t, notes, "unsaved work")
+	checkpointer := func(projectStore *store.Store, options store.CheckpointOptions) (store.Checkpoint, error) {
+		testutil.WriteFile(t, filepath.Join(root, "other.txt"), "made during the restore")
+		if err := os.Chmod(notes, 0); err != nil {
+			return store.Checkpoint{}, err
+		}
+		defer os.Chmod(notes, 0o600) //nolint:errcheck // readAsOwner checks the mode again
+		return projectStore.Take(options)
+	}
+	if _, err := Apply(projectStore, 1, checkpointer); err != nil {
+		t.Fatal(err)
+	}
+	if readAsOwner(t, notes) == "unsaved work" {
+		return
+	}
+	latest, _, err := projectStore.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(t, projectStore, latest.ID)
+	if got := readAsOwner(t, notes); got != "unsaved work" {
+		t.Fatalf("after undoing the restore, notes.txt holds %q: the restore overwrote work no checkpoint saved", got)
+	}
+}
