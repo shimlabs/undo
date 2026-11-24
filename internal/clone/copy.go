@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -130,7 +131,7 @@ func copyDirAt(srcFd int, srcName string, dir *os.File, name string, perm uint32
 	for _, entry := range entries {
 		err := copyTreeAt(src, entry.Name(), dst, entry.Name(), copyData)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
+			return JoinErrorPath(name, err)
 		}
 	}
 	if err := unix.Fchmod(int(dst.Fd()), perm); err != nil {
@@ -168,6 +169,16 @@ func toUint32[T ~uint16 | ~uint32](mode T) uint32 {
 // PermissionBits returns the part of mode that chmod sets.
 func PermissionBits(mode fs.FileMode) fs.FileMode {
 	return mode & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky)
+}
+
+// JoinErrorPath returns err with the path it names, when that is relative,
+// taken as inside dir, so an error from deep in a copy says which file
+// failed.
+func JoinErrorPath(dir string, err error) error {
+	if pathErr, ok := errors.AsType[*os.PathError](err); ok && !path.IsAbs(pathErr.Path) {
+		pathErr.Path = path.Join(dir, pathErr.Path)
+	}
+	return err
 }
 
 func openatError(name string, err error) error {

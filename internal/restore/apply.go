@@ -311,7 +311,7 @@ func (p *restorePlan) inParent(rel string, write func(dir *os.File, name string)
 		return err
 	}
 	defer dir.Close()
-	return write(dir, path.Base(rel))
+	return clone.JoinErrorPath(path.Dir(rel), write(dir, path.Base(rel)))
 }
 
 // clonableDirs returns the directories in paths that are missing from the

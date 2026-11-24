@@ -1,6 +1,7 @@
 package clone
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -198,5 +199,23 @@ func TestCopyAtNeverOpensExistingAppleDoubleName(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("CopyAt blocked on an existing ._p named pipe")
+	}
+}
+
+// An error inside a copied folder names the path from the folder copied, so
+// whoever reports it can say which file failed.
+func TestCopyAtNamesFailingPathInsideFolder(t *testing.T) {
+	testutil.SkipIfRoot(t)
+	src, dst := t.TempDir(), t.TempDir()
+	unreadable := filepath.Join(src, "tree", "sub", "secret")
+	testutil.WriteFile(t, unreadable, "x")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	err := copyByPath(t, CopyAt, filepath.Join(src, "tree"), filepath.Join(dst, "tree"))
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	if !ok || pathErr.Path != "tree/sub/secret" {
+		t.Fatalf("CopyAt = %v, want an error naming tree/sub/secret", err)
 	}
 }

@@ -136,7 +136,9 @@ func (e *Extractor) openStored(rel string, source Source) (*os.File, string, fun
 		return nil, "", nil, fmt.Errorf("%s: %w", rel, ErrStoredFileMissing)
 	}
 	if err != nil {
-		return nil, "", nil, err
+		// The store's root names paths inside the store, which callers would
+		// take for paths in the project.
+		return nil, "", nil, clone.JoinErrorPath(e.store.dir, err)
 	}
 	srcName := filepath.Base(src)
 	var stat unix.Stat_t

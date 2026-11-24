@@ -3,7 +3,9 @@ package restore
 import (
 	"bytes"
 	"encoding/gob"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -1159,5 +1161,24 @@ func TestPlanListsFileRewrittenKeepingSizeAndTimes(t *testing.T) {
 	}
 	if !slices.Contains(changes.Written, "README.md") {
 		t.Fatalf("written = %v, want README.md, whose content changed", changes.Written)
+	}
+}
+
+// A write that fails names the path from the project root, not only its last
+// part.
+func TestInParentNamesPathFromRoot(t *testing.T) {
+	_, root := newProject(t)
+	projectRoot, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer projectRoot.Close()
+	plan := restorePlan{root: root, projectRoot: projectRoot}
+
+	err = plan.inParent("src/util/str.go", func(_ *os.File, name string) error {
+		return &os.PathError{Op: "openat", Path: name, Err: fs.ErrNotExist}
+	})
+	if pathErr, ok := errors.AsType[*fs.PathError](err); !ok || pathErr.Path != "src/util/str.go" {
+		t.Fatalf("inParent = %v, want an error naming src/util/str.go", err)
 	}
 }
