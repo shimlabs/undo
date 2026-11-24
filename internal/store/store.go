@@ -29,6 +29,9 @@ var (
 	ErrCloneUnsupported = errors.New("this filesystem cannot make copy-on-write clones")
 	// ErrNewerFormat means a newer version of undo wrote the store.
 	ErrNewerFormat = errors.New("this store was written by a newer version of undo")
+	// ErrOlderFormat means an older version of undo wrote the store, in a
+	// layout this version cannot read.
+	ErrOlderFormat = errors.New("this store was written by an older version of undo")
 	// ErrUnsafeStore means a store directory exists that is not a private
 	// directory of the current user, so someone else could change it.
 	ErrUnsafeStore = errors.New("the store folder must be a folder owned by you and private to you")
@@ -173,6 +176,9 @@ func initStore(dir, root string, files *os.Root) (*Store, error) {
 	settings := *s.config.Load()
 	if settings.Format > format {
 		return nil, fmt.Errorf("%s: %w", dir, ErrNewerFormat)
+	}
+	if settings.Format != 0 && settings.Format < format {
+		return nil, fmt.Errorf("%s: %w", dir, ErrOlderFormat)
 	}
 	if settings.Format == 0 {
 		settings.Format, settings.Root = format, root

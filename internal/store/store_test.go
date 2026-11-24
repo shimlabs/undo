@@ -126,6 +126,21 @@ func TestOpenRefusesNewerFormat(t *testing.T) {
 	}
 }
 
+func TestOpenRefusesOlderFormat(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	projectStore, err := Create(home, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projectStore.writeJSON(projectStore.configPath(), config{Format: format - 1, Root: root}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(home, root); !errors.Is(err, ErrOlderFormat) {
+		t.Fatalf("Open = %v, want ErrOlderFormat", err)
+	}
+}
+
 func TestStoresUnderFindsDeletedProjects(t *testing.T) {
 	home, parent := t.TempDir(), t.TempDir()
 	root := filepath.Join(parent, "app")
