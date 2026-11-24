@@ -320,6 +320,9 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		if err != nil {
 			return store.Checkpoint{}, err
 		}
+		if err := tree.AddMissed(t.root, t.matcher.Load(), t.listing, current); err != nil {
+			return store.Checkpoint{}, err
+		}
 		changed, deleted = tree.Changed(t.listing, current)
 		t.replaceListing(current)
 		t.unreadable, t.excluded = skipped.Unreadable, skipped.Excluded

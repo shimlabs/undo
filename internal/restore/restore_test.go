@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -1180,5 +1181,43 @@ func TestInParentNamesPathFromRoot(t *testing.T) {
 	})
 	if pathErr, ok := errors.AsType[*fs.PathError](err); !ok || pathErr.Path != "src/util/str.go" {
 		t.Fatalf("inParent = %v, want an error naming src/util/str.go", err)
+	}
+}
+
+// Editors and agents save a file by renaming a new one over it, so the name
+// always exists. A checkpoint taken meanwhile must never record it deleted,
+// or restoring that checkpoint would remove it.
+func TestCheckpointNeverRecordsFileReplacedByRenameDeleted(t *testing.T) {
+	projectStore, root := newProject(t)
+	take(t, projectStore, "1")
+	target := filepath.Join(root, "src", "main.go")
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for k := 0; ; k++ {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			_ = os.WriteFile(target+".tmp", []byte(strconv.Itoa(k)), 0o644)
+			_ = os.Rename(target+".tmp", target)
+		}
+	}()
+	defer func() {
+		close(done)
+		<-stopped
+	}()
+
+	for i := range 100 {
+		checkpoint := take(t, projectStore, strconv.Itoa(i))
+		manifest, err := projectStore.Manifest(checkpoint.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(manifest.Deleted, "src/main.go") {
+			t.Fatalf("checkpoint %d records src/main.go deleted though it always existed", checkpoint.ID)
+		}
 	}
 }

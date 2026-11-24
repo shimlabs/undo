@@ -124,6 +124,9 @@ func (s *Store) Take(options CheckpointOptions) (Checkpoint, error) {
 	if err != nil {
 		return Checkpoint{}, err
 	}
+	if err := tree.AddMissed(s.root, matcher, previous, current); err != nil {
+		return Checkpoint{}, err
+	}
 	changed, deleted := tree.Changed(previous, current)
 	checkpoint, err := s.commit(latest.ID, options, Changes{
 		Listing:         current,
