@@ -1,8 +1,10 @@
 package watch
 
 import (
+	"maps"
 	"path"
 	"path/filepath"
+	"slices"
 
 	"github.com/shimlabs/undo/internal/tree"
 )
@@ -41,13 +43,63 @@ func (t *tracker) removeStaleSpellings(changes *changeSet) {
 			namesInDir[dir] = names
 		}
 	}
-	for rel, entry := range changes.listing {
-		if rel == "." {
-			continue
+	if t.children == nil {
+		t.children = newChildIndex(t.listing)
+	}
+	for dir, names := range namesInDir {
+		// The index holds the listing as the last checkpoint left it, so the
+		// paths this batch added are checked as well.
+		listed := slices.Collect(maps.Keys(t.children[dir]))
+		for rel := range changes.changed {
+			if rel != "." && path.Dir(rel) == dir {
+				listed = append(listed, rel)
+			}
 		}
-		if names, ok := namesInDir[path.Dir(rel)]; ok && !names[path.Base(rel)] {
-			changes.removeTree(rel, entry.Kind == tree.Dir)
+		for _, rel := range listed {
+			if entry, isListed := changes.listing[rel]; isListed && !names[path.Base(rel)] {
+				changes.removeTree(rel, entry.Kind == tree.Dir)
+			}
 		}
+	}
+}
+
+// childIndex maps each listed folder to the paths listed directly in it, so
+// finding them does not take a pass over the whole listing.
+type childIndex map[string]map[string]bool
+
+func newChildIndex(listing tree.Listing) childIndex {
+	index := childIndex{}
+	for rel := range listing {
+		index.add(rel)
+	}
+	return index
+}
+
+func (index childIndex) add(rel string) {
+	if rel == "." {
+		return
+	}
+	dir := path.Dir(rel)
+	if index[dir] == nil {
+		index[dir] = map[string]bool{}
+	}
+	index[dir][rel] = true
+}
+
+// update applies the paths a checkpoint changed and deleted. A nil index,
+// not built yet, stays nil.
+func (index childIndex) update(changed, deleted []string) {
+	if index == nil {
+		return
+	}
+	for _, rel := range deleted {
+		delete(index[path.Dir(rel)], rel)
+		if len(index[path.Dir(rel)]) == 0 {
+			delete(index, path.Dir(rel))
+		}
+	}
+	for _, rel := range changed {
+		index.add(rel)
 	}
 }
 

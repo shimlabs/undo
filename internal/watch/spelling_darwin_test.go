@@ -3,6 +3,7 @@ package watch
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -237,5 +238,28 @@ func TestApplyWhenDirectoryBecameNamedPipe(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("applying the events is stuck opening the named pipe")
+	}
+}
+
+// The index of each folder's listed children is kept up to date from each
+// checkpoint's changes, so it must stay what building it again gives.
+func TestChildIndexFollowsListing(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "1")
+	testutil.WriteFile(t, filepath.Join(root, "web", "app.js"), "v1")
+	takeCheckpoint(t, projectTracker, "2")
+	if projectTracker.children == nil {
+		t.Fatal("a new name did not build the index")
+	}
+	if err := os.Rename(filepath.Join(root, "web"), filepath.Join(root, "Web")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, filepath.Join(root, "Web", "new.js"), "v1")
+	if err := os.Remove(filepath.Join(root, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	checkMatchesScan(t, projectStore, root, takeCheckpoint(t, projectTracker, "3").ID)
+	if want := newChildIndex(projectTracker.listing); !reflect.DeepEqual(projectTracker.children, want) {
+		t.Fatalf("child index = %v, want %v", projectTracker.children, want)
 	}
 }

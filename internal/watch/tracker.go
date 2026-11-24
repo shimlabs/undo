@@ -65,7 +65,10 @@ type tracker struct {
 	// through a name outside the project has no event here, so every
 	// checkpoint checks them.
 	hardLinked map[string]bool
-	lastID     int
+	// children indexes the listing by folder. It is built the first time a
+	// spelling check needs it, and nil until then.
+	children childIndex
+	lastID   int
 	// ignoresCase is whether the project's filesystem treats names that
 	// differ only in case as the same.
 	ignoresCase bool
@@ -138,7 +141,7 @@ func (t *tracker) Checkpoint(options store.CheckpointOptions) (store.Checkpoint,
 		t.mu.Lock()
 		t.shouldRescan = true
 		t.mu.Unlock()
-		t.listing = nil
+		t.replaceListing(nil)
 		return checkpoint, err
 	}
 	return checkpoint, nil
@@ -183,8 +186,8 @@ func (t *tracker) loadListing(id int) error {
 	if err != nil {
 		return err
 	}
-	t.listing, t.lastID = listing, id
-	t.hardLinked = hardLinkedFiles(listing)
+	t.replaceListing(listing)
+	t.lastID = id
 	t.unreadable, t.unsavedFiles = nil, nil
 	for _, rel := range manifest.Unreadable {
 		if listing[rel].Kind == tree.Dir {
@@ -304,8 +307,8 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 			return store.Checkpoint{}, err
 		}
 		changed, deleted = tree.Changed(t.listing, current)
-		t.listing, t.unreadable = current, skipped.Unreadable
-		t.hardLinked = hardLinkedFiles(current)
+		t.replaceListing(current)
+		t.unreadable = skipped.Unreadable
 	}
 
 	checkpoint, err := t.store.Commit(latest.ID, options, store.Changes{
@@ -316,7 +319,7 @@ func (t *tracker) checkpoint(options store.CheckpointOptions, dirty map[string]b
 		ExcludePatterns: t.matcher.Load().Patterns(),
 	})
 	if errors.Is(err, store.ErrStale) {
-		t.listing = nil
+		t.replaceListing(nil)
 		return t.checkpoint(options, nil, true)
 	}
 	if err != nil {
@@ -354,7 +357,16 @@ func (t *tracker) applyEvents(dirty map[string]bool) (changed, deleted []string,
 	}
 	t.unreadable = slices.DeleteFunc(t.unreadable, t.isReadableOrGone)
 	t.updateHardLinked(changed, deleted)
+	t.children.update(changed, deleted)
 	return changed, deleted, false, nil
+}
+
+// replaceListing makes listing the tracker's view of the project, and drops
+// what was derived from the old one.
+func (t *tracker) replaceListing(listing tree.Listing) {
+	t.listing = listing
+	t.hardLinked = hardLinkedFiles(listing)
+	t.children = nil
 }
 
 // markChangedHardLinks marks the listed files with several names whose stat
