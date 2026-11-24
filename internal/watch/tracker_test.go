@@ -217,9 +217,7 @@ func TestTrackerFollowsExcludeRuleChanges(t *testing.T) {
 	if _, err := restore.Apply(projectStore, checkpoint.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "data", "important.db")); string(data) != "precious" {
-		t.Fatalf("data/important.db = %q after the restore", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "data", "important.db"), "precious")
 }
 
 func TestTrackerRecordsExcludedPaths(t *testing.T) {
@@ -303,9 +301,7 @@ func TestTrackerAppliesDirectoryPatterns(t *testing.T) {
 	if _, err := restore.Apply(projectStore, checkpoint.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "build", "out.bin")); string(data) != "new build" {
-		t.Fatalf("restore changed an excluded file: build/out.bin = %q", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "build", "out.bin"), "new build")
 }
 
 func TestTrackerWithRootTypedInOtherCase(t *testing.T) {
@@ -428,12 +424,8 @@ func TestTrackerSeesRenamesThatOnlyChangeCase(t *testing.T) {
 	if _, err := restore.Apply(projectStore, edited.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "Notes.md")); string(data) != "v3" {
-		t.Fatalf("Notes.md = %q after restore, want v3", data)
-	}
-	if data, _ := os.ReadFile(filepath.Join(root, "Src", "lib", "util.go")); string(data) != "package lib" {
-		t.Fatalf("Src/lib/util.go = %q after restore", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "Notes.md"), "v3")
+	testutil.AssertContent(t, filepath.Join(root, "Src", "lib", "util.go"), "package lib")
 }
 
 func TestTrackerSeesRenamesThatOnlyChangeUnicodeForm(t *testing.T) {
@@ -559,9 +551,7 @@ func TestTrackerNeverActsThroughSymlinkedParent(t *testing.T) {
 
 			takeCheckpoint(t, projectTracker, "swapped")
 			for _, rel := range []string{"secret", "home/deep/file"} {
-				if data, err := os.ReadFile(filepath.Join(outside, rel)); err != nil || string(data) != "do not delete" {
-					t.Errorf("%s outside the project = %q, %v", rel, data, err)
-				}
+				testutil.AssertContent(t, filepath.Join(outside, rel), "do not delete")
 			}
 		})
 	}
@@ -656,9 +646,7 @@ func TestRestoreAfterEditThenCaseRenameOfParent(t *testing.T) {
 	if _, err := restore.Apply(projectStore, edited.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "Src", "main.go")); string(data) != "v3" {
-		t.Fatalf("Src/main.go = %q after restore, want v3", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "Src", "main.go"), "v3")
 }
 
 // The watcher is killed (no Close), scans take checkpoints, files change,
@@ -818,9 +806,7 @@ func TestRestoreOfDirectoryMovedOutEditedAndBack(t *testing.T) {
 	if _, err := restore.Apply(projectStore, saved.ID, checkpointThroughTracker(projectTracker)); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "docs", "guide.md")); string(data) != "edited while outside" {
-		t.Fatalf("docs/guide.md = %q after restoring checkpoint 2", data)
-	}
+	testutil.AssertContent(t, filepath.Join(root, "docs", "guide.md"), "edited while outside")
 }
 
 // secret.txt is unreadable at checkpoint 2 and still at checkpoint 3, then
