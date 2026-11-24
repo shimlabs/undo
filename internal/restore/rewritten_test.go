@@ -20,7 +20,7 @@ func newRewrittenProject(tb testing.TB, fileCount int) *store.Store {
 	tb.Helper()
 	root := testutil.TempDir(tb)
 	for i := range fileCount {
-		testutil.WriteFile(tb, filepath.Join(root, fmt.Sprintf("dir%02d", i%50), fmt.Sprintf("file%05d.go", i)), "package main")
+		testutil.WriteFile(tb, rewrittenFilePath(root, i), "package main")
 	}
 	projectStore, err := store.Create(tb.TempDir(), root)
 	if err != nil {
@@ -30,10 +30,16 @@ func newRewrittenProject(tb testing.TB, fileCount int) *store.Store {
 	testutil.WriteFile(tb, filepath.Join(root, "notes.txt"), "second")
 	take(tb, projectStore, "second")
 	for i := range fileCount {
-		testutil.WriteFile(tb, filepath.Join(root, fmt.Sprintf("dir%02d", i%50), fmt.Sprintf("file%05d.go", i)), "changed")
+		testutil.WriteFile(tb, rewrittenFilePath(root, i), "changed")
 	}
 	apply(tb, projectStore, 2)
 	return projectStore
+}
+
+// rewrittenFilePath returns the path of the file numbered i in a project
+// newRewrittenProject makes.
+func rewrittenFilePath(root string, i int) string {
+	return filepath.Join(root, fmt.Sprintf("dir%02d", i%50), fmt.Sprintf("file%05d.go", i))
 }
 
 func planRewrittenProject(tb testing.TB, projectStore *store.Store) restorePlan {
@@ -46,7 +52,7 @@ func planRewrittenProject(tb testing.TB, projectStore *store.Store) restorePlan 
 	return plan
 }
 
-func TestPlanComparesRewrittenFilesWithoutBuffersForEach(t *testing.T) {
+func TestPlanComparesRewrittenFilesWithPooledBuffers(t *testing.T) {
 	const fileCount = 200
 	projectStore := newRewrittenProject(t, fileCount)
 	if plan := planRewrittenProject(t, projectStore); len(plan.unchanged) < fileCount {

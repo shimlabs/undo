@@ -25,7 +25,8 @@ func (p *restorePlan) rewrittenPaths(projectStore *store.Store, restored tree.Li
 			continue
 		}
 		if isListed && !source.IsLost && differsOnlyInIdentity(current, source.Entry) {
-			candidatesInDir[path.Dir(rel)] = append(candidatesInDir[path.Dir(rel)], rel)
+			dir := path.Dir(rel)
+			candidatesInDir[dir] = append(candidatesInDir[dir], rel)
 		}
 	}
 	if len(candidatesInDir) == 0 {
@@ -79,9 +80,9 @@ func (p *restorePlan) hasTargetContent(extractor *store.Extractor, dir *os.File,
 
 // differsOnlyInIdentity reports whether current, a file, symlink or named
 // pipe, is another file than target that differs from it only in its inode
-// and change time. A write that
-// keeps the size and modification time differs the same way, so a file's
-// content must still be compared.
+// and change time. A file saved by replacing it, keeping its size and
+// modification time, differs the same way, so a file's content must still be
+// compared.
 func differsOnlyInIdentity(current, target tree.Entry) bool {
 	// A path a restore wrote back is a new clone. The same file with a new
 	// change time may have new extended attributes, which content does not
