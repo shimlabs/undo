@@ -102,3 +102,19 @@ func TestHelpListsFlagsOfPlainUndo(t *testing.T) {
 		}
 	}
 }
+
+func TestFlagsBeforeTheCommand(t *testing.T) {
+	root := newProject(t)
+	mustRun(t, root, "checkpoint")
+	elsewhere := t.TempDir()
+
+	if out := mustRun(t, elsewhere, "--project", root, "list"); !strings.Contains(out, "undo checkpoint") {
+		t.Fatalf("undo --project <root> list:\n%s", out)
+	}
+	if out := mustRun(t, elsewhere, "-y", "to", "1", "--project", root); !strings.Contains(out, "already matches") {
+		t.Fatalf("undo -y to 1 --project <root>:\n%s", out)
+	}
+	if code, out := run(t, elsewhere, "", "--project", root, "run", "--", "true"); code != 2 || !strings.Contains(out, "undo run takes no flags") {
+		t.Fatalf("undo --project <root> run: exit %d:\n%s", code, out)
+	}
+}

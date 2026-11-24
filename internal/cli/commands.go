@@ -247,10 +247,7 @@ func (cmd command) synopsis() string {
 func isEmpty(text string) bool { return text == "" }
 
 func dispatch(args []string, env Env) error {
-	name, rest := "", args
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		name, rest = args[0], args[1:]
-	}
+	name, rest := splitCommandName(args)
 	if name == "" && len(rest) > 0 && (rest[0] == flagVersion || rest[0] == "-v") {
 		return versionCommand(flags{}, env)
 	}
@@ -276,6 +273,31 @@ func dispatch(args []string, env Env) error {
 		return usageErr
 	}
 	return err
+}
+
+// splitCommandName returns the command args name and the rest of args. The
+// command may follow flags, as in undo --project ~/code/web list, as git
+// allows for -C; the flags are then checked against that command.
+func splitCommandName(args []string) (name string, rest []string) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			return "", args
+		case i == 0 && !strings.HasPrefix(arg, "-"):
+			return arg, args[1:]
+		case !strings.HasPrefix(arg, "-"):
+			if _, isCommand := findCommand(arg); isCommand {
+				return arg, slices.Concat(args[:i], args[i+1:])
+			}
+			return "", args
+		}
+		flagName, _, hasValue := strings.Cut(arg, "=")
+		if flag, isKnown := findFlag(flagName); isKnown && flag.value != "" && !hasValue {
+			i++
+		}
+	}
+	return "", args
 }
 
 // parseArguments parses args for cmd, and reports whether they ask for
