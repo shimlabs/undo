@@ -130,7 +130,7 @@ func Create(home, root string) (*Store, error) {
 }
 
 // FormatError is a store written in a layout this version of undo cannot
-// read. It matches ErrNewerFormat or ErrOlderFormat.
+// read. IsNewer says which way the formats differ.
 type FormatError struct {
 	// Dir is the store's folder.
 	Dir string
