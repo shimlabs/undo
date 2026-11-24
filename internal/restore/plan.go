@@ -76,10 +76,10 @@ type restorePlan struct {
 	// cloned holds the paths written as part of a whole directory cloned
 	// from the base, which keeps the lock flags they had at the checkpoint.
 	cloned map[string]bool
-	// retimed are the directories whose only difference is their times, as
-	// after a temporary file came and went. They are no change on their own,
-	// and get their times back along with real changes.
-	retimed []string
+	// unchangedDirs are the directories with the mode they had at the
+	// checkpoint, which are no change on their own and get their times back
+	// along with real changes.
+	unchangedDirs []string
 }
 
 // planRestore plans a restore of checkpoint id. It never touches a path the
@@ -183,8 +183,7 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	// A checkpoint of a project that was missing has no root, but removing
 	// the project folder itself would act outside it, so it stays, empty.
 	removed = slices.DeleteFunc(removed, func(rel string) bool { return rel == "." })
-	p.retimed = slices.DeleteFunc(slices.Clone(written), func(rel string) bool { return !p.differsOnlyInTimes(rel) })
-	written = slices.DeleteFunc(written, p.differsOnlyInTimes)
+	written, p.unchangedDirs = p.splitUnchangedDirs(written)
 	p.changes = Changes{
 		Written: written, Removed: removed, Kept: kept, KeepReasons: p.keepReasons, Dirs: p.dirsAmong(written, removed, kept),
 		Unstable: inputs.manifest.Unstable, Lost: lost, MissingExcluded: p.missingExcluded(inputs),
@@ -197,16 +196,29 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 	}
 }
 
-// differsOnlyInTimes reports whether rel is a directory, now and at the
-// checkpoint, that differs only in its modification and change times. A
-// file whose only difference is its change time still counts, since a write
-// that keeps its size and modification time differs only there.
-func (p *restorePlan) differsOnlyInTimes(rel string) bool {
+// splitUnchangedDirs splits written into the paths that changed and the
+// directories that did not.
+func (p *restorePlan) splitUnchangedDirs(written []string) (changed, unchangedDirs []string) {
+	for _, rel := range written {
+		if p.isUnchangedDir(rel) {
+			unchangedDirs = append(unchangedDirs, rel)
+		} else {
+			changed = append(changed, rel)
+		}
+	}
+	return changed, unchangedDirs
+}
+
+// isUnchangedDir reports whether rel is a directory, now and at the
+// checkpoint, with the same mode. Its times change whenever what it holds
+// does, as after a temporary file came and went, and a restore that made it
+// again gave it a new inode; what it holds is compared path by path.
+func (p *restorePlan) isUnchangedDir(rel string) bool {
 	current, target := p.current[rel], p.target[rel].Entry
 	if current.Kind != tree.Dir || target.Kind != tree.Dir {
 		return false
 	}
-	current.ModTime, current.ChangeTime = target.ModTime, target.ChangeTime
+	current.ModTime, current.ChangeTime, current.Inode = target.ModTime, target.ChangeTime, target.Inode
 	return current == target
 }
 
