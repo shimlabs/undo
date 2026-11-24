@@ -13,14 +13,14 @@ import (
 	"github.com/shimlabs/undo/internal/testutil"
 )
 
-// newRewrittenProject returns a project of fileCount files that a restore to
-// checkpoint 2 wrote back as new clones. Checkpoint 1 holds the same entries,
+// newRewrittenProject returns a project of fileCount files in folderCount
+// folders that a restore to checkpoint 2 wrote back as new clones. Checkpoint 1 holds the same entries,
 // so planning a restore to it compares every file with its stored copy.
-func newRewrittenProject(tb testing.TB, fileCount int) *store.Store {
+func newRewrittenProject(tb testing.TB, fileCount, folderCount int) *store.Store {
 	tb.Helper()
 	root := testutil.TempDir(tb)
 	for i := range fileCount {
-		testutil.WriteFile(tb, rewrittenFilePath(root, i), "package main")
+		testutil.WriteFile(tb, rewrittenFilePath(root, i, folderCount), "package main")
 	}
 	projectStore, err := store.Create(tb.TempDir(), root)
 	if err != nil {
@@ -30,7 +30,7 @@ func newRewrittenProject(tb testing.TB, fileCount int) *store.Store {
 	testutil.WriteFile(tb, filepath.Join(root, "notes.txt"), "second")
 	take(tb, projectStore, "second")
 	for i := range fileCount {
-		testutil.WriteFile(tb, rewrittenFilePath(root, i), "changed")
+		testutil.WriteFile(tb, rewrittenFilePath(root, i, folderCount), "changed")
 	}
 	apply(tb, projectStore, 2)
 	return projectStore
@@ -38,8 +38,8 @@ func newRewrittenProject(tb testing.TB, fileCount int) *store.Store {
 
 // rewrittenFilePath returns the path of the file numbered i in a project
 // newRewrittenProject makes.
-func rewrittenFilePath(root string, i int) string {
-	return filepath.Join(root, fmt.Sprintf("dir%02d", i%50), fmt.Sprintf("file%05d.go", i))
+func rewrittenFilePath(root string, i, folderCount int) string {
+	return filepath.Join(root, fmt.Sprintf("dir%02d", i%folderCount), fmt.Sprintf("file%05d.go", i))
 }
 
 func planRewrittenProject(tb testing.TB, projectStore *store.Store) restorePlan {
@@ -54,7 +54,7 @@ func planRewrittenProject(tb testing.TB, projectStore *store.Store) restorePlan 
 
 func TestPlanComparesRewrittenFilesWithPooledBuffers(t *testing.T) {
 	const fileCount = 200
-	projectStore := newRewrittenProject(t, fileCount)
+	projectStore := newRewrittenProject(t, fileCount, 50)
 	if plan := planRewrittenProject(t, projectStore); len(plan.unchanged) < fileCount {
 		t.Fatalf("plan found %d unchanged paths, want at least %d", len(plan.unchanged), fileCount)
 	}
@@ -72,7 +72,16 @@ func TestPlanComparesRewrittenFilesWithPooledBuffers(t *testing.T) {
 // BenchmarkPlanAfterRestore measures planning a restore that compares 10,000
 // files a restore wrote back, in 50 folders.
 func BenchmarkPlanAfterRestore(b *testing.B) {
-	projectStore := newRewrittenProject(b, 10_000)
+	projectStore := newRewrittenProject(b, 10_000, 50)
+	for b.Loop() {
+		planRewrittenProject(b, projectStore)
+	}
+}
+
+// BenchmarkPlanAfterRestoreInOneFolder measures the same with every file in
+// one folder, as in generated assets or test fixtures.
+func BenchmarkPlanAfterRestoreInOneFolder(b *testing.B) {
+	projectStore := newRewrittenProject(b, 10_000, 1)
 	for b.Loop() {
 		planRewrittenProject(b, projectStore)
 	}

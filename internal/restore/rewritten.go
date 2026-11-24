@@ -32,34 +32,56 @@ func (p *restorePlan) rewrittenPaths(projectStore *store.Store, restored tree.Li
 	if len(candidatesInDir) == 0 {
 		return tree.Listing{}
 	}
-	// Sorted, so the store's folders are opened in an order its cache keeps.
-	dirs := slices.Sorted(maps.Keys(candidatesInDir))
+	batches := compareBatches(candidatesInDir)
 	extractor := projectStore.NewExtractor()
 	defer extractor.Close()
-	isSameInDir := make([][]bool, len(dirs))
+	isSameInBatch := make([][]bool, len(batches))
 	// It never fails: a file that cannot be compared counts as changed.
-	_ = parallel.For(len(dirs), func(i int) error {
-		candidates := candidatesInDir[dirs[i]]
-		isSameInDir[i] = make([]bool, len(candidates))
-		dir, err := tree.OpenDir(p.root, dirs[i])
+	_ = parallel.For(len(batches), func(i int) error {
+		batch := batches[i]
+		isSameInBatch[i] = make([]bool, len(batch.paths))
+		dir, err := tree.OpenDir(p.root, batch.dir)
 		if err != nil {
 			return nil
 		}
 		defer dir.Close()
-		for j, rel := range candidates {
-			isSameInDir[i][j] = p.hasTargetContent(extractor, dir, rel)
+		for j, rel := range batch.paths {
+			isSameInBatch[i][j] = p.hasTargetContent(extractor, dir, rel)
 		}
 		return nil
 	})
 	rewritten := tree.Listing{}
-	for i, dir := range dirs {
-		for j, rel := range candidatesInDir[dir] {
-			if isSameInDir[i][j] {
+	for i, batch := range batches {
+		for j, rel := range batch.paths {
+			if isSameInBatch[i][j] {
 				rewritten[rel] = p.current[rel]
 			}
 		}
 	}
 	return rewritten
+}
+
+// compareBatchSize is the most paths one worker compares in a folder it
+// opens once, so a large folder is still compared on every core.
+const compareBatchSize = 64
+
+// compareBatch is paths in the folder dir that one worker compares.
+type compareBatch struct {
+	dir   string
+	paths []string
+}
+
+// compareBatches splits the paths in each folder into batches, with the
+// folders sorted so the store's folders are opened in an order its cache
+// keeps.
+func compareBatches(pathsInDir map[string][]string) []compareBatch {
+	var batches []compareBatch
+	for _, dir := range slices.Sorted(maps.Keys(pathsInDir)) {
+		for paths := range slices.Chunk(pathsInDir[dir], compareBatchSize) {
+			batches = append(batches, compareBatch{dir: dir, paths: paths})
+		}
+	}
+	return batches
 }
 
 // hasTargetContent reports whether the path rel, in the open folder dir,
