@@ -358,7 +358,7 @@ func (t *tracker) applyEvents(dirty map[string]bool) (changed, deleted []string,
 	}
 	t.markChangedHardLinks(dirty)
 	changed, deleted, err = t.applyDirty(dirty)
-	if errors.Is(err, fs.ErrPermission) || errors.Is(err, errNeedsFullComparison) {
+	if errors.Is(err, fs.ErrPermission) || errors.Is(err, errNeedsFullComparison) || (err == nil && t.hasUnreportedChange()) {
 		// applyDirty changed the listing in place, and a full comparison
 		// must start from the listing of the last checkpoint, or what it
 		// already applied would not count as changed.

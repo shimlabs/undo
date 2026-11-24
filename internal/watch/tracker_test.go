@@ -385,6 +385,27 @@ func TestTrackerRescansAfterDroppedEvents(t *testing.T) {
 	checkMatchesScan(t, projectStore, root, checkpoint.ID)
 }
 
+// FSEvents can deliver a change made before the marker after it, when it
+// joins a later event for the same path. A checkpoint must not leave out what
+// such an event would have reported.
+func TestTrackerSeesChangesWhoseEventsComeLate(t *testing.T) {
+	projectTracker, projectStore, root := newTrackerWithFiles(t)
+	takeCheckpoint(t, projectTracker, "first")
+	testutil.WriteFile(t, filepath.Join(root, "É", "É"), "made before the checkpoint")
+	if err := os.RemoveAll(filepath.Join(root, "src", "lib")); err != nil {
+		t.Fatal(err)
+	}
+	if !projectTracker.waitForMarker() {
+		t.Fatal("the events never arrived")
+	}
+	projectTracker.mu.Lock()
+	clear(projectTracker.dirty)
+	projectTracker.mu.Unlock()
+
+	checkpoint := takeCheckpoint(t, projectTracker, "second")
+	checkMatchesScan(t, projectStore, root, checkpoint.ID)
+}
+
 func TestTrackerSeesDirectoryReplacedByAnother(t *testing.T) {
 	projectTracker, projectStore, root := newTrackerWithFiles(t)
 	takeCheckpoint(t, projectTracker, "first")
