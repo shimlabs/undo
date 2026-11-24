@@ -15,21 +15,27 @@ import (
 // the target only in their inode and change time, as a path a restore wrote
 // back as a new clone does, and that hold the target's content. A file is
 // read and compared with its stored copy; one that cannot be read counts as
-// changed.
-func (p *restorePlan) rewrittenPaths(projectStore *store.Store) (tree.Listing, error) {
+// changed. A path that still holds what the last restore to this checkpoint
+// wrote, as restored records, is known to match and is not read again.
+func (p *restorePlan) rewrittenPaths(projectStore *store.Store, restored tree.Listing) tree.Listing {
 	var candidates []string
 	for rel, source := range p.target {
-		if current, isListed := p.current[rel]; isListed && !source.IsLost && differsOnlyInIdentity(current, source.Entry) {
+		current, isListed := p.current[rel]
+		if restoredEntry, isRestored := restored[rel]; isRestored && restoredEntry == current {
+			continue
+		}
+		if isListed && !source.IsLost && differsOnlyInIdentity(current, source.Entry) {
 			candidates = append(candidates, rel)
 		}
 	}
 	if len(candidates) == 0 {
-		return tree.Listing{}, nil
+		return tree.Listing{}
 	}
 	extractor := projectStore.NewExtractor()
 	defer extractor.Close()
 	isSame := make([]bool, len(candidates))
-	err := parallel.For(len(candidates), func(i int) error {
+	// It never fails: a file that cannot be compared counts as changed.
+	_ = parallel.For(len(candidates), func(i int) error {
 		rel := candidates[i]
 		if p.current[rel].Kind != tree.File {
 			// A symlink's target is in its entry, and other kinds hold no
@@ -48,16 +54,13 @@ func (p *restorePlan) rewrittenPaths(projectStore *store.Store) (tree.Listing, e
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
 	rewritten := tree.Listing{}
 	for i, rel := range candidates {
 		if isSame[i] {
 			rewritten[rel] = p.current[rel]
 		}
 	}
-	return rewritten, nil
+	return rewritten
 }
 
 // differsOnlyInIdentity reports whether current, a file, symlink or named

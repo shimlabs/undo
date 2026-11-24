@@ -94,9 +94,7 @@ func planRestore(projectStore *store.Store, id int) (restorePlan, error) {
 		return restorePlan{}, err
 	}
 	plan := restorePlan{root: projectStore.Root(), target: inputs.target, current: maps.Clone(inputs.current), scanned: inputs.current}
-	if inputs.rewritten, err = plan.rewrittenPaths(projectStore); err != nil {
-		return restorePlan{}, err
-	}
+	inputs.rewritten = plan.rewrittenPaths(projectStore, inputs.restored)
 	plan.planChanges(inputs)
 	return plan, nil
 }
@@ -166,8 +164,8 @@ func (p *restorePlan) planChanges(inputs restoreInputs) {
 		return isUnchanged
 	}
 	written = slices.DeleteFunc(written, isUnchanged)
-	// Directories that differ only in their times need none of the checks
-	// below either: they are no change on their own.
+	// Directories that differ only in their times or inode need none of the
+	// checks below either: they are no change on their own.
 	written, unchangedDirs := p.splitUnchangedDirs(written)
 	// The safety checkpoint could not save a file undo cannot read, so the
 	// restore must not change it either.
