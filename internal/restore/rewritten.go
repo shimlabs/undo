@@ -63,11 +63,15 @@ func (p *restorePlan) rewrittenPaths(projectStore *store.Store, restored tree.Li
 }
 
 // differsOnlyInIdentity reports whether current, a file, symlink or named
-// pipe, differs from target only in its inode and change time. A write that
+// pipe, is another file than target that differs from it only in its inode
+// and change time. A write that
 // keeps the size and modification time differs the same way, so a file's
 // content must still be compared.
 func differsOnlyInIdentity(current, target tree.Entry) bool {
-	if current == target || current.Kind == tree.Dir {
+	// A path a restore wrote back is a new clone. The same file with a new
+	// change time may have new extended attributes, which content does not
+	// show.
+	if current == target || current.Kind == tree.Dir || current.Inode == target.Inode {
 		return false
 	}
 	current.Inode, current.ChangeTime = target.Inode, target.ChangeTime

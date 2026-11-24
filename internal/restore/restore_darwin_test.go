@@ -408,3 +408,26 @@ func TestRestoreRenamesReadOnlyFolderBackToItsCase(t *testing.T) {
 		t.Fatalf("the folder is spelled %q, %v; want docs", storedName, err)
 	}
 }
+
+// Setting an extended attribute, as Finder tags do, changes only a file's
+// change time, so its content matches while the file still differs.
+func TestRestoreBringsBackExtendedAttributes(t *testing.T) {
+	projectStore, root := newProject(t)
+	file := filepath.Join(root, "src", "data.txt")
+	testutil.WriteFile(t, file, "AAAA")
+	if err := unix.Setxattr(file, "com.example.tag", []byte("one"), 0); err != nil {
+		t.Fatal(err)
+	}
+	first := take(t, projectStore, "1")
+	if err := unix.Setxattr(file, "com.example.tag", []byte("two"), 0); err != nil {
+		t.Fatal(err)
+	}
+	take(t, projectStore, "2")
+
+	apply(t, projectStore, first.ID)
+	value := make([]byte, 16)
+	size, err := unix.Getxattr(file, "com.example.tag", value)
+	if err != nil || string(value[:size]) != "one" {
+		t.Fatalf("tag after the restore = %q, %v; want one", value[:max(size, 0)], err)
+	}
+}
