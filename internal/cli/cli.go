@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os/exec"
+	"path/filepath"
 
+	"github.com/shimlabs/undo/internal/exclude"
 	"github.com/shimlabs/undo/internal/project"
 	"github.com/shimlabs/undo/internal/store"
 	"github.com/shimlabs/undo/internal/terminal"
@@ -76,6 +79,8 @@ func Run(args []string, env Env) int {
 	case errors.Is(err, store.ErrCloneUnsupported):
 		printError(errOut, withHint(fmt.Errorf("%w, so undo cannot protect this project cheaply", err),
 			fmt.Sprintf("Run %s once to keep full copies instead. They take as much disk as the project.", errOut.Bold("undo checkpoint --copy"))))
+	case isUnreadableIgnoreFile(err):
+		printError(errOut, withHint(err, fmt.Sprintf("Run %s in the project folder, then try again.", errOut.Bold("chmod u+r "+exclude.IgnoreFile))))
 	case errors.Is(err, project.ErrNotProject):
 		errOut.Errorf("%s", sentence(notProjectMessage(err)))
 		printNotProjectHint(errOut)
@@ -83,6 +88,13 @@ func Run(args []string, env Env) int {
 		printError(errOut, err)
 	}
 	return 1
+}
+
+// isUnreadableIgnoreFile reports whether err is the project's .undoignore
+// refusing to open for lack of permission.
+func isUnreadableIgnoreFile(err error) bool {
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	return ok && errors.Is(err, fs.ErrPermission) && filepath.Base(pathErr.Path) == exclude.IgnoreFile
 }
 
 // printNotProjectHint says where undo works, after saying a folder is not a

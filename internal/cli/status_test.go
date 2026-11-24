@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -46,5 +47,20 @@ func TestStatusAfterRefusedCheckpointPointsToCopyMode(t *testing.T) {
 	}
 	if out := mustRun(t, root, "list"); !strings.Contains(out, "Run undo checkpoint --copy to start; this filesystem cannot clone.") {
 		t.Fatalf("list after a refused checkpoint:\n%s", out)
+	}
+}
+
+func TestUnreadableIgnoreFileSaysCannotOpen(t *testing.T) {
+	testutil.SkipIfRoot(t)
+	root := newProject(t)
+	testutil.WriteFile(t, filepath.Join(root, ".undoignore"), "dist/\n")
+	if err := os.Chmod(filepath.Join(root, ".undoignore"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RestoreModeOnCleanup(t, filepath.Join(root, ".undoignore"), 0o644)
+
+	code, out := run(t, root, "", "checkpoint")
+	if code != 1 || !strings.Contains(out, "Error: Cannot open .undoignore: permission denied.\nRun chmod u+r .undoignore in the project folder, then try again.\n") {
+		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }

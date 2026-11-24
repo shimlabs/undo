@@ -71,7 +71,8 @@ func userMessage(err error) string {
 	message := err.Error()
 	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
 		shown := displayPath(pathErr.Path) + ": " + pathErr.Err.Error()
-		if pathErr.Op == "open" {
+		// os.Root names the call openat.
+		if pathErr.Op == "open" || pathErr.Op == "openat" {
 			shown = "cannot open " + shown
 		}
 		message = strings.Replace(message, pathErr.Error(), shown, 1)
