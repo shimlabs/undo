@@ -505,8 +505,8 @@ func (t *tracker) isReadableOrGone(rel string) bool {
 }
 
 // waitForMarker writes a file next to the store and waits for its event.
-// Events arrive in order, so once this one arrives, every earlier change has
-// arrived too.
+// Once this one arrives, every earlier change has arrived too, except on
+// macOS, where one can still come late (canEventsArriveLate).
 func (t *tracker) waitForMarker() bool {
 	markerName := fmt.Sprintf("%s-%d-%d", t.markerPrefix, os.Getpid(), t.sequence.Add(1))
 	markerPath := filepath.Join(t.markerDir, markerName)
