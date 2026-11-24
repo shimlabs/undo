@@ -77,3 +77,20 @@ func displayPath(path string) string {
 	}
 	return terminal.Printable(path)
 }
+
+// joinWithAnd joins items as a list in a sentence: "a", "a and b", "a, b
+// and c".
+func joinWithAnd(items []string) string {
+	if len(items) <= 1 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
+// displayRel returns rel safe to print, ending in "/" when it is a folder.
+func displayRel(rel string, isDir bool) string {
+	if isDir {
+		return terminal.Printable(rel) + "/"
+	}
+	return terminal.Printable(rel)
+}
