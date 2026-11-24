@@ -36,13 +36,28 @@ const CanCloneDirs = true
 // followed. It fails if name already exists, and returns an error matching
 // errors.ErrUnsupported when the volume cannot clone.
 func FileAt(srcDir *os.File, srcName string, dir *os.File, name string) error {
-	if err := unix.Clonefileat(int(srcDir.Fd()), srcName, int(dir.Fd()), name, unix.CLONE_NOFOLLOW); err != nil {
+	err := unix.Clonefileat(int(srcDir.Fd()), srcName, int(dir.Fd()), name, unix.CLONE_NOFOLLOW)
+	// clonefileat looks srcName up and then clones what it found, so a file
+	// replaced by rename in between fails as missing though the name exists.
+	for attempt := 0; errors.Is(err, unix.ENOENT) && attempt < maxReplacedRetries && existsAt(srcDir, srcName); attempt++ {
+		err = unix.Clonefileat(int(srcDir.Fd()), srcName, int(dir.Fd()), name, unix.CLONE_NOFOLLOW)
+	}
+	if err != nil {
 		if errors.Is(err, unix.EXDEV) {
 			err = errors.Join(errors.ErrUnsupported, err)
 		}
 		return &os.LinkError{Op: "clonefileat", Old: srcName, New: name, Err: err}
 	}
 	return nil
+}
+
+// maxReplacedRetries bounds how often FileAt clones a name again that a
+// rename replaced while it was cloned.
+const maxReplacedRetries = 8
+
+func existsAt(dir *os.File, name string) bool {
+	var stat unix.Stat_t
+	return unix.Fstatat(int(dir.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW) == nil
 }
 
 // MkfifoAt creates the named pipe name in dir. It works relative to dir, so
