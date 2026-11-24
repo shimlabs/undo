@@ -194,3 +194,12 @@ func PlainDir(tb testing.TB) string {
 	tb.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
 }
+
+// AssertContent fails the test unless the file at path holds want.
+func AssertContent(tb testing.TB, path, want string) {
+	tb.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != want {
+		tb.Fatalf("%s holds %q, %v; want %q", path, data, err, want)
+	}
+}

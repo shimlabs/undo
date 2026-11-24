@@ -7,6 +7,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/shimlabs/undo/internal/testutil"
 )
 
 func TestFileAtRefusesExisting(t *testing.T) {
@@ -78,9 +80,7 @@ func checkSameTree(t *testing.T, src, dst string) {
 			}
 		}
 	}
-	if data, _ := os.ReadFile(filepath.Join(dst, "a", "f.txt")); string(data) != "hello" {
-		t.Errorf("a/f.txt = %q", data)
-	}
+	testutil.AssertContent(t, filepath.Join(dst, "a", "f.txt"), "hello")
 	if target, _ := os.Readlink(filepath.Join(dst, "link")); target != "/etc/hosts" {
 		t.Errorf("link points to %q", target)
 	}
