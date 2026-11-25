@@ -41,7 +41,9 @@ homebrew_casks:
     repository:
       owner: shimlabs
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      git:
+        url: git@github.com:shimlabs/homebrew-tap.git
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY }}"
     homepage: https://github.com/shimlabs/undo
     description: Undo anything a coding agent does to your project
     license: MIT
