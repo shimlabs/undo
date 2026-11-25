@@ -45,3 +45,9 @@ homebrew_casks:
     homepage: https://github.com/shimlabs/undo
     description: Undo anything a coding agent does to your project
     license: MIT
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/undo"]
+          end
